@@ -26,12 +26,299 @@
 
   <h2>Displayed Code (as text exactly)</h2>
 
-  <pre><code>&lt;!-- PASTE YOUR CODE BELOW (as text) --&gt;
-function hello(name) {
-  console.log("Hello, " + name + "!");
+  <pre><code>
+
+
+
+
+
+
+
+    
+
+    using OfficeOpenXml;
+using System;
+using System.Collections.Generic;
+using System.IO;
+using System.Linq;
+using System.Text.RegularExpressions;
+using System.Windows.Forms;
+
+namespace DrugNameStandardizer
+{
+    public partial class Form1 : Form
+    {
+        public Form1()
+        {
+            InitializeComponent();
+            ExcelPackage.LicenseContext = LicenseContext.NonCommercial;
+
+            // Simple UI setup (no designer required)
+            this.Text = "Generic Name → Primary Ingredient Standardizer";
+            this.Width = 820;
+            this.Height = 260;
+
+            var btnPick = new Button() { Left = 20, Top = 20, Width = 180, Height = 40, Text = "Upload Excel (.xlsx)" };
+            var btnRun = new Button() { Left = 220, Top = 20, Width = 180, Height = 40, Text = "Run Standardization" };
+            var chkComboDetails = new CheckBox() { Left = 420, Top = 30, Width = 320, Text = "Add ingredient_set + ingredient_count" };
+            var txtPath = new TextBox() { Left = 20, Top = 80, Width = 760 };
+            var txtLog = new TextBox() { Left = 20, Top = 115, Width = 760, Height = 90, Multiline = true, ScrollBars = ScrollBars.Vertical };
+
+            this.Controls.Add(btnPick);
+            this.Controls.Add(btnRun);
+            this.Controls.Add(chkComboDetails);
+            this.Controls.Add(txtPath);
+            this.Controls.Add(txtLog);
+
+            string selectedPath = "";
+
+            btnPick.Click += (s, e) =>
+            {
+                using var ofd = new OpenFileDialog();
+                ofd.Filter = "Excel files (*.xlsx)|*.xlsx";
+                ofd.Title = "Select Excel file";
+
+                if (ofd.ShowDialog() == DialogResult.OK)
+                {
+                    selectedPath = ofd.FileName;
+                    txtPath.Text = selectedPath;
+                    txtLog.Text = $"Selected: {selectedPath}\r\n";
+                }
+            };
+
+            btnRun.Click += (s, e) =>
+            {
+                if (string.IsNullOrWhiteSpace(selectedPath) || !File.Exists(selectedPath))
+                {
+                    MessageBox.Show("Please upload an Excel .xlsx file first.");
+                    return;
+                }
+
+                try
+                {
+                    var outPath = RunStandardization(
+                        inputPath: selectedPath,
+                        addComboDetails: chkComboDetails.Checked,
+                        log: msg => txtLog.AppendText(msg + "\r\n")
+                    );
+
+                    MessageBox.Show($"Done!\nSaved: {outPath}");
+                }
+                catch (Exception ex)
+                {
+                    MessageBox.Show("Error: " + ex.Message);
+                    txtLog.AppendText("ERROR: " + ex + "\r\n");
+                }
+            };
+        }
+
+        // -----------------------------
+        // Core Pipeline
+        // -----------------------------
+        private static string RunStandardization(string inputPath, bool addComboDetails, Action<string> log)
+        {
+            using var package = new ExcelPackage(new FileInfo(inputPath));
+            var ws = package.Workbook.Worksheets.FirstOrDefault();
+            if (ws == null) throw new Exception("No worksheet found.");
+
+            int headerRow = 1;
+            int colCount = ws.Dimension.End.Column;
+            int rowCount = ws.Dimension.End.Row;
+
+            // Read headers
+            var headers = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
+            for (int c = 1; c <= colCount; c++)
+            {
+                var h = (ws.Cells[headerRow, c].Text ?? "").Trim();
+                if (!string.IsNullOrEmpty(h) && !headers.ContainsKey(h))
+                    headers[h] = c;
+            }
+
+            // Find generic_name
+            int genericCol = -1;
+            if (headers.TryGetValue("generic_name", out var gcol)) genericCol = gcol;
+            else if (headers.TryGetValue("genericname", out var gcol2)) genericCol = gcol2;
+            else if (headers.Keys.Any(k => k.Replace(" ", "").Equals("generic_name", StringComparison.OrdinalIgnoreCase)))
+            {
+                var key = headers.Keys.First(k => k.Replace(" ", "").Equals("generic_name", StringComparison.OrdinalIgnoreCase));
+                genericCol = headers[key];
+            }
+
+            if (genericCol == -1)
+                throw new Exception("Could not find a 'generic_name' column in the first row.");
+
+            // Ensure output columns exist
+            int primaryCol = GetOrCreateColumn(ws, headers, "primary_ingredient", colCount + 1);
+            int setCol = -1, countCol = -1;
+
+            if (addComboDetails)
+            {
+                setCol = GetOrCreateColumn(ws, headers, "ingredient_set", Math.Max(primaryCol, colCount) + 1);
+                countCol = GetOrCreateColumn(ws, headers, "ingredient_count", Math.Max(setCol, colCount) + 1);
+            }
+
+            log($"Worksheet: {ws.Name}");
+            log($"Rows: {rowCount - 1}, generic_name col: {genericCol}, primary_ingredient col: {primaryCol}");
+
+            int updated = 0;
+            int combos = 0;
+
+            for (int r = 2; r <= rowCount; r++)
+            {
+                var generic = (ws.Cells[r, genericCol].Text ?? "").Trim();
+                if (string.IsNullOrEmpty(generic)) continue;
+
+                var result = PrimaryIngredientParser.Parse(generic);
+
+                ws.Cells[r, primaryCol].Value = result.PrimaryIngredient;
+
+                if (addComboDetails)
+                {
+                    ws.Cells[r, setCol].Value = result.IngredientSet;
+                    ws.Cells[r, countCol].Value = result.IngredientCount;
+                }
+
+                updated++;
+                if (result.IngredientCount > 1) combos++;
+            }
+
+            // Save output
+            var dir = Path.GetDirectoryName(inputPath)!;
+            var name = Path.GetFileNameWithoutExtension(inputPath);
+            var outPath = Path.Combine(dir, $"{name}_standardized.xlsx");
+
+            package.SaveAs(new FileInfo(outPath));
+
+            log($"Updated rows: {updated}");
+            log($"Combination rows (count>1): {combos}");
+            return outPath;
+        }
+
+        private static int GetOrCreateColumn(ExcelWorksheet ws, Dictionary<string, int> headers, string headerName, int defaultCol)
+        {
+            if (headers.TryGetValue(headerName, out int existingCol)) return existingCol;
+
+            int col = defaultCol;
+            // If defaultCol is already used, place at end
+            col = ws.Dimension.End.Column + 1;
+
+            ws.Cells[1, col].Value = headerName;
+            headers[headerName] = col;
+            return col;
+        }
+    }
+
+    // -----------------------------
+    // Parsing logic (Tier 2)
+    // -----------------------------
+    public static class PrimaryIngredientParser
+    {
+        // Stable noise lists (not per-drug mapping)
+        private static readonly HashSet<string> StopWords = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
+        {
+            "tablet","tablets","capsule","capsules","solution","suspension","injection","injectable",
+            "intravenous","iv","im","sc","subcutaneous","oral","topical","ophthalmic","otic","nasal",
+            "extended","release","er","xr","sr","dr",
+            "powder","kit","prefilled","syringe","vial","pen",
+            "concentrate","for","and","with"
+        };
+
+        private static readonly HashSet<string> SaltWords = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
+        {
+            "hydrochloride","hcl","sodium","potassium","calcium",
+            "acetate","sulfate","succinate","tartrate","phosphate",
+            "mesylate","besylate","maleate","fumarate","citrate",
+            "gluconate","lactate","monohydrate","dihydrate"
+        };
+
+        // Regex for strengths and units (simple + effective)
+        private static readonly Regex StrengthRegex = new Regex(
+            @"\b\d+(\.\d+)?\s*(mg|mcg|g|ml|l|units|iu|meq|%)\b",
+            RegexOptions.IgnoreCase | RegexOptions.Compiled);
+
+        // Replace separators with plus for combination detection
+        public static ParseResult Parse(string genericName)
+        {
+            var normalized = Normalize(genericName);
+
+            // detect combinations by + after normalization
+            var parts = normalized.Split(new[] { " + " }, StringSplitOptions.RemoveEmptyEntries)
+                                 .Select(p => CleanIngredientPhrase(p))
+                                 .Where(p => !string.IsNullOrWhiteSpace(p))
+                                 .Distinct(StringComparer.OrdinalIgnoreCase)
+                                 .ToList();
+
+            if (parts.Count == 0)
+                return new ParseResult("UNKNOWN", "UNKNOWN", 0);
+
+            if (parts.Count == 1)
+            {
+                var single = parts[0];
+                return new ParseResult(single, single, 1);
+            }
+
+            // combination
+            var set = string.Join(" + ", parts.OrderBy(x => x, StringComparer.OrdinalIgnoreCase));
+            return new ParseResult("COMBINATION", set, parts.Count);
+        }
+
+        private static string Normalize(string s)
+        {
+            var x = (s ?? "").Trim().ToLowerInvariant();
+
+            // unify separators (/, comma, parentheses, hyphen)
+            x = x.Replace("/", " + ");
+            x = x.Replace(",", " ");
+            x = x.Replace("(", " ");
+            x = x.Replace(")", " ");
+            x = x.Replace("-", " ");
+
+            // remove strengths
+            x = StrengthRegex.Replace(x, " ");
+
+            // collapse whitespace
+            x = Regex.Replace(x, @"\s+", " ").Trim();
+
+            // ensure plus has spaces around it
+            x = Regex.Replace(x, @"\s*\+\s*", " + ");
+
+            return x;
+        }
+
+        private static string CleanIngredientPhrase(string phrase)
+        {
+            var tokens = phrase.Split(' ', StringSplitOptions.RemoveEmptyEntries).ToList();
+
+            tokens.RemoveAll(t => StopWords.Contains(t));
+            tokens.RemoveAll(t => SaltWords.Contains(t));
+
+            // remove leftover numeric tokens
+            tokens.RemoveAll(t => t.Any(char.IsDigit));
+
+            var cleaned = string.Join(" ", tokens).Trim();
+
+            // final cleanup for edge punctuation
+            cleaned = Regex.Replace(cleaned, @"\s+", " ").Trim();
+
+            // keep short but meaningful
+            if (cleaned.Length == 0) return "";
+            if (cleaned.Length > 255) cleaned = cleaned.Substring(0, 255);
+
+            return cleaned;
+        }
+    }
+
+    public record ParseResult(string PrimaryIngredient, string IngredientSet, int IngredientCount);
 }
-hello("World");
-&lt;!-- PASTE YOUR CODE ABOVE (as text) --&gt;</code></pre>
+
+  
+  
+  
+  
+  
+  
+  </code></pre>
+  
 
 </body>
 </html>
