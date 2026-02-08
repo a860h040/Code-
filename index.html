@@ -1,0 +1,37 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>Show Code as Written Text</title>
+  <style>
+    body { font-family: system-ui, Arial, sans-serif; margin: 24px; }
+    pre {
+      padding: 16px;
+      border: 1px solid #e5e5e5;
+      border-radius: 12px;
+      background: #0b1020;
+      color: #e8e8e8;
+      overflow: auto;
+      line-height: 1.45;
+      font-size: 14px;
+    }
+    code {
+      font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, "Liberation Mono", monospace;
+      white-space: pre;      /* keep spacing */
+    }
+  </style>
+</head>
+<body>
+
+  <h2>Displayed Code (as text exactly)</h2>
+
+  <pre><code>&lt;!-- PASTE YOUR CODE BELOW (as text) --&gt;
+function hello(name) {
+  console.log("Hello, " + name + "!");
+}
+hello("World");
+&lt;!-- PASTE YOUR CODE ABOVE (as text) --&gt;</code></pre>
+
+</body>
+</html>
