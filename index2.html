@@ -1111,12 +1111,17 @@ namespace DrugNameStandardizer
             return added;
         }
 
-        private static long GetChangesCount(SqliteConnection conn)
-        {
-            using var cmd = conn.CreateCommand();
-            cmd.CommandText = "SELECT changes();";
-            return (long)cmd.ExecuteScalar();
-        }
+     private static long GetChangesCount(SqliteConnection conn)
+{
+    using var cmd = conn.CreateCommand();
+    cmd.CommandText = "SELECT changes();";
+
+    object? o = cmd.ExecuteScalar();
+    if (o == null || o == DBNull.Value) return 0L;
+
+    return Convert.ToInt64(o);
+}
+
 
         // =========================
         // Standardization Rules Engine
