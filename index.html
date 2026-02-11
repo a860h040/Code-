@@ -32,9 +32,6 @@
 
 
 
-
-
-
 using System;
 using System.Collections.Generic;
 using System.Data;
@@ -63,9 +60,9 @@ namespace DrugNameStandardizer
         private DataTable _variabilityTable = new DataTable();
         private DataTable _validationTable = new DataTable();
 
-        // NEW: Cost-Savings Opportunity Finder state
-        private DataTable _costSavingsSummaryTable = new DataTable();
-        private DataTable _costSavingsTopTable = new DataTable();
+        // NEW: Cost savings + spend trends
+        private DataTable _costSavingsTable = new DataTable();             // row-level output (top 25 view)
+        private DataTable _therapeuticSpendTable = new DataTable();         // category pivot
 
         private HashSet<string> _ingredientSet = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         private Dictionary<string, string> _synonymMap = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
@@ -99,7 +96,7 @@ namespace DrugNameStandardizer
             var btnUploadInput = new Button { Text = "Upload Input Excel", Left = 975, Top = 15, Width = 150, Height = 35 };
             var btnRun = new Button { Text = "Run Standardization", Left = 1130, Top = 15, Width = 165, Height = 35, Enabled = false };
 
-            // Second row buttons (existing)
+            // Second row buttons
             var btnAnalyzeVariability = new Button { Text = "Analyze Variability", Left = 15, Top = 58, Width = 160, Height = 32, Enabled = false };
             var btnGenerateValidation = new Button { Text = "Generate Validation", Left = 185, Top = 58, Width = 160, Height = 32, Enabled = false };
             var btnExportDocs = new Button { Text = "Export Documentation", Left = 355, Top = 58, Width = 175, Height = 32 };
@@ -111,14 +108,16 @@ namespace DrugNameStandardizer
             var btnChooseColumns = new Button { Text = "Choose Output Columns", Left = 1040, Top = 58, Width = 185, Height = 32, Enabled = false };
             var btnSaveOutput = new Button { Text = "Save Output Excel", Left = 1230, Top = 58, Width = 135, Height = 32, Enabled = false };
 
-            // NEW: Third row buttons (Cost-Savings Opportunity Finder)
-            var btnCostSavingsFinder = new Button { Text = "Cost-Savings Finder", Left = 15, Top = 92, Width = 190, Height = 32, Enabled = false };
-            var btnExportCostSavings = new Button { Text = "Export Cost-Savings", Left = 210, Top = 92, Width = 180, Height = 32, Enabled = false };
+            // NEW: Third row tools (kept minimal + consistent)
+            var btnCostSavings = new Button { Text = "Cost-Savings Finder", Left = 15, Top = 94, Width = 170, Height = 32, Enabled = false };
+            var btnExportCostSavings = new Button { Text = "Export Cost-Savings", Left = 195, Top = 94, Width = 170, Height = 32, Enabled = false };
 
-            // Status label moved down to make room for new third row
+            var btnTherapeuticSpend = new Button { Text = "Therapeutic Spend Trends", Left = 375, Top = 94, Width = 210, Height = 32, Enabled = false };
+            var btnExportTherapeuticSpend = new Button { Text = "Export Spend Trends", Left = 595, Top = 94, Width = 180, Height = 32, Enabled = false };
+
             var lblStatus = new Label { Text = "Status: Ready", Left = 15, Top = 132, Width = 1320 };
 
-            // Tabs (moved down)
+            // Tabs
             var tabs = new TabControl { Left = 15, Top = 160, Width = 1350, Height = 615 };
 
             var tabLibrary = new TabPage("Ingredient Library (Editable)");
@@ -128,8 +127,9 @@ namespace DrugNameStandardizer
             var tabVariability = new TabPage("Variability Report");
             var tabValidation = new TabPage("Validation Examples");
 
-            // NEW: Cost-Savings tab
+            // NEW tabs
             var tabCostSavings = new TabPage("Cost-Savings Opportunities");
+            var tabSpendTrends = new TabPage("Therapeutic Spend Trends");
 
             tabs.TabPages.Add(tabLibrary);
             tabs.TabPages.Add(tabSynonyms);
@@ -138,6 +138,7 @@ namespace DrugNameStandardizer
             tabs.TabPages.Add(tabVariability);
             tabs.TabPages.Add(tabValidation);
             tabs.TabPages.Add(tabCostSavings);
+            tabs.TabPages.Add(tabSpendTrends);
 
             // Grids
             var libraryGrid = MakeEditableGrid();
@@ -147,9 +148,9 @@ namespace DrugNameStandardizer
             var variabilityGrid = MakeReadOnlyGrid();
             var validationGrid = MakeReadOnlyGrid();
 
-            // NEW: Cost-Savings grids (summary + top 25)
-            var costSavingsSummaryGrid = MakeReadOnlyGrid();
-            var costSavingsTopGrid = MakeReadOnlyGrid();
+            // NEW grids
+            var costSavingsGrid = MakeReadOnlyGrid();
+            var spendTrendsGrid = MakeReadOnlyGrid();
 
             tabLibrary.Controls.Add(libraryGrid);
             tabSynonyms.Controls.Add(synonymsGrid);
@@ -157,17 +158,8 @@ namespace DrugNameStandardizer
             tabUnknowns.Controls.Add(unknownsGrid);
             tabVariability.Controls.Add(variabilityGrid);
             tabValidation.Controls.Add(validationGrid);
-
-            // Cost-Savings tab layout
-            var split = new SplitContainer
-            {
-                Dock = DockStyle.Fill,
-                Orientation = Orientation.Horizontal,
-                SplitterDistance = 180
-            };
-            split.Panel1.Controls.Add(costSavingsSummaryGrid);
-            split.Panel2.Controls.Add(costSavingsTopGrid);
-            tabCostSavings.Controls.Add(split);
+            tabCostSavings.Controls.Add(costSavingsGrid);
+            tabSpendTrends.Controls.Add(spendTrendsGrid);
 
             Controls.Add(btnLoadLibrary);
             Controls.Add(btnImportLibrary);
@@ -191,9 +183,11 @@ namespace DrugNameStandardizer
             Controls.Add(btnChooseColumns);
             Controls.Add(btnSaveOutput);
 
-            // NEW buttons
-            Controls.Add(btnCostSavingsFinder);
+            // NEW tool buttons
+            Controls.Add(btnCostSavings);
             Controls.Add(btnExportCostSavings);
+            Controls.Add(btnTherapeuticSpend);
+            Controls.Add(btnExportTherapeuticSpend);
 
             Controls.Add(lblStatus);
             Controls.Add(tabs);
@@ -403,30 +397,7 @@ namespace DrugNameStandardizer
 
                 try
                 {
-                    var loaded = LoadFirstSheetToDataTable(ofd.FileName);
-
-                    // NEW: Validate required pricing columns at upload-time (Cost-Savings Finder requirement)
-                    var missing = GetMissingColumns(loaded, RequiredCostSavingsColumns);
-                    if (missing.Count > 0)
-                    {
-                        MessageBox.Show(
-                            "Input Excel is missing required pricing columns for Cost-Savings Finder:\n\n" +
-                            string.Join("\n", missing.Select(m => "• " + m)) +
-                            "\n\nPlease upload a file that includes ALL required pricing columns.",
-                            "Missing Required Columns",
-                            MessageBoxButtons.OK,
-                            MessageBoxIcon.Error
-                        );
-                        _inputTable = null;
-                        inputGrid.DataSource = null;
-                        btnRun.Enabled = false;
-                        btnCostSavingsFinder.Enabled = false;
-                        btnExportCostSavings.Enabled = false;
-                        lblStatus.Text = "Status: Input rejected (missing required pricing columns).";
-                        return;
-                    }
-
-                    _inputTable = loaded;
+                    _inputTable = LoadFirstSheetToDataTable(ofd.FileName);
                     inputGrid.DataSource = _inputTable;
 
                     btnRun.Enabled = true;
@@ -441,9 +412,11 @@ namespace DrugNameStandardizer
                     btnExportVariability.Enabled = false;
                     btnExportValidation.Enabled = false;
 
-                    // NEW: enable cost-savings analysis after successful upload/validation
-                    btnCostSavingsFinder.Enabled = true;
+                    // NEW tools enabled after load (run will compute standardization; cost tools can run anytime after load)
+                    btnCostSavings.Enabled = true;
+                    btnTherapeuticSpend.Enabled = true;
                     btnExportCostSavings.Enabled = false;
+                    btnExportTherapeuticSpend.Enabled = false;
 
                     _selectedOutputColumns = null;
 
@@ -566,8 +539,10 @@ namespace DrugNameStandardizer
                 tabs.SelectedTab = tabValidation;
             };
 
-            // NEW: Cost-Savings Opportunity Finder action
-            btnCostSavingsFinder.Click += (_, __) =>
+            // =========================
+            // NEW FEATURE: Cost-Savings Opportunity Finder
+            // =========================
+            btnCostSavings.Click += (_, __) =>
             {
                 if (_inputTable == null)
                 {
@@ -575,26 +550,44 @@ namespace DrugNameStandardizer
                     return;
                 }
 
+                // Validate required pricing columns for this tool
+                var missing = GetMissingColumns(_inputTable, RequiredPricingColumns);
+                if (missing.Count > 0)
+                {
+                    MessageBox.Show(
+                        "Cost-Savings Finder cannot run. Missing required pricing columns:\n\n- " + string.Join("\n- ", missing),
+                        "Missing Columns",
+                        MessageBoxButtons.OK,
+                        MessageBoxIcon.Error
+                    );
+                    return;
+                }
+
+                lblStatus.Text = "Status: Calculating cost-savings opportunities...";
+                Application.DoEvents();
+
                 try
                 {
-                    lblStatus.Text = "Status: Running Cost-Savings Opportunity Finder...";
-                    Application.DoEvents();
+                    EnsureCostSavingsColumns(_inputTable);
+                    ComputeCostSavingsColumnsInPlace(_inputTable);
 
-                    RunCostSavingsOpportunityFinder(_inputTable, out _costSavingsSummaryTable, out _costSavingsTopTable);
+                    // Summary popup + top 25 table
+                    var summaryText = BuildCostSavingsSummaryText(_inputTable);
+                    ShowBigPopup(summaryText, "Cost-Savings Opportunity Finder — Summary");
 
-                    costSavingsSummaryGrid.DataSource = _costSavingsSummaryTable;
-                    costSavingsTopGrid.DataSource = _costSavingsTopTable;
+                    _costSavingsTable = BuildTopCostSavingsTable(_inputTable, topN: 25);
+                    costSavingsGrid.DataSource = _costSavingsTable;
 
-                    // keep export selection in sync (auto-include new columns if user already picked output columns)
+                    btnExportCostSavings.Enabled = true;
+
+                    // Ensure these new columns are included in export selection if already chosen
                     if (_selectedOutputColumns != null)
                     {
                         foreach (var c in CostSavingsComputedColumns)
                             _selectedOutputColumns.Add(c);
                     }
 
-                    btnExportCostSavings.Enabled = true;
-
-                    lblStatus.Text = $"Status: Cost-Savings Finder complete. Items: {_costSavingsTopTable.Rows.Count} shown (Top 25).";
+                    lblStatus.Text = $"Status: Cost-Savings Finder complete. Top 25 loaded.";
                     tabs.SelectedTab = tabCostSavings;
                 }
                 catch (Exception ex)
@@ -604,6 +597,121 @@ namespace DrugNameStandardizer
                 }
             };
 
+            btnExportCostSavings.Click += (_, __) =>
+            {
+                if (_costSavingsTable.Rows.Count == 0)
+                {
+                    MessageBox.Show("Run Cost-Savings Finder first.");
+                    return;
+                }
+
+                using var sfd = new SaveFileDialog
+                {
+                    Filter = "Excel Files (*.xlsx)|*.xlsx",
+                    Title = "Save Cost-Savings Opportunities",
+                    FileName = "cost_savings_opportunities.xlsx"
+                };
+                if (sfd.ShowDialog() != DialogResult.OK) return;
+
+                try
+                {
+                    SaveDataTableToExcel(_costSavingsTable, sfd.FileName);
+                    lblStatus.Text = $"Status: Cost-Savings exported -> {sfd.FileName}";
+                }
+                catch (Exception ex) { MessageBox.Show(ex.Message, "Export Cost-Savings Error"); }
+            };
+
+            // =========================
+            // NEW TOOL: Therapeutic Category Spend Trends
+            // =========================
+            btnTherapeuticSpend.Click += (_, __) =>
+            {
+                if (_inputTable == null)
+                {
+                    MessageBox.Show("Upload an input Excel file first.");
+                    return;
+                }
+
+                // Needs pricing + category columns (etc1/etc2/ahfs desc + ETC_Lowest_lvl pivot)
+                var missingPricing = GetMissingColumns(_inputTable, RequiredPricingColumns);
+                if (missingPricing.Count > 0)
+                {
+                    MessageBox.Show(
+                        "Therapeutic Spend Trends cannot run. Missing required pricing columns:\n\n- " + string.Join("\n- ", missingPricing),
+                        "Missing Columns",
+                        MessageBoxButtons.OK,
+                        MessageBoxIcon.Error
+                    );
+                    return;
+                }
+
+                var missingCats = GetMissingColumns(_inputTable, RequiredTherapeuticColumns);
+                if (missingCats.Count > 0)
+                {
+                    MessageBox.Show(
+                        "Therapeutic Spend Trends cannot run. Missing required category columns:\n\n- " + string.Join("\n- ", missingCats),
+                        "Missing Columns",
+                        MessageBoxButtons.OK,
+                        MessageBoxIcon.Error
+                    );
+                    return;
+                }
+
+                lblStatus.Text = "Status: Building therapeutic spend trends...";
+                Application.DoEvents();
+
+                try
+                {
+                    // Make sure price parsing exists (reuse cost columns calc for clean numeric + lowest/avg metrics)
+                    EnsureCostSavingsColumns(_inputTable);
+                    ComputeCostSavingsColumnsInPlace(_inputTable);
+
+                    _therapeuticSpendTable = BuildTherapeuticSpendTrends(_inputTable);
+                    spendTrendsGrid.DataSource = _therapeuticSpendTable;
+
+                    btnExportTherapeuticSpend.Enabled = true;
+
+                    // Summary popup: top classes
+                    var spendSummary = BuildTherapeuticSpendSummaryText(_therapeuticSpendTable);
+                    ShowBigPopup(spendSummary, "Therapeutic Category Spend Trends — Summary");
+
+                    lblStatus.Text = $"Status: Therapeutic spend trends created ({_therapeuticSpendTable.Rows.Count} categories).";
+                    tabs.SelectedTab = tabSpendTrends;
+                }
+                catch (Exception ex)
+                {
+                    MessageBox.Show(ex.Message, "Therapeutic Spend Trends Error");
+                    lblStatus.Text = "Status: Therapeutic spend trends failed.";
+                }
+            };
+
+            btnExportTherapeuticSpend.Click += (_, __) =>
+            {
+                if (_therapeuticSpendTable.Rows.Count == 0)
+                {
+                    MessageBox.Show("Run Therapeutic Spend Trends first.");
+                    return;
+                }
+
+                using var sfd = new SaveFileDialog
+                {
+                    Filter = "Excel Files (*.xlsx)|*.xlsx",
+                    Title = "Save Therapeutic Spend Trends",
+                    FileName = "therapeutic_spend_trends.xlsx"
+                };
+                if (sfd.ShowDialog() != DialogResult.OK) return;
+
+                try
+                {
+                    SaveDataTableToExcel(_therapeuticSpendTable, sfd.FileName);
+                    lblStatus.Text = $"Status: Spend trends exported -> {sfd.FileName}";
+                }
+                catch (Exception ex) { MessageBox.Show(ex.Message, "Export Spend Trends Error"); }
+            };
+
+            // =========================
+            // Existing exports
+            // =========================
             btnSaveOutput.Click += (_, __) =>
             {
                 if (_inputTable == null) return;
@@ -627,32 +735,6 @@ namespace DrugNameStandardizer
                     lblStatus.Text = $"Status: Output saved -> {sfd.FileName}";
                 }
                 catch (Exception ex) { MessageBox.Show(ex.Message, "Save Output Error"); }
-            };
-
-            // NEW: Export Cost-Savings (original + all computed columns) as Excel or CSV
-            btnExportCostSavings.Click += (_, __) =>
-            {
-                if (_inputTable == null) return;
-
-                using var sfd = new SaveFileDialog
-                {
-                    Filter = "Excel Files (*.xlsx)|*.xlsx|CSV Files (*.csv)|*.csv",
-                    Title = "Export Cost-Savings Output",
-                    FileName = "cost_savings_output.xlsx"
-                };
-                if (sfd.ShowDialog() != DialogResult.OK) return;
-
-                try
-                {
-                    var ext = Path.GetExtension(sfd.FileName).ToLowerInvariant();
-                    if (ext == ".csv")
-                        SaveDataTableToCsv(_inputTable, sfd.FileName);
-                    else
-                        SaveDataTableToExcel(_inputTable, sfd.FileName);
-
-                    lblStatus.Text = $"Status: Cost-Savings exported -> {sfd.FileName}";
-                }
-                catch (Exception ex) { MessageBox.Show(ex.Message, "Export Cost-Savings Error"); }
             };
 
             btnExportUnknowns.Click += (_, __) =>
@@ -1516,16 +1598,15 @@ namespace DrugNameStandardizer
             sb.AppendLine("- Validation examples: before/after examples for high-variability ingredients.");
             sb.AppendLine();
 
-            sb.AppendLine("Cost-Savings Opportunity Finder (Pricing Variability)");
-            sb.AppendLine("- Validates required pricing columns at upload: Vizient_ABC_WAC, Vizient_MCK_WAC, Vizient_MDX_WAC, fdb_current_wac_price.");
-            sb.AppendLine("- Computes lowest distributor, spread (abs/pct), avg/std, FDB-vs-lowest deltas, and flags abnormal variance/incomplete wholesaler pricing.");
-            sb.AppendLine("- Produces summary counts + buckets and top 25 opportunities in the Cost-Savings tab.");
-            sb.AppendLine();
-
             sb.AppendLine("Usability");
             sb.AppendLine("- Click PrimaryIngredient cell => popup with count + unique generic_name forms (no duplicates).");
             sb.AppendLine("- Right-click a column header in preview => Delete Column (generic_name protected).");
             sb.AppendLine("- Choose Output Columns => export only what user wants.");
+
+            sb.AppendLine();
+            sb.AppendLine("Added Tools");
+            sb.AppendLine("- Cost-Savings Opportunity Finder: computes wholesaler WAC spreads (ABC/MCK/MDX) and flags abnormal variance.");
+            sb.AppendLine("- Therapeutic Category Spend Trends: pivots total WAC by ETC_Lowest_lvl and highlights high-spend / risk categories.");
 
             return sb.ToString();
         }
@@ -1647,26 +1728,6 @@ namespace DrugNameStandardizer
             wb.SaveAs(path);
         }
 
-        private static void SaveDataTableToCsv(DataTable dt, string path)
-        {
-            using var sw = new StreamWriter(path, false, Encoding.UTF8);
-            sw.WriteLine(string.Join(",", dt.Columns.Cast<DataColumn>().Select(c => CsvEscape(c.ColumnName))));
-
-            foreach (DataRow row in dt.Rows)
-            {
-                var line = string.Join(",", dt.Columns.Cast<DataColumn>().Select(c => CsvEscape(row[c])));
-                sw.WriteLine(line);
-            }
-        }
-
-        private static string CsvEscape(object? value)
-        {
-            var s = value == null || value == DBNull.Value ? "" : value.ToString() ?? "";
-            var needsQuotes = s.Contains(",") || s.Contains("\"") || s.Contains("\n") || s.Contains("\r");
-            if (s.Contains("\"")) s = s.Replace("\"", "\"\"");
-            return needsQuotes ? $"\"{s}\"" : s;
-        }
-
         // =========================
         // Column picker dialog
         // =========================
@@ -1756,11 +1817,10 @@ namespace DrugNameStandardizer
             }
         }
 
-        // =====================================================================
-        // NEW FEATURE: Cost-Savings Opportunity Finder
-        // =====================================================================
-
-        private static readonly string[] RequiredCostSavingsColumns =
+        // ==========================================================
+        // NEW FEATURE: Cost-Savings Opportunity Finder (core logic)
+        // ==========================================================
+        private static readonly string[] RequiredPricingColumns =
         {
             "Vizient_ABC_WAC",
             "Vizient_MCK_WAC",
@@ -1768,9 +1828,17 @@ namespace DrugNameStandardizer
             "fdb_current_wac_price"
         };
 
+        private static readonly string[] RequiredTherapeuticColumns =
+        {
+            "etc1",
+            "etc2",
+            "AHFS_therapeutic_description",
+            "ETC_Lowest_lvl"
+        };
+
         private static readonly string[] CostSavingsComputedColumns =
         {
-            "pricing_key",
+            "cost_key",
             "lowest_distributor",
             "lowest_wholesaler_wac",
             "highest_wholesaler_wac",
@@ -1787,388 +1855,456 @@ namespace DrugNameStandardizer
         private static List<string> GetMissingColumns(DataTable dt, IEnumerable<string> required)
         {
             var missing = new List<string>();
-            foreach (var col in required)
+            foreach (var c in required)
             {
-                if (FindColumn(dt, col) == null)
-                    missing.Add(col);
+                if (FindColumn(dt, c) == null)
+                    missing.Add(c);
             }
             return missing;
         }
 
-        private static void EnsureColCI(DataTable dt, string name, Type t)
+        private static void EnsureCostSavingsColumns(DataTable dt)
         {
-            if (FindColumn(dt, name) == null)
-                dt.Columns.Add(name, t);
+            // computed columns
+            EnsureCol(dt, "cost_key", typeof(string));
+            EnsureCol(dt, "lowest_distributor", typeof(string));
+            EnsureCol(dt, "lowest_wholesaler_wac", typeof(decimal));
+            EnsureCol(dt, "highest_wholesaler_wac", typeof(decimal));
+            EnsureCol(dt, "wholesaler_spread_abs", typeof(decimal));
+            EnsureCol(dt, "wholesaler_spread_pct", typeof(decimal));
+            EnsureCol(dt, "wholesaler_avg_wac", typeof(decimal));
+            EnsureCol(dt, "wholesaler_std_wac", typeof(decimal));
+            EnsureCol(dt, "fdb_vs_lowest_abs", typeof(decimal));
+            EnsureCol(dt, "fdb_vs_lowest_pct", typeof(decimal));
+            EnsureCol(dt, "abnormal_variance", typeof(bool));
+            EnsureCol(dt, "incomplete_wholesaler_pricing", typeof(bool));
         }
 
-        private static double? ParseMoneyToNullableDouble(object? value)
+        private static void ComputeCostSavingsColumnsInPlace(DataTable dt)
         {
-            if (value == null || value == DBNull.Value) return null;
+            var colNdc = FindColumn(dt, "ndc");
+            var colCross = FindColumn(dt, "crossrefkey");
 
-            if (value is double d) return d;
-            if (value is float f) return f;
-            if (value is decimal m) return (double)m;
-            if (value is int i) return i;
-            if (value is long l) return l;
+            var colABC = FindColumn(dt, "Vizient_ABC_WAC");
+            var colMCK = FindColumn(dt, "Vizient_MCK_WAC");
+            var colMDX = FindColumn(dt, "Vizient_MDX_WAC");
+            var colFDB = FindColumn(dt, "fdb_current_wac_price");
 
-            var s = value.ToString() ?? "";
-            s = s.Trim();
-            if (string.IsNullOrWhiteSpace(s)) return null;
+            if (colABC == null || colMCK == null || colMDX == null || colFDB == null)
+                throw new Exception("Missing required pricing columns (unexpected after validation).");
 
-            // common null tokens
+            for (int i = 0; i < dt.Rows.Count; i++)
+            {
+                var r = dt.Rows[i];
+
+                // key
+                var key = (colNdc != null ? (r[colNdc]?.ToString() ?? "").Trim() : "");
+                if (string.IsNullOrWhiteSpace(key) && colCross != null)
+                    key = (r[colCross]?.ToString() ?? "").Trim();
+                if (string.IsNullOrWhiteSpace(key))
+                    key = $"ROW_{i + 1}";
+                r["cost_key"] = key;
+
+                // parse numeric pricing
+                decimal? abc = ParseMoneyToDecimal(r[colABC]?.ToString());
+                decimal? mck = ParseMoneyToDecimal(r[colMCK]?.ToString());
+                decimal? mdx = ParseMoneyToDecimal(r[colMDX]?.ToString());
+                decimal? fdb = ParseMoneyToDecimal(r[colFDB]?.ToString());
+
+                var wholes = new List<(string Dist, decimal Price)>();
+                if (abc.HasValue) wholes.Add(("ABC", abc.Value));
+                if (mck.HasValue) wholes.Add(("MCK", mck.Value));
+                if (mdx.HasValue) wholes.Add(("MDX", mdx.Value));
+
+                bool anyPresent = abc.HasValue || mck.HasValue || mdx.HasValue;
+                bool anyMissing = !abc.HasValue || !mck.HasValue || !mdx.HasValue;
+                r["incomplete_wholesaler_pricing"] = anyPresent && anyMissing;
+
+                if (wholes.Count == 0)
+                {
+                    // no wholesaler prices at all
+                    r["lowest_distributor"] = "";
+                    r["lowest_wholesaler_wac"] = DBNull.Value;
+                    r["highest_wholesaler_wac"] = DBNull.Value;
+                    r["wholesaler_spread_abs"] = DBNull.Value;
+                    r["wholesaler_spread_pct"] = DBNull.Value;
+                    r["wholesaler_avg_wac"] = DBNull.Value;
+                    r["wholesaler_std_wac"] = DBNull.Value;
+                    r["fdb_vs_lowest_abs"] = DBNull.Value;
+                    r["fdb_vs_lowest_pct"] = DBNull.Value;
+                    r["abnormal_variance"] = false;
+                    continue;
+                }
+
+                var lowest = wholes.OrderBy(x => x.Price).First();
+                var highest = wholes.OrderByDescending(x => x.Price).First();
+
+                decimal spreadAbs = highest.Price - lowest.Price;
+
+                decimal spreadPct = 0m;
+                if (lowest.Price != 0m)
+                    spreadPct = spreadAbs / lowest.Price;
+
+                decimal avg = wholes.Average(x => x.Price);
+                decimal std = StdDev(wholes.Select(x => x.Price));
+
+                r["lowest_distributor"] = lowest.Dist;
+                r["lowest_wholesaler_wac"] = lowest.Price;
+                r["highest_wholesaler_wac"] = highest.Price;
+                r["wholesaler_spread_abs"] = spreadAbs;
+                r["wholesaler_spread_pct"] = spreadPct;
+                r["wholesaler_avg_wac"] = avg;
+                r["wholesaler_std_wac"] = std;
+
+                if (fdb.HasValue)
+                {
+                    decimal fdbAbs = fdb.Value - lowest.Price;
+                    decimal fdbPct = 0m;
+                    if (lowest.Price != 0m)
+                        fdbPct = fdbAbs / lowest.Price;
+
+                    r["fdb_vs_lowest_abs"] = fdbAbs;
+                    r["fdb_vs_lowest_pct"] = fdbPct;
+                }
+                else
+                {
+                    r["fdb_vs_lowest_abs"] = DBNull.Value;
+                    r["fdb_vs_lowest_pct"] = DBNull.Value;
+                }
+
+                // abnormal variance rule: >=20% OR >=$100
+                bool abnormal = (spreadPct >= 0.20m) || (spreadAbs >= 100m);
+                r["abnormal_variance"] = abnormal;
+            }
+        }
+
+        private static decimal StdDev(IEnumerable<decimal> values)
+        {
+            var list = values.ToList();
+            if (list.Count <= 1) return 0m;
+
+            decimal mean = list.Average();
+            decimal sumSq = 0m;
+            foreach (var v in list)
+            {
+                var d = v - mean;
+                sumSq += d * d;
+            }
+            // population std dev
+            var variance = sumSq / list.Count;
+            return (decimal)Math.Sqrt((double)variance);
+        }
+
+        private static decimal? ParseMoneyToDecimal(string? raw)
+        {
+            if (string.IsNullOrWhiteSpace(raw)) return null;
+
+            var s = raw.Trim();
+
+            // common "blank-ish"
             if (s.Equals("na", StringComparison.OrdinalIgnoreCase) ||
                 s.Equals("n/a", StringComparison.OrdinalIgnoreCase) ||
                 s.Equals("null", StringComparison.OrdinalIgnoreCase) ||
                 s.Equals("-", StringComparison.OrdinalIgnoreCase))
                 return null;
 
-            bool neg = false;
-            if (s.StartsWith("(") && s.EndsWith(")"))
-            {
-                neg = true;
-                s = s.Substring(1, s.Length - 2);
-            }
-
+            // remove $ and commas and spaces
             s = s.Replace("$", "").Replace(",", "").Trim();
 
-            // keep digits, dot, minus
-            s = Regex.Replace(s, @"[^0-9\.\-]", "");
+            // try parse invariant + current culture
+            if (decimal.TryParse(s, NumberStyles.Any, CultureInfo.InvariantCulture, out var d))
+                return d;
 
-            if (double.TryParse(s, NumberStyles.Any, CultureInfo.InvariantCulture, out var v) ||
-                double.TryParse(s, NumberStyles.Any, CultureInfo.CurrentCulture, out v))
-            {
-                if (neg) v = -v;
-                return v;
-            }
+            if (decimal.TryParse(s, NumberStyles.Any, CultureInfo.CurrentCulture, out d))
+                return d;
+
+            // last resort: extract first numeric token
+            var m = Regex.Match(s, @"-?\d+(\.\d+)?");
+            if (m.Success && decimal.TryParse(m.Value, NumberStyles.Any, CultureInfo.InvariantCulture, out d))
+                return d;
 
             return null;
         }
 
-        private static void SetValueOrDbNull(DataRow row, string colName, object? value)
+        private static DataTable BuildTopCostSavingsTable(DataTable input, int topN)
         {
-            var col = FindColumn(row.Table, colName);
-            if (col == null) return;
-            row[col] = value == null ? DBNull.Value : value;
-        }
+            // show a compact table: key + distributors + spread + flags + fdb delta
+            var dt = new DataTable();
+            dt.Columns.Add("cost_key", typeof(string));
+            dt.Columns.Add("lowest_distributor", typeof(string));
+            dt.Columns.Add("lowest_wholesaler_wac", typeof(decimal));
+            dt.Columns.Add("highest_wholesaler_wac", typeof(decimal));
+            dt.Columns.Add("wholesaler_spread_abs", typeof(decimal));
+            dt.Columns.Add("wholesaler_spread_pct", typeof(decimal));
+            dt.Columns.Add("wholesaler_std_wac", typeof(decimal));
+            dt.Columns.Add("fdb_current_wac_price", typeof(string));
+            dt.Columns.Add("fdb_vs_lowest_abs", typeof(decimal));
+            dt.Columns.Add("fdb_vs_lowest_pct", typeof(decimal));
+            dt.Columns.Add("abnormal_variance", typeof(bool));
+            dt.Columns.Add("incomplete_wholesaler_pricing", typeof(bool));
 
-        private static string BuildPricingKey(DataRow row, DataColumn? ndcCol, DataColumn? crossrefCol, int rowIndex)
-        {
-            var ndc = ndcCol == null ? "" : (row[ndcCol]?.ToString() ?? "").Trim();
-            if (!string.IsNullOrWhiteSpace(ndc)) return ndc;
+            // required computed cols exist already
+            var rows = input.Rows.Cast<DataRow>()
+                .Where(r => r.Table.Columns.Contains("wholesaler_spread_abs") && r["wholesaler_spread_abs"] != DBNull.Value)
+                .Select(r => new
+                {
+                    Row = r,
+                    SpreadAbs = Convert.ToDecimal(r["wholesaler_spread_abs"]),
+                    SpreadPct = r["wholesaler_spread_pct"] == DBNull.Value ? 0m : Convert.ToDecimal(r["wholesaler_spread_pct"])
+                })
+                .OrderByDescending(x => x.SpreadAbs)
+                .ThenByDescending(x => x.SpreadPct)
+                .Take(topN)
+                .ToList();
 
-            var x = crossrefCol == null ? "" : (row[crossrefCol]?.ToString() ?? "").Trim();
-            if (!string.IsNullOrWhiteSpace(x)) return x;
-
-            return $"ROW_{rowIndex + 1}";
-        }
-
-        private static double? GetNullableDoubleFromRow(DataRow row, string colName)
-        {
-            var col = FindColumn(row.Table, colName);
-            if (col == null) return null;
-
-            var v = row[col];
-            if (v == null || v == DBNull.Value) return null;
-
-            if (v is double d) return d;
-            if (v is float f) return f;
-            if (v is decimal m) return (double)m;
-
-            // fallback parse
-            return ParseMoneyToNullableDouble(v);
-        }
-
-        private static void EnsureCostSavingsColumns(DataTable dt)
-        {
-            EnsureColCI(dt, "pricing_key", typeof(string));
-
-            EnsureColCI(dt, "lowest_distributor", typeof(string));
-            EnsureColCI(dt, "lowest_wholesaler_wac", typeof(double));
-            EnsureColCI(dt, "highest_wholesaler_wac", typeof(double));
-
-            EnsureColCI(dt, "wholesaler_spread_abs", typeof(double));
-            EnsureColCI(dt, "wholesaler_spread_pct", typeof(double));
-
-            EnsureColCI(dt, "wholesaler_avg_wac", typeof(double));
-            EnsureColCI(dt, "wholesaler_std_wac", typeof(double));
-
-            EnsureColCI(dt, "fdb_vs_lowest_abs", typeof(double));
-            EnsureColCI(dt, "fdb_vs_lowest_pct", typeof(double));
-
-            EnsureColCI(dt, "abnormal_variance", typeof(bool));
-            EnsureColCI(dt, "incomplete_wholesaler_pricing", typeof(bool));
-        }
-
-        private static double StdDevPopulation(IReadOnlyList<double> values)
-        {
-            if (values.Count <= 1) return 0.0;
-            var avg = values.Average();
-            var var = values.Sum(v => (v - avg) * (v - avg)) / values.Count;
-            return Math.Sqrt(var);
-        }
-
-        private static string BucketLabel(double spreadPct)
-        {
-            // spreadPct is ratio (0.05 = 5%)
-            if (spreadPct < 0.05) return "0–5%";
-            if (spreadPct < 0.10) return "5–10%";
-            if (spreadPct < 0.20) return "10–20%";
-            return ">20%";
-        }
-
-        private static void RunCostSavingsOpportunityFinder(DataTable input, out DataTable summary, out DataTable top25)
-        {
-            // Validate required columns (hard stop)
-            var missing = GetMissingColumns(input, RequiredCostSavingsColumns);
-            if (missing.Count > 0)
-                throw new Exception("Missing required pricing columns:\n" + string.Join("\n", missing.Select(m => "• " + m)));
-
-            EnsureCostSavingsColumns(input);
-
-            var ndcCol = FindColumn(input, "ndc");
-            var crossrefCol = FindColumn(input, "crossrefkey");
-
-            var abcCol = FindColumn(input, "Vizient_ABC_WAC")!;
-            var mckCol = FindColumn(input, "Vizient_MCK_WAC")!;
-            var mdxCol = FindColumn(input, "Vizient_MDX_WAC")!;
-            var fdbCol = FindColumn(input, "fdb_current_wac_price")!;
-
-            // 1) Row-level calculations
-            for (int i = 0; i < input.Rows.Count; i++)
+            foreach (var x in rows)
             {
-                var row = input.Rows[i];
+                var r = x.Row;
 
-                var key = BuildPricingKey(row, ndcCol, crossrefCol, i);
-                row[FindColumn(input, "pricing_key")!] = key;
-
-                var abc = ParseMoneyToNullableDouble(row[abcCol]);
-                var mck = ParseMoneyToNullableDouble(row[mckCol]);
-                var mdx = ParseMoneyToNullableDouble(row[mdxCol]);
-                var fdb = ParseMoneyToNullableDouble(row[fdbCol]);
-
-                var present = new List<(string Dist, double Val)>();
-                if (abc.HasValue) present.Add(("ABC", abc.Value));
-                if (mck.HasValue) present.Add(("MCK", mck.Value));
-                if (mdx.HasValue) present.Add(("MDX", mdx.Value));
-
-                bool incomplete = present.Count >= 1 && present.Count < 3;
-
-                // lowest/highest among wholesalers
-                string lowestDist = "";
-                double? lowest = null;
-                double? highest = null;
-                double? spreadAbs = null;
-                double? spreadPct = null;
-                double? avg = null;
-                double? std = null;
-
-                if (present.Count > 0)
-                {
-                    // deterministic tie-break: ABC, then MCK, then MDX
-                    var order = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase)
-                    {
-                        ["ABC"] = 0, ["MCK"] = 1, ["MDX"] = 2
-                    };
-
-                    var minVal = present.Min(p => p.Val);
-                    var minCandidates = present.Where(p => p.Val == minVal)
-                                               .OrderBy(p => order.ContainsKey(p.Dist) ? order[p.Dist] : 99)
-                                               .ToList();
-
-                    lowestDist = minCandidates.First().Dist;
-                    lowest = minVal;
-
-                    highest = present.Max(p => p.Val);
-
-                    avg = present.Average(p => p.Val);
-                    std = StdDevPopulation(present.Select(p => p.Val).ToList());
-
-                    spreadAbs = highest.Value - lowest.Value;
-
-                    if (Math.Abs(lowest.Value) < 1e-12)
-                        spreadPct = null; // avoid divide-by-zero
-                    else
-                        spreadPct = spreadAbs.Value / lowest.Value;
-                }
-
-                // fdb deltas vs lowest
-                double? fdbVsLowestAbs = null;
-                double? fdbVsLowestPct = null;
-                if (fdb.HasValue && lowest.HasValue)
-                {
-                    fdbVsLowestAbs = fdb.Value - lowest.Value;
-                    if (Math.Abs(lowest.Value) < 1e-12)
-                        fdbVsLowestPct = null;
-                    else
-                        fdbVsLowestPct = (fdb.Value - lowest.Value) / lowest.Value;
-                }
-
-                // abnormal variance rule (default)
-                bool abnormal = false;
-                if (spreadAbs.HasValue && spreadPct.HasValue)
-                {
-                    abnormal = (spreadPct.Value >= 0.20) || (spreadAbs.Value >= 100.0);
-                }
-                else if (spreadAbs.HasValue)
-                {
-                    abnormal = spreadAbs.Value >= 100.0;
-                }
-
-                SetValueOrDbNull(row, "lowest_distributor", string.IsNullOrWhiteSpace(lowestDist) ? null : lowestDist);
-                SetValueOrDbNull(row, "lowest_wholesaler_wac", lowest);
-                SetValueOrDbNull(row, "highest_wholesaler_wac", highest);
-
-                SetValueOrDbNull(row, "wholesaler_spread_abs", spreadAbs);
-                SetValueOrDbNull(row, "wholesaler_spread_pct", spreadPct);
-
-                SetValueOrDbNull(row, "wholesaler_avg_wac", avg);
-                SetValueOrDbNull(row, "wholesaler_std_wac", std);
-
-                SetValueOrDbNull(row, "fdb_vs_lowest_abs", fdbVsLowestAbs);
-                SetValueOrDbNull(row, "fdb_vs_lowest_pct", fdbVsLowestPct);
-
-                SetValueOrDbNull(row, "abnormal_variance", abnormal);
-                SetValueOrDbNull(row, "incomplete_wholesaler_pricing", incomplete);
+                dt.Rows.Add(
+                    r["cost_key"]?.ToString() ?? "",
+                    r["lowest_distributor"]?.ToString() ?? "",
+                    r["lowest_wholesaler_wac"] == DBNull.Value ? 0m : Convert.ToDecimal(r["lowest_wholesaler_wac"]),
+                    r["highest_wholesaler_wac"] == DBNull.Value ? 0m : Convert.ToDecimal(r["highest_wholesaler_wac"]),
+                    r["wholesaler_spread_abs"] == DBNull.Value ? 0m : Convert.ToDecimal(r["wholesaler_spread_abs"]),
+                    r["wholesaler_spread_pct"] == DBNull.Value ? 0m : Convert.ToDecimal(r["wholesaler_spread_pct"]),
+                    r["wholesaler_std_wac"] == DBNull.Value ? 0m : Convert.ToDecimal(r["wholesaler_std_wac"]),
+                    (FindColumn(input, "fdb_current_wac_price") != null ? (r[FindColumn(input, "fdb_current_wac_price")!]?.ToString() ?? "") : ""),
+                    r["fdb_vs_lowest_abs"] == DBNull.Value ? 0m : Convert.ToDecimal(r["fdb_vs_lowest_abs"]),
+                    r["fdb_vs_lowest_pct"] == DBNull.Value ? 0m : Convert.ToDecimal(r["fdb_vs_lowest_pct"]),
+                    r["abnormal_variance"] != DBNull.Value && Convert.ToBoolean(r["abnormal_variance"]),
+                    r["incomplete_wholesaler_pricing"] != DBNull.Value && Convert.ToBoolean(r["incomplete_wholesaler_pricing"])
+                );
             }
 
-            // 2) Build unique-item view (best row per pricing_key for ranking)
-            var keyCol = FindColumn(input, "pricing_key")!;
-            var bestByKey = new Dictionary<string, DataRow>(StringComparer.OrdinalIgnoreCase);
+            return dt;
+        }
 
-            foreach (DataRow r in input.Rows)
-            {
-                var key = (r[keyCol]?.ToString() ?? "").Trim();
-                if (string.IsNullOrWhiteSpace(key)) continue;
+        private static string BuildCostSavingsSummaryText(DataTable input)
+        {
+            int abc = 0, mck = 0, mdx = 0, none = 0;
 
-                if (!bestByKey.TryGetValue(key, out var existing))
-                {
-                    bestByKey[key] = r;
-                    continue;
-                }
-
-                var aNew = GetNullableDoubleFromRow(r, "wholesaler_spread_abs") ?? -1;
-                var aOld = GetNullableDoubleFromRow(existing, "wholesaler_spread_abs") ?? -1;
-
-                if (aNew > aOld)
-                {
-                    bestByKey[key] = r;
-                    continue;
-                }
-
-                if (Math.Abs(aNew - aOld) < 1e-12)
-                {
-                    var pNew = GetNullableDoubleFromRow(r, "wholesaler_spread_pct") ?? -1;
-                    var pOld = GetNullableDoubleFromRow(existing, "wholesaler_spread_pct") ?? -1;
-                    if (pNew > pOld)
-                        bestByKey[key] = r;
-                }
-            }
-
-            // 3) Summary
-            var lowestCounts = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase)
-            {
-                ["ABC"] = 0, ["MCK"] = 0, ["MDX"] = 0
-            };
-
-            var bucketCounts = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase)
-            {
-                ["0–5%"] = 0, ["5–10%"] = 0, ["10–20%"] = 0, [">20%"] = 0
-            };
-
+            int bucket_0_5 = 0, bucket_5_10 = 0, bucket_10_20 = 0, bucket_20p = 0;
             int abnormalCount = 0;
             int incompleteCount = 0;
 
-            foreach (var r in bestByKey.Values)
+            foreach (DataRow r in input.Rows)
             {
-                var ld = (FindColumn(input, "lowest_distributor") == null) ? "" : (r[FindColumn(input, "lowest_distributor")!]?.ToString() ?? "");
-                if (!string.IsNullOrWhiteSpace(ld) && lowestCounts.ContainsKey(ld))
-                    lowestCounts[ld]++;
+                var lowest = (r.Table.Columns.Contains("lowest_distributor") ? (r["lowest_distributor"]?.ToString() ?? "") : "").Trim();
+                if (string.Equals(lowest, "ABC", StringComparison.OrdinalIgnoreCase)) abc++;
+                else if (string.Equals(lowest, "MCK", StringComparison.OrdinalIgnoreCase)) mck++;
+                else if (string.Equals(lowest, "MDX", StringComparison.OrdinalIgnoreCase)) mdx++;
+                else none++;
 
-                var sp = GetNullableDoubleFromRow(r, "wholesaler_spread_pct");
-                if (sp.HasValue && sp.Value >= 0)
-                {
-                    var b = BucketLabel(sp.Value);
-                    if (bucketCounts.ContainsKey(b)) bucketCounts[b]++;
-                }
+                if (r.Table.Columns.Contains("abnormal_variance") && r["abnormal_variance"] != DBNull.Value && Convert.ToBoolean(r["abnormal_variance"]))
+                    abnormalCount++;
 
-                var ab = FindColumn(input, "abnormal_variance") != null && r[FindColumn(input, "abnormal_variance")!] is bool b1 && b1;
-                if (ab) abnormalCount++;
+                if (r.Table.Columns.Contains("incomplete_wholesaler_pricing") && r["incomplete_wholesaler_pricing"] != DBNull.Value && Convert.ToBoolean(r["incomplete_wholesaler_pricing"]))
+                    incompleteCount++;
 
-                var inc = FindColumn(input, "incomplete_wholesaler_pricing") != null && r[FindColumn(input, "incomplete_wholesaler_pricing")!] is bool b2 && b2;
-                if (inc) incompleteCount++;
+                if (!r.Table.Columns.Contains("wholesaler_spread_pct") || r["wholesaler_spread_pct"] == DBNull.Value) continue;
+                var pct = Convert.ToDecimal(r["wholesaler_spread_pct"]) * 100m;
+
+                if (pct < 5m) bucket_0_5++;
+                else if (pct < 10m) bucket_5_10++;
+                else if (pct < 20m) bucket_10_20++;
+                else bucket_20p++;
             }
 
-            summary = new DataTable();
-            summary.Columns.Add("Metric", typeof(string));
-            summary.Columns.Add("Value", typeof(string));
+            var sb = new StringBuilder();
+            sb.AppendLine("Cost-Savings Opportunity Finder — Summary");
+            sb.AppendLine("----------------------------------------");
+            sb.AppendLine($"Items loaded: {input.Rows.Count}");
+            sb.AppendLine();
+            sb.AppendLine("Lowest distributor counts:");
+            sb.AppendLine($"- ABC: {abc}");
+            sb.AppendLine($"- MCK: {mck}");
+            sb.AppendLine($"- MDX: {mdx}");
+            sb.AppendLine($"- (none/blank): {none}");
+            sb.AppendLine();
+            sb.AppendLine("Variance buckets (wholesaler_spread_pct):");
+            sb.AppendLine($"- 0–5%: {bucket_0_5}");
+            sb.AppendLine($"- 5–10%: {bucket_5_10}");
+            sb.AppendLine($"- 10–20%: {bucket_10_20}");
+            sb.AppendLine($">=20%: {bucket_20p}");
+            sb.AppendLine();
+            sb.AppendLine($"Abnormal variance flagged: {abnormalCount}");
+            sb.AppendLine($"Incomplete wholesaler pricing flagged: {incompleteCount}");
+            sb.AppendLine();
+            sb.AppendLine("Rule used for abnormal variance:");
+            sb.AppendLine("- abnormal_variance = TRUE if wholesaler_spread_pct >= 20% OR wholesaler_spread_abs >= 100");
+            return sb.ToString();
+        }
 
-            summary.Rows.Add("Items analyzed (unique pricing_key)", bestByKey.Count.ToString());
-            summary.Rows.Add("Lowest distributor count — ABC", lowestCounts["ABC"].ToString());
-            summary.Rows.Add("Lowest distributor count — MCK", lowestCounts["MCK"].ToString());
-            summary.Rows.Add("Lowest distributor count — MDX", lowestCounts["MDX"].ToString());
-            summary.Rows.Add("Abnormal variance items", abnormalCount.ToString());
-            summary.Rows.Add("Incomplete wholesaler pricing items", incompleteCount.ToString());
-            summary.Rows.Add("Spread buckets: 0–5%", bucketCounts["0–5%"].ToString());
-            summary.Rows.Add("Spread buckets: 5–10%", bucketCounts["5–10%"].ToString());
-            summary.Rows.Add("Spread buckets: 10–20%", bucketCounts["10–20%"].ToString());
-            summary.Rows.Add("Spread buckets: >20%", bucketCounts[">20%"].ToString());
+        // ==========================================================
+        // NEW TOOL: Therapeutic Category Spend Trends (pivot)
+        // ==========================================================
+        private static DataTable BuildTherapeuticSpendTrends(DataTable input)
+        {
+            var dt = new DataTable();
+            dt.Columns.Add("ETC_Lowest_lvl", typeof(string));
+            dt.Columns.Add("ItemCount", typeof(int));
 
-            // 4) Top 25 opportunities
-            var ranked = bestByKey.Values
-                .OrderByDescending(r => GetNullableDoubleFromRow(r, "wholesaler_spread_abs") ?? -1)
-                .ThenByDescending(r => GetNullableDoubleFromRow(r, "wholesaler_spread_pct") ?? -1)
-                .Take(25)
+            // Spend: use lowest_wholesaler_wac if available, else fallback to fdb_current_wac_price
+            dt.Columns.Add("Sum_WAC_Using_LowestWholesaler", typeof(decimal));
+            dt.Columns.Add("Sum_WAC_Using_FDB", typeof(decimal));
+
+            dt.Columns.Add("Avg_Wholesaler_Spread_Pct", typeof(decimal));
+            dt.Columns.Add("Avg_Wholesaler_Spread_Abs", typeof(decimal));
+
+            dt.Columns.Add("Inflation_Risk_Flag", typeof(bool)); // simple risk heuristic
+
+            dt.Columns.Add("HighCompetitionCount", typeof(int));
+            dt.Columns.Add("Example_ETC1", typeof(string));
+            dt.Columns.Add("Example_ETC2", typeof(string));
+            dt.Columns.Add("Example_AHFS_Desc", typeof(string));
+
+            var colLvl = FindColumn(input, "ETC_Lowest_lvl")!;
+            var colEtc1 = FindColumn(input, "etc1");
+            var colEtc2 = FindColumn(input, "etc2");
+            var colAhfs = FindColumn(input, "AHFS_therapeutic_description");
+            var colComp = FindColumn(input, "competition");
+
+            var colLowest = FindColumn(input, "lowest_wholesaler_wac");
+            var colSpreadPct = FindColumn(input, "wholesaler_spread_pct");
+            var colSpreadAbs = FindColumn(input, "wholesaler_spread_abs");
+            var colFdb = FindColumn(input, "fdb_current_wac_price")!;
+
+            var groups = input.Rows.Cast<DataRow>()
+                .GroupBy(r => (r[colLvl]?.ToString() ?? "").Trim())
+                .Select(g =>
+                {
+                    var key = string.IsNullOrWhiteSpace(g.Key) ? "(blank)" : g.Key;
+
+                    decimal sumLowest = 0m;
+                    decimal sumFdb = 0m;
+
+                    var pctVals = new List<decimal>();
+                    var absVals = new List<decimal>();
+
+                    int highComp = 0;
+
+                    string etc1 = "";
+                    string etc2 = "";
+                    string ahfs = "";
+
+                    foreach (var r in g)
+                    {
+                        if (string.IsNullOrWhiteSpace(etc1) && colEtc1 != null) etc1 = (r[colEtc1]?.ToString() ?? "").Trim();
+                        if (string.IsNullOrWhiteSpace(etc2) && colEtc2 != null) etc2 = (r[colEtc2]?.ToString() ?? "").Trim();
+                        if (string.IsNullOrWhiteSpace(ahfs) && colAhfs != null) ahfs = (r[colAhfs]?.ToString() ?? "").Trim();
+
+                        if (colComp != null)
+                        {
+                            var comp = (r[colComp]?.ToString() ?? "");
+                            if (comp.IndexOf("high", StringComparison.OrdinalIgnoreCase) >= 0)
+                                highComp++;
+                        }
+
+                        // lowest wholesaler sum
+                        if (colLowest != null && r[colLowest] != DBNull.Value)
+                            sumLowest += Convert.ToDecimal(r[colLowest]);
+
+                        // fdb sum
+                        var fdbVal = ParseMoneyToDecimal(r[colFdb]?.ToString());
+                        if (fdbVal.HasValue) sumFdb += fdbVal.Value;
+
+                        if (colSpreadPct != null && r[colSpreadPct] != DBNull.Value)
+                            pctVals.Add(Convert.ToDecimal(r[colSpreadPct]));
+
+                        if (colSpreadAbs != null && r[colSpreadAbs] != DBNull.Value)
+                            absVals.Add(Convert.ToDecimal(r[colSpreadAbs]));
+                    }
+
+                    decimal avgPct = pctVals.Count == 0 ? 0m : pctVals.Average();
+                    decimal avgAbs = absVals.Count == 0 ? 0m : absVals.Average();
+
+                    // Inflation risk heuristic:
+                    // - avg spread pct >= 10% OR avg spread abs >= 50 OR (sumFdb very high AND avg spread pct >= 5%)
+                    bool risk = (avgPct >= 0.10m) || (avgAbs >= 50m) || (sumFdb >= 100000m && avgPct >= 0.05m);
+
+                    return new
+                    {
+                        Key = key,
+                        Count = g.Count(),
+                        SumLowest = sumLowest,
+                        SumFdb = sumFdb,
+                        AvgPct = avgPct,
+                        AvgAbs = avgAbs,
+                        Risk = risk,
+                        HighComp = highComp,
+                        Etc1 = etc1,
+                        Etc2 = etc2,
+                        Ahfs = ahfs
+                    };
+                })
+                .OrderByDescending(x => x.SumFdb) // show biggest spend first (FDB)
                 .ToList();
 
-            top25 = new DataTable();
-
-            // Safe "nice-to-have" columns (only add if present)
-            AddIfExists(top25, input, "pricing_key", typeof(string));
-            AddIfExists(top25, input, "ndc", typeof(string));
-            AddIfExists(top25, input, "crossrefkey", typeof(string));
-            AddIfExists(top25, input, "brand_name", typeof(string));
-            AddIfExists(top25, input, "generic_name", typeof(string));
-
-            AddIfExists(top25, input, "Vizient_ABC_WAC", typeof(string));
-            AddIfExists(top25, input, "Vizient_MCK_WAC", typeof(string));
-            AddIfExists(top25, input, "Vizient_MDX_WAC", typeof(string));
-            AddIfExists(top25, input, "fdb_current_wac_price", typeof(string));
-
-            AddIfExists(top25, input, "lowest_distributor", typeof(string));
-            AddIfExists(top25, input, "lowest_wholesaler_wac", typeof(double));
-            AddIfExists(top25, input, "highest_wholesaler_wac", typeof(double));
-            AddIfExists(top25, input, "wholesaler_spread_abs", typeof(double));
-            AddIfExists(top25, input, "wholesaler_spread_pct", typeof(double));
-            AddIfExists(top25, input, "wholesaler_avg_wac", typeof(double));
-            AddIfExists(top25, input, "wholesaler_std_wac", typeof(double));
-            AddIfExists(top25, input, "fdb_vs_lowest_abs", typeof(double));
-            AddIfExists(top25, input, "fdb_vs_lowest_pct", typeof(double));
-
-            AddIfExists(top25, input, "abnormal_variance", typeof(bool));
-            AddIfExists(top25, input, "incomplete_wholesaler_pricing", typeof(bool));
-
-            foreach (var src in ranked)
+            foreach (var x in groups)
             {
-                var nr = top25.NewRow();
-                foreach (DataColumn c in top25.Columns)
-                {
-                    var srcCol = FindColumn(input, c.ColumnName);
-                    nr[c.ColumnName] = srcCol == null ? "" : (src[srcCol] ?? "");
-                }
-                top25.Rows.Add(nr);
+                dt.Rows.Add(
+                    x.Key,
+                    x.Count,
+                    x.SumLowest,
+                    x.SumFdb,
+                    x.AvgPct,
+                    x.AvgAbs,
+                    x.Risk,
+                    x.HighComp,
+                    x.Etc1,
+                    x.Etc2,
+                    x.Ahfs
+                );
             }
+
+            return dt;
         }
 
-        private static void AddIfExists(DataTable dest, DataTable source, string colName, Type type)
+        private static string BuildTherapeuticSpendSummaryText(DataTable trends)
         {
-            if (FindColumn(source, colName) == null) return;
-            if (FindColumn(dest, colName) != null) return;
-            dest.Columns.Add(colName, type);
+            var sb = new StringBuilder();
+            sb.AppendLine("Therapeutic Category Spend Trends — Summary");
+            sb.AppendLine("------------------------------------------");
+            sb.AppendLine($"Categories: {trends.Rows.Count}");
+            sb.AppendLine();
+
+            // Top 10 by Sum_WAC_Using_FDB
+            sb.AppendLine("Top 10 categories by total WAC (FDB):");
+            sb.AppendLine("-------------------------------------");
+
+            var top = trends.Rows.Cast<DataRow>()
+                .OrderByDescending(r => Convert.ToDecimal(r["Sum_WAC_Using_FDB"]))
+                .Take(10)
+                .ToList();
+
+            for (int i = 0; i < top.Count; i++)
+            {
+                var r = top[i];
+                var cat = r["ETC_Lowest_lvl"]?.ToString() ?? "";
+                var sum = Convert.ToDecimal(r["Sum_WAC_Using_FDB"]);
+                var risk = (r["Inflation_Risk_Flag"] != DBNull.Value && Convert.ToBoolean(r["Inflation_Risk_Flag"])) ? "RISK" : "";
+                sb.AppendLine($"{i + 1}. {cat}  |  Sum WAC: {sum:n2}  {risk}");
+            }
+
+            sb.AppendLine();
+            sb.AppendLine("Inflation risk flag heuristic:");
+            sb.AppendLine("- TRUE if Avg spread % >= 10% OR Avg spread $ >= 50 OR (Total FDB spend >= 100,000 AND Avg spread % >= 5%)");
+            sb.AppendLine();
+            sb.AppendLine("High competition classes:");
+            sb.AppendLine("- HighCompetitionCount = count of rows where 'competition' contains the word 'high' (case-insensitive).");
+            return sb.ToString();
         }
+
+        // =========================
+        // END new tools
+        // =========================
     }
 }
 
-  
+
+
+         
   
   
   
