@@ -1,0 +1,153 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>Show Code as Written Text</title>
+  <style>
+    body { font-family: system-ui, Arial, sans-serif; margin: 24px; }
+
+    .code-wrap { max-width: 1200px; }
+
+    pre{
+      position: relative;
+      padding: 52px 16px 16px;
+      border: 1px solid #e5e5e5;
+      border-radius: 12px;
+      background: #0b1020;
+      color: #e8e8e8;
+      overflow: auto;
+      line-height: 1.45;
+      font-size: 14px;
+      margin: 0;
+      min-height: 240px;
+    }
+
+    code{
+      font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, "Liberation Mono", monospace;
+      white-space: pre;
+    }
+
+    #copyBtn{
+      position: absolute;
+      top: 12px;
+      right: 12px;
+      border: 1px solid rgba(255,255,255,0.2);
+      background: rgba(255,255,255,0.08);
+      color: #fff;
+      padding: 8px 12px;
+      border-radius: 10px;
+      cursor: pointer;
+      font-size: 13px;
+      user-select: none;
+      backdrop-filter: blur(6px);
+    }
+    #copyBtn:hover{ background: rgba(255,255,255,0.14); }
+    #copyBtn:active{ transform: translateY(1px); }
+
+    #copyStatus{
+      position: absolute;
+      top: 16px;
+      left: 16px;
+      font-size: 12px;
+      color: rgba(232,232,232,0.85);
+      max-width: calc(100% - 160px);
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+  </style>
+</head>
+<body>
+
+  <h2>Displayed Code (loaded from index2)</h2>
+
+  <div class="code-wrap">
+    <pre>
+      <button id="copyBtn" type="button" aria-label="Copy code to clipboard" disabled>Copy</button>
+      <span id="copyStatus" aria-live="polite">Loading code from index2…</span>
+      <code id="codeBlock"></code>
+    </pre>
+  </div>
+
+  <script>
+    (function () {
+      // ✅ Change this if your file name is different (ex: "index2.txt" or "index2.cs")
+      const SOURCE_FILE = "index2.html";
+
+      const btn = document.getElementById("copyBtn");
+      const codeEl = document.getElementById("codeBlock");
+      const statusEl = document.getElementById("copyStatus");
+
+      let loadedText = "";
+
+      function setStatus(msg) {
+        statusEl.textContent = msg || "";
+      }
+
+      async function loadCode() {
+        try {
+          const res = await fetch(SOURCE_FILE, { cache: "no-store" });
+          if (!res.ok) throw new Error("HTTP " + res.status);
+
+          loadedText = await res.text();
+
+          // Show it exactly as text
+          codeEl.textContent = loadedText;
+
+          setStatus("Loaded: " + SOURCE_FILE);
+          btn.disabled = false;
+        } catch (e) {
+          loadedText = "";
+          codeEl.textContent = "";
+          btn.disabled = true;
+          setStatus("Could not load " + SOURCE_FILE + ". (Make sure you open via a local server, not file://)");
+        }
+      }
+
+      async function copyText(text) {
+        if (navigator.clipboard && window.isSecureContext) {
+          await navigator.clipboard.writeText(text);
+          return true;
+        }
+
+        const ta = document.createElement("textarea");
+        ta.value = text;
+        ta.setAttribute("readonly", "");
+        ta.style.position = "fixed";
+        ta.style.left = "-9999px";
+        document.body.appendChild(ta);
+        ta.select();
+
+        let ok = false;
+        try { ok = document.execCommand("copy"); } catch (e) { ok = false; }
+
+        document.body.removeChild(ta);
+        return ok;
+      }
+
+      btn.addEventListener("click", async () => {
+        const textToCopy = loadedText || codeEl.textContent || "";
+        if (!textToCopy.trim()) {
+          setStatus("Nothing to copy (code not loaded).");
+          return;
+        }
+
+        try {
+          const ok = await copyText(textToCopy);
+          if (!ok) throw new Error("Copy failed");
+          const old = btn.textContent;
+          btn.textContent = "Copied!";
+          setStatus("Copied to clipboard.");
+          setTimeout(() => { btn.textContent = old; setStatus("Loaded: " + SOURCE_FILE); }, 1500);
+        } catch (e) {
+          setStatus("Copy blocked by browser. Select the code and copy manually.");
+        }
+      });
+
+      loadCode();
+    })();
+  </script>
+
+</body>
+</html>
