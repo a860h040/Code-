@@ -77,9 +77,7 @@
 
 
 
-
-
-
+#nullable enable
 using System;
 using System.Collections.Generic;
 using System.Data;
@@ -95,7 +93,7 @@ using Microsoft.Data.Sqlite;
 
 namespace DrugNameStandardizer
 {
-    public partial class Form1 : Form
+    public class Form1 : Form
     {
         // =========================
         // State
@@ -112,7 +110,7 @@ namespace DrugNameStandardizer
         private DataTable _costSavingsTopTable = new DataTable();
         private DataTable _therapeuticSpendTable = new DataTable();
 
-        // FIX: typed generics (this is what removes CS0305 errors)
+        // FIX: typed generics (removes CS0305 errors)
         private HashSet<string> _ingredientSet = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         private Dictionary<string, string> _synonymMap = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
 
@@ -121,12 +119,16 @@ namespace DrugNameStandardizer
 
         private readonly string _dbPath = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "ingredient_library.db");
 
+        // Stores summaries for the "Show Summary" buttons
+        private string _lastCostSummary = "";
+        private string _lastSpendSummary = "";
+
         // =========================
         // Constructor / UI
         // =========================
         public Form1()
         {
-            InitializeComponent();
+            // FIX: remove dependency on InitializeComponent (avoids missing Designer errors)
             Controls.Clear();
 
             Width = 1380;
@@ -169,7 +171,7 @@ namespace DrugNameStandardizer
             var tabVariability = new TabPage("Variability Report");
             var tabValidation = new TabPage("Validation Examples");
 
-            // NEW TABS (do not disturb existing UI rows)
+            // NEW TABS
             var tabCostSavings = new TabPage("Cost-Savings Opportunity Finder");
             var tabTherapeuticSpend = new TabPage("Therapeutic Category Spend Trends");
 
@@ -185,8 +187,8 @@ namespace DrugNameStandardizer
             // Grids
             var libraryGrid = MakeEditableGrid();
             var synonymsGrid = MakeEditableGrid();
-            var inputGrid = MakeReadOnlyGrid();      // preview grid (read-only cells, but supports right-click delete column)
-            var unknownsGrid = MakeEditableGrid();   // user can fill ApprovedIngredient
+            var inputGrid = MakeReadOnlyGrid();
+            var unknownsGrid = MakeEditableGrid();
             var variabilityGrid = MakeReadOnlyGrid();
             var validationGrid = MakeReadOnlyGrid();
 
@@ -201,7 +203,7 @@ namespace DrugNameStandardizer
             tabVariability.Controls.Add(variabilityGrid);
             tabValidation.Controls.Add(validationGrid);
 
-            // NEW: tool UIs inside their tabs (keeps your top UI unchanged)
+            // Tool UI panels
             var costPanel = new Panel { Dock = DockStyle.Fill };
             var btnRunCost = new Button { Text = "Run Cost-Savings Finder", Left = 10, Top = 10, Width = 200, Height = 30, Enabled = false };
             var btnExportCost = new Button { Text = "Export Cost-Savings Output", Left = 220, Top = 10, Width = 220, Height = 30, Enabled = false };
@@ -285,7 +287,6 @@ namespace DrugNameStandardizer
                 if (_inputTable == null) return;
                 if (string.IsNullOrWhiteSpace(lastRightClickedColumnName)) return;
 
-                // Protect required column (generic_name)
                 var protectedCols = new HashSet<string>(StringComparer.OrdinalIgnoreCase) { "generic_name" };
 
                 if (protectedCols.Contains(lastRightClickedColumnName))
@@ -294,10 +295,11 @@ namespace DrugNameStandardizer
                     return;
                 }
 
-                if (!_inputTable.Columns.Contains(lastRightClickedColumnName)) return;
+                var col = FindColumn(_inputTable, lastRightClickedColumnName);
+                if (col == null) return;
 
                 var confirm = MessageBox.Show(
-                    $"Delete column '{lastRightClickedColumnName}' from the preview table?\n\nThis removes it from the current loaded data in the program.",
+                    $"Delete column '{col.ColumnName}' from the preview table?\n\nThis removes it from the current loaded data in the program.",
                     "Confirm Delete Column",
                     MessageBoxButtons.YesNo,
                     MessageBoxIcon.Warning
@@ -305,15 +307,14 @@ namespace DrugNameStandardizer
 
                 if (confirm != DialogResult.Yes) return;
 
-                _inputTable.Columns.Remove(lastRightClickedColumnName);
+                _inputTable.Columns.Remove(col);
 
-                // keep export selection in sync
-                _selectedOutputColumns?.Remove(lastRightClickedColumnName);
+                _selectedOutputColumns?.Remove(col.ColumnName);
 
                 inputGrid.DataSource = _inputTable;
                 inputGrid.Refresh();
 
-                lblStatus.Text = $"Status: Deleted column '{lastRightClickedColumnName}' from preview.";
+                lblStatus.Text = $"Status: Deleted column '{col.ColumnName}' from preview.";
             };
 
             // ==========================================================
@@ -324,7 +325,6 @@ namespace DrugNameStandardizer
                 if (e.RowIndex < 0 || e.ColumnIndex < 0) return;
                 if (_inputTable == null) return;
 
-                // Only trigger when clicking PrimaryIngredient column
                 var clickedColName = inputGrid.Columns[e.ColumnIndex].Name;
                 if (!clickedColName.Equals("PrimaryIngredient", StringComparison.OrdinalIgnoreCase))
                     return;
@@ -469,7 +469,7 @@ namespace DrugNameStandardizer
                     btnExportVariability.Enabled = false;
                     btnExportValidation.Enabled = false;
 
-                    // NEW tools enabled once input exists (they validate columns internally)
+                    // NEW tools enabled once input exists
                     btnRunCost.Enabled = true;
                     btnRunSpend.Enabled = true;
 
@@ -563,8 +563,7 @@ namespace DrugNameStandardizer
 
                 var allCols = _inputTable.Columns.Cast<DataColumn>().Select(c => c.ColumnName).ToList();
 
-                if (_selectedOutputColumns == null)
-                    _selectedOutputColumns = new HashSet<string>(allCols, StringComparer.OrdinalIgnoreCase);
+                _selectedOutputColumns ??= new HashSet<string>(allCols, StringComparer.OrdinalIgnoreCase);
 
                 using var dlg = new ColumnPickerDialog(allCols, _selectedOutputColumns);
                 if (dlg.ShowDialog() == DialogResult.OK)
@@ -725,7 +724,6 @@ namespace DrugNameStandardizer
                     lblStatus.Text = $"Status: Cost-Savings Finder done. Top opportunities: {_costSavingsTopTable.Rows.Count}.";
                     tabs.SelectedTab = tabCostSavings;
 
-                    // store summary for the button (local closure)
                     _lastCostSummary = summaryText;
                 }
                 catch (Exception ex)
@@ -758,7 +756,6 @@ namespace DrugNameStandardizer
 
                 try
                 {
-                    // Export includes original + computed columns (in-place on _inputTable)
                     SaveDataTableToExcel(_inputTable, sfd.FileName);
                     lblStatus.Text = $"Status: Cost-Savings output exported -> {sfd.FileName}";
                 }
@@ -829,10 +826,6 @@ namespace DrugNameStandardizer
                 catch (Exception ex) { MessageBox.Show(ex.Message, "Export Spend Trends Error"); }
             };
         }
-
-        // Stores summaries for the "Show Summary" buttons
-        private string _lastCostSummary = "";
-        private string _lastSpendSummary = "";
 
         // =========================
         // Popup Window Helper
@@ -1042,11 +1035,8 @@ namespace DrugNameStandardizer
                 cmd.Parameters.AddWithValue("$n", name);
                 cmd.Parameters.AddWithValue("$nn", norm);
 
-                var before = GetChangesCount(conn);
                 cmd.ExecuteNonQuery();
-                var after = GetChangesCount(conn);
-
-                if (after > before) added++;
+                if (GetChangesCount(conn) > 0) added++;
             }
 
             tx.Commit();
@@ -1182,11 +1172,8 @@ namespace DrugNameStandardizer
                 cmd.Parameters.AddWithValue("$nm", normMapsTo);
                 cmd.Parameters.AddWithValue("$s", string.IsNullOrWhiteSpace(source) ? "import" : source);
 
-                var before = GetChangesCount(conn);
                 cmd.ExecuteNonQuery();
-                var after = GetChangesCount(conn);
-
-                if (after > before) added++;
+                if (GetChangesCount(conn) > 0) added++;
             }
 
             tx.Commit();
@@ -1197,7 +1184,7 @@ namespace DrugNameStandardizer
         {
             using var cmd = conn.CreateCommand();
             cmd.CommandText = "SELECT changes();";
-            return (long)cmd.ExecuteScalar();
+            return (long)cmd.ExecuteScalar()!;
         }
 
         // =========================
@@ -1213,7 +1200,6 @@ namespace DrugNameStandardizer
             public string SuggestedIngredient;
         }
 
-        // FIX: typed generics
         private static ExtractResult ExtractWithRules(string genericName, HashSet<string> ingredientSet, Dictionary<string, string> synonymMap)
         {
             var result = new ExtractResult
@@ -1357,7 +1343,6 @@ namespace DrugNameStandardizer
             return tokens.Any(t => suffixes.Any(s => t.EndsWith(s)));
         }
 
-        // FIX: typed List<string>
         private static List<string> SplitComboParts(string raw)
         {
             var s = raw.ToLowerInvariant();
@@ -1375,7 +1360,6 @@ namespace DrugNameStandardizer
             return parts.Count == 0 ? new List<string> { raw } : parts;
         }
 
-        // FIX: typed IEnumerable<string>
         private static string LongestMatch(string cleaned, IEnumerable<string> candidates)
         {
             var tokens = cleaned.Split(' ', StringSplitOptions.RemoveEmptyEntries);
@@ -1438,10 +1422,8 @@ namespace DrugNameStandardizer
                  .Replace(")", " ")
                  .Replace("-", " ");
 
-            // remove "U-100" style
             s = Regex.Replace(s, @"\bu\s*[-]?\s*\d+\b", " ");
 
-            // remove strengths/units
             s = Regex.Replace(s, @"\b\d+(\.\d+)?\s*(mg|mcg|g|gram|grams|ml|mL|l|meq|units|iu|%)\b", " ");
             s = Regex.Replace(s, @"\b\d+(\.\d+)?\s*(mg\/ml|mg\/mL|mcg\/ml|g\/l|mg\/g)\b", " ");
 
@@ -1643,9 +1625,13 @@ namespace DrugNameStandardizer
             EnsureCol(dt, "NormalizedGeneric", typeof(string));
         }
 
+        // FIX: case-insensitive EnsureCol (prevents duplicates)
         private static void EnsureCol(DataTable dt, string name, Type t)
         {
-            if (dt.Columns.Cast<DataColumn>().All(c => c.ColumnName != name))
+            var exists = dt.Columns.Cast<DataColumn>()
+                .Any(c => string.Equals(c.ColumnName, name, StringComparison.OrdinalIgnoreCase));
+
+            if (!exists)
                 dt.Columns.Add(name, t);
         }
 
@@ -1750,11 +1736,10 @@ namespace DrugNameStandardizer
         }
 
         // ==========================================================
-        // NEW TOOL 1: Cost-Savings Opportunity Finder (in-place columns + Top 25 table)
+        // NEW TOOL 1: Cost-Savings Opportunity Finder
         // ==========================================================
         private string RunCostSavingsOpportunityFinder(DataTable input, out DataTable top25)
         {
-            // Required pricing columns (validate presence; stop if missing)
             string[] required =
             {
                 "Vizient_ABC_WAC",
@@ -1763,14 +1748,10 @@ namespace DrugNameStandardizer
                 "fdb_current_wac_price"
             };
 
-            var missing = required
-                .Where(col => FindColumn(input, col) == null)
-                .ToList();
-
+            var missing = required.Where(col => FindColumn(input, col) == null).ToList();
             if (missing.Count > 0)
                 throw new Exception("Missing required pricing columns:\n- " + string.Join("\n- ", missing));
 
-            // Ensure computed columns exist (in-place)
             EnsureCol(input, "pricing_key", typeof(string));
             EnsureCol(input, "lowest_distributor", typeof(string));
             EnsureCol(input, "lowest_wholesaler_wac", typeof(double));
@@ -1793,16 +1774,12 @@ namespace DrugNameStandardizer
             var colFDB = FindColumn(input, "fdb_current_wac_price")!;
 
             int abcLowest = 0, mckLowest = 0, mdxLowest = 0, noLowest = 0;
-
-            // Histogram buckets for spread pct (ignoring null/invalid)
             int b0_5 = 0, b5_10 = 0, b10_20 = 0, b20p = 0;
 
-            // Compute per row
             for (int i = 0; i < input.Rows.Count; i++)
             {
                 var row = input.Rows[i];
 
-                // key: ndc -> crossrefkey -> row index
                 var key = (colNdc == null ? "" : (row[colNdc]?.ToString() ?? "").Trim());
                 if (string.IsNullOrWhiteSpace(key))
                     key = (colCross == null ? "" : (row[colCross]?.ToString() ?? "").Trim());
@@ -1827,7 +1804,6 @@ namespace DrugNameStandardizer
 
                 if (wholesalerVals.Count == 0)
                 {
-                    // no wholesaler pricing
                     row["lowest_distributor"] = "";
                     row["lowest_wholesaler_wac"] = DBNull.Value;
                     row["highest_wholesaler_wac"] = DBNull.Value;
@@ -1880,16 +1856,13 @@ namespace DrugNameStandardizer
                     row["fdb_vs_lowest_pct"] = DBNull.Value;
                 }
 
-                // Abnormal variance rule (default): spread_pct >= 20% OR spread_abs >= 100
                 bool abnormal = (spreadPct >= 0.20) || (spreadAbs >= 100.0);
                 row["abnormal_variance"] = abnormal;
 
-                // Count lowest dist
                 if (lowest.dist == "ABC") abcLowest++;
                 else if (lowest.dist == "MCK") mckLowest++;
                 else if (lowest.dist == "MDX") mdxLowest++;
 
-                // Histogram buckets
                 if (lowest.val > 0)
                 {
                     if (spreadPct < 0.05) b0_5++;
@@ -1899,7 +1872,6 @@ namespace DrugNameStandardizer
                 }
             }
 
-            // Build Top 25 table (largest spread_abs, tie-break by spread_pct)
             top25 = new DataTable();
             top25.Columns.Add("pricing_key", typeof(string));
             top25.Columns.Add("ndc", typeof(string));
@@ -1933,8 +1905,8 @@ namespace DrugNameStandardizer
                 var r = x.Row;
                 top25.Rows.Add(
                     r["pricing_key"]?.ToString() ?? "",
-                    FindColumn(input, "ndc") == null ? "" : (r[FindColumn(input, "ndc")!]?.ToString() ?? ""),
-                    FindColumn(input, "crossrefkey") == null ? "" : (r[FindColumn(input, "crossrefkey")!]?.ToString() ?? ""),
+                    colNdc == null ? "" : (r[colNdc]?.ToString() ?? ""),
+                    colCross == null ? "" : (r[colCross]?.ToString() ?? ""),
                     r["lowest_distributor"]?.ToString() ?? "",
                     r["lowest_wholesaler_wac"] == DBNull.Value ? 0 : Convert.ToDouble(r["lowest_wholesaler_wac"]),
                     r["highest_wholesaler_wac"] == DBNull.Value ? 0 : Convert.ToDouble(r["highest_wholesaler_wac"]),
@@ -1948,7 +1920,6 @@ namespace DrugNameStandardizer
                 );
             }
 
-            // Summary text
             var sb = new StringBuilder();
             sb.AppendLine("Cost-Savings Opportunity Finder — Summary");
             sb.AppendLine("----------------------------------------");
@@ -1977,12 +1948,9 @@ namespace DrugNameStandardizer
 
         // ==========================================================
         // NEW TOOL 2: Therapeutic Category Spend Trends
-        // - Use: etc1, etc2, AHFS_therapeutic_description
-        // - Pivot: Sum WAC by ETC_Lowest_lvl
         // ==========================================================
         private string RunTherapeuticSpendTrends(DataTable input, out DataTable trends)
         {
-            // We need ETC_Lowest_lvl and a WAC field to sum (use fdb_current_wac_price as stable baseline)
             var colEtcLowest = FindColumn(input, "ETC_Lowest_lvl");
             var colFdb = FindColumn(input, "fdb_current_wac_price");
 
@@ -1995,9 +1963,8 @@ namespace DrugNameStandardizer
             var colEtc1 = FindColumn(input, "etc1");
             var colEtc2 = FindColumn(input, "etc2");
             var colAhfs = FindColumn(input, "AHFS_therapeutic_description");
-            var colCompetition = FindColumn(input, "competition"); // optional but in your expected list
+            var colCompetition = FindColumn(input, "competition");
 
-            // Build pivot table
             trends = new DataTable();
             trends.Columns.Add("ETC_Lowest_lvl", typeof(string));
             trends.Columns.Add("ItemCount", typeof(int));
@@ -2009,23 +1976,23 @@ namespace DrugNameStandardizer
             trends.Columns.Add("Example_AHFS", typeof(string));
             trends.Columns.Add("High_Competition_Count", typeof(int));
             trends.Columns.Add("High_Competition_Pct", typeof(double));
-            trends.Columns.Add("Abnormal_Variance_Count", typeof(int));   // uses cost tool if already run
-            trends.Columns.Add("Abnormal_Variance_Pct", typeof(double));   // uses cost tool if already run
+            trends.Columns.Add("Abnormal_Variance_Count", typeof(int));
+            trends.Columns.Add("Abnormal_Variance_Pct", typeof(double));
 
             bool hasAbnormal = FindColumn(input, "abnormal_variance") != null;
 
             var groups = input.Rows.Cast<DataRow>()
                 .GroupBy(r => (r[colEtcLowest]?.ToString() ?? "").Trim())
-                .OrderByDescending(g => g.Sum(r => ParseMoneyToNullableDouble(r[colFdb]!.ToString()) ?? 0.0));
+                .OrderByDescending(g => g.Sum(r => ParseMoneyToNullableDouble(r[colFdb]?.ToString()) ?? 0.0));
 
             foreach (var g in groups)
             {
                 var key = g.Key;
                 if (string.IsNullOrWhiteSpace(key)) key = "(blank)";
 
-                var wacs = g.Select(r => ParseMoneyToNullableDouble(r[colFdb]!.ToString()))
+                var wacs = g.Select(r => ParseMoneyToNullableDouble(r[colFdb]?.ToString()))
                             .Where(v => v.HasValue)
-                            .Select(v => v.Value)
+                            .Select(v => v!.Value)
                             .ToList();
 
                 double sum = wacs.Sum();
@@ -2040,7 +2007,6 @@ namespace DrugNameStandardizer
                 int highCompCount = 0;
                 if (colCompetition != null)
                 {
-                    // "High competition classes" heuristic: competition contains "high" (case-insensitive) OR numeric >= 3
                     foreach (var r in g)
                     {
                         var v = (r[colCompetition]?.ToString() ?? "").Trim();
@@ -2070,7 +2036,6 @@ namespace DrugNameStandardizer
                 trends.Rows.Add(key, cnt, sum, avg, max, exEtc1, exEtc2, exAhfs, highCompCount, highCompPct, abnormalCount, abnormalPct);
             }
 
-            // Summary text
             var sb = new StringBuilder();
             sb.AppendLine("Therapeutic Category Spend Trends — Summary");
             sb.AppendLine("------------------------------------------");
@@ -2087,7 +2052,7 @@ namespace DrugNameStandardizer
         }
 
         // =========================
-        // Money parsing helpers (handles blanks, $, commas, strings)
+        // Money parsing helpers
         // =========================
         private static double? ParseMoneyToNullableDouble(string? s)
         {
@@ -2095,17 +2060,13 @@ namespace DrugNameStandardizer
 
             var t = s.Trim();
 
-            // common "null-ish"
             if (t.Equals("na", StringComparison.OrdinalIgnoreCase) ||
                 t.Equals("n/a", StringComparison.OrdinalIgnoreCase) ||
                 t.Equals("null", StringComparison.OrdinalIgnoreCase) ||
                 t.Equals("-", StringComparison.OrdinalIgnoreCase))
                 return null;
 
-            // remove currency and commas
             t = t.Replace("$", "").Replace(",", "").Trim();
-
-            // if it still has weird chars, strip anything except digits, dot, minus
             t = Regex.Replace(t, @"[^0-9\.\-]", "");
 
             if (string.IsNullOrWhiteSpace(t)) return null;
@@ -2113,7 +2074,6 @@ namespace DrugNameStandardizer
             if (double.TryParse(t, NumberStyles.Float, CultureInfo.InvariantCulture, out var v))
                 return v;
 
-            // fallback: current culture
             if (double.TryParse(t, NumberStyles.Float, CultureInfo.CurrentCulture, out v))
                 return v;
 
@@ -2124,7 +2084,7 @@ namespace DrugNameStandardizer
         {
             if (vals == null || vals.Count <= 1) return 0.0;
             var mean = vals.Average();
-            var var = vals.Sum(v => Math.Pow(v - mean, 2)) / (vals.Count - 1); // sample std dev
+            var var = vals.Sum(v => Math.Pow(v - mean, 2)) / (vals.Count - 1);
             return Math.Sqrt(var);
         }
 
@@ -2218,21 +2178,6 @@ namespace DrugNameStandardizer
         }
     }
 }
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
 
 
 
