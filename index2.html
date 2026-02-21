@@ -1,50 +1,7 @@
-// ===============================
-// Program.cs
-// ===============================
-using System;
-using System.Windows.Forms;
-
-namespace DrugNameStandardizer
-{
-    internal static class Program
-    {
-        [STAThread]
-        static void Main()
-        {
-            ApplicationConfiguration.Initialize();
-            Application.Run(new Form1());
-        }
-    }
-}
-
-
-
-
-
-
-
-
-
-
-
-
-// ===============================
-// Form1.cs  (UPDATED FULL CODE)
-// - Organized "ribbon-like" layout using MenuStrip + ToolStrip
-// - Search bar (Find Next + Filter + Clear Filter + Search Results tab)
-// - Tools moved into dropdown + Tools menu
-// - Adds TWO tools:
-//    1) Cost-Savings Opportunity Finder (wholesaler variability + export-ready computed columns)
-//    2) Therapeutic Category Spend Trends (pivot spend by ETC_Lowest_lvl + class insights)
-// - Keeps ALL prior functionality (library/synonyms/standardization/unknowns/variability/validation,
-//   right-click delete column, PrimaryIngredient popup, choose output columns, exports)
-// ===============================
-
 using System;
 using System.Collections.Generic;
 using System.Data;
 using System.Drawing;
-using System.Globalization;
 using System.IO;
 using System.Linq;
 using System.Text;
@@ -68,76 +25,36 @@ namespace DrugNameStandardizer
         private DataTable _variabilityTable = new DataTable();
         private DataTable _validationTable = new DataTable();
 
-        // NEW: tool outputs
-        private DataTable _costSavingsSummaryTable = new DataTable();
-        private DataTable _costSavingsTopTable = new DataTable();
-        private DataTable _spendTrendsTable = new DataTable();
-        private DataTable _searchResultsTable = new DataTable();
-
         private HashSet<string> _ingredientSet = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         private Dictionary<string, string> _synonymMap = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
 
-        // Export column selection
         private HashSet<string>? _selectedOutputColumns = null;
 
         private readonly string _dbPath = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "ingredient_library.db");
 
-        // =========================
-        // UI fields
-        // =========================
-        private MenuStrip _menu = new MenuStrip();
-        private ToolStrip _toolStrip = new ToolStrip();
-        private StatusStrip _statusStrip = new StatusStrip();
-        private ToolStripStatusLabel _statusLabel = new ToolStripStatusLabel();
-
-        private TabControl _tabs = new TabControl();
-
-        private DataGridView _gridInput = new DataGridView();
-        private DataGridView _gridLibrary = new DataGridView();
-        private DataGridView _gridSynonyms = new DataGridView();
-        private DataGridView _gridUnknowns = new DataGridView();
-        private DataGridView _gridVariability = new DataGridView();
-        private DataGridView _gridValidation = new DataGridView();
-
-        // NEW grids
-        private DataGridView _gridCostSavingsSummary = new DataGridView();
-        private DataGridView _gridCostSavingsTop = new DataGridView();
-        private DataGridView _gridSpendTrends = new DataGridView();
-        private DataGridView _gridSearchResults = new DataGridView();
-
-        // BindingSources for optional filtering
-        private BindingSource? _bsInput;
-        private BindingSource? _bsLibrary;
-        private BindingSource? _bsSynonyms;
-        private BindingSource? _bsUnknowns;
-        private BindingSource? _bsVariability;
-        private BindingSource? _bsValidation;
-        private BindingSource? _bsCostSavingsSummary;
-        private BindingSource? _bsCostSavingsTop;
-        private BindingSource? _bsSpendTrends;
-        private BindingSource? _bsSearchResults;
-
-        // Tool dropdown + search controls
-        private ToolStripComboBox _toolPicker = new ToolStripComboBox();
-        private ToolStripButton _btnRunTool = new ToolStripButton("Run");
-
-        private ToolStripTextBox _txtSearch = new ToolStripTextBox();
-        private ToolStripComboBox _searchScope = new ToolStripComboBox();
-        private ToolStripButton _btnFindNext = new ToolStripButton("Find Next");
-        private ToolStripButton _btnFilter = new ToolStripButton("Filter");
-        private ToolStripButton _btnClearFilter = new ToolStripButton("Clear Filter");
-
-        // search cursor per grid
-        private int _lastSearchRow = 0;
-        private int _lastSearchCol = 0;
+        // Search state
         private string _lastSearchText = "";
+        private int _lastFoundRow = -1;
+        private int _lastFoundCol = -1;
 
-        // View mode
-        private bool _fitColumnsToScreen = true;
+        // =========================
+        // UI references
+        // =========================
+        private ToolStripStatusLabel? _statusLabel;
 
-        // For right-click delete column
-        private ContextMenuStrip _inputHeaderMenu = new ContextMenuStrip();
-        private string? _lastRightClickedColumnName = null;
+        private TabControl? _tabs;
+
+        private DataGridView? _libraryGrid;
+        private DataGridView? _synonymsGrid;
+        private DataGridView? _inputGrid;
+        private DataGridView? _inputDetailsGrid;
+        private DataGridView? _unknownsGrid;
+        private DataGridView? _variabilityGrid;
+        private DataGridView? _validationGrid;
+
+        // Search ribbon widgets
+        private ToolStripTextBox? _searchBox;
+        private ToolStripComboBox? _searchScope;
 
         // =========================
         // Constructor
@@ -147,294 +64,308 @@ namespace DrugNameStandardizer
             InitializeComponent();
             Controls.Clear();
 
+            Width = 1500;
+            Height = 900;
             Text = "Generic Name Standardizer — Library + Synonyms + Tools";
-            StartPosition = FormStartPosition.CenterScreen;
-            WindowState = FormWindowState.Maximized;
-            MinimumSize = new Size(1200, 750);
 
-            BuildUi();
+            KeyPreview = true;
+            KeyDown += Form1_KeyDown;
 
-            // Ensure DB exists + initial load
+            // =========================
+            // MenuStrip (kept minimal; your “ribbon” is ToolStrips below)
+            // =========================
+            var menu = new MenuStrip();
+
+            var mFile = new ToolStripMenuItem("File");
+            var miOpen = new ToolStripMenuItem("Open Input Excel", null, (_, __) => UploadInputExcel()) { ShortcutKeys = Keys.Control | Keys.O };
+            var miSaveOutput = new ToolStripMenuItem("Save Output Excel", null, (_, __) => SaveOutputExcel()) { ShortcutKeys = Keys.Control | Keys.S };
+            var miExit = new ToolStripMenuItem("Exit", null, (_, __) => Close());
+            mFile.DropDownItems.Add(miOpen);
+            mFile.DropDownItems.Add(miSaveOutput);
+            mFile.DropDownItems.Add(new ToolStripSeparator());
+            mFile.DropDownItems.Add(miExit);
+
+            var mView = new ToolStripMenuItem("View");
+            var miEssential = new ToolStripMenuItem("Essential Columns (Input)", null, (_, __) =>
+            {
+                if (_inputTable != null && _inputGrid != null)
+                {
+                    ApplyInputColumnProfile(_inputTable, _inputGrid, "Essential");
+                    SetStatus("View: Essential columns applied.");
+                }
+            });
+            var miAllCols = new ToolStripMenuItem("Show All Columns (Input)", null, (_, __) =>
+            {
+                if (_inputTable != null && _inputGrid != null)
+                {
+                    ApplyInputColumnProfile(_inputTable, _inputGrid, "All");
+                    SetStatus("View: All columns shown.");
+                }
+            });
+            mView.DropDownItems.Add(miEssential);
+            mView.DropDownItems.Add(miAllCols);
+
+            var mHelp = new ToolStripMenuItem("Help");
+            var miHotkeys = new ToolStripMenuItem("Hotkeys", null, (_, __) =>
+            {
+                MessageBox.Show(
+                    "Hotkeys:\n\n" +
+                    "Ctrl+F = Focus Search\n" +
+                    "Enter (in search box) = Find Next\n" +
+                    "F3 = Find Next\n" +
+                    "Shift+F3 = Find Previous\n",
+                    "Hotkeys");
+            });
+            mHelp.DropDownItems.Add(miHotkeys);
+
+            menu.Items.AddRange(new ToolStripItem[] { mFile, mView, mHelp });
+            MainMenuStrip = menu;
+            Controls.Add(menu);
+
+            // =========================
+            // SEARCH RIBBON (ToolStrip #1) — ONLY search bar
+            // =========================
+            var searchRibbon = new ToolStrip
+            {
+                Dock = DockStyle.Top,
+                GripStyle = ToolStripGripStyle.Hidden,
+                RenderMode = ToolStripRenderMode.Professional
+            };
+
+            searchRibbon.Items.Add(new ToolStripLabel("Search:"));
+
+            _searchBox = new ToolStripTextBox
+            {
+                Width = 360,
+                AutoSize = false
+            };
+            _searchBox.KeyDown += SearchBox_KeyDown;
+
+            var btnPrev = new ToolStripButton("Prev");
+            btnPrev.Click += (_, __) => FindInActiveGrid(next: false);
+
+            var btnNext = new ToolStripButton("Next");
+            btnNext.Click += (_, __) => FindInActiveGrid(next: true);
+
+            searchRibbon.Items.Add(_searchBox);
+            searchRibbon.Items.Add(btnPrev);
+            searchRibbon.Items.Add(btnNext);
+
+            searchRibbon.Items.Add(new ToolStripSeparator());
+            searchRibbon.Items.Add(new ToolStripLabel("Scope:"));
+
+            _searchScope = new ToolStripComboBox { Width = 160, DropDownStyle = ComboBoxStyle.DropDownList };
+            _searchScope.Items.AddRange(new object[] { "Active Tab", "Input Tab Only" });
+            _searchScope.SelectedIndex = 0;
+
+            searchRibbon.Items.Add(_searchScope);
+
+            Controls.Add(searchRibbon);
+
+            // =========================
+            // TOOLS RIBBON (ToolStrip #2) — Tool dropdown + Run (green)
+            // =========================
+            var toolsRibbon = new ToolStrip
+            {
+                Dock = DockStyle.Top,
+                GripStyle = ToolStripGripStyle.Hidden,
+                RenderMode = ToolStripRenderMode.Professional
+            };
+
+            // File quick actions
+            var btnOpenExcel = new ToolStripButton("Open Excel");
+            btnOpenExcel.Click += (_, __) => UploadInputExcel();
+
+            var btnSaveExcel = new ToolStripButton("Save Output");
+            btnSaveExcel.Click += (_, __) => SaveOutputExcel();
+
+            toolsRibbon.Items.Add(btnOpenExcel);
+            toolsRibbon.Items.Add(btnSaveExcel);
+            toolsRibbon.Items.Add(new ToolStripSeparator());
+
+            toolsRibbon.Items.Add(new ToolStripLabel("Tool:"));
+
+            // Tool dropdown list (as requested)
+            var toolDropDown = new ToolStripDropDownButton("Select Tool");
+            var miAnalyzeVar = new ToolStripMenuItem("Analyze Variability", null, (_, __) => RunVariability());
+            var miValidation = new ToolStripMenuItem("Generate Validation Examples", null, (_, __) => RunValidation());
+            toolDropDown.DropDownItems.Add(miAnalyzeVar);
+            toolDropDown.DropDownItems.Add(miValidation);
+
+            toolsRibbon.Items.Add(toolDropDown);
+            toolsRibbon.Items.Add(new ToolStripSeparator());
+
+            // RUN as a GREEN button (host a real Button so BackColor works reliably)
+            var runBtn = new Button
+            {
+                Text = "RUN",
+                AutoSize = true,
+                BackColor = Color.FromArgb(0, 170, 0),
+                ForeColor = Color.White,
+                FlatStyle = FlatStyle.Flat,
+                Font = new Font("Segoe UI", 9F, FontStyle.Bold),
+                Padding = new Padding(10, 2, 10, 2)
+            };
+            runBtn.FlatAppearance.BorderSize = 0;
+            runBtn.Click += (_, __) => RunStandardization();
+
+            var runHost = new ToolStripControlHost(runBtn) { Margin = new Padding(6, 2, 6, 2) };
+            toolsRibbon.Items.Add(runHost);
+
+            Controls.Add(toolsRibbon);
+
+            // =========================
+            // StatusStrip
+            // =========================
+            var statusStrip = new StatusStrip();
+            _statusLabel = new ToolStripStatusLabel("Status: Ready");
+            statusStrip.Items.Add(_statusLabel);
+            Controls.Add(statusStrip);
+
+            // =========================
+            // Tabs + Grids
+            // =========================
+            _tabs = new TabControl
+            {
+                Dock = DockStyle.Fill
+            };
+
+            var tabLibrary = new TabPage("Library");
+            var tabSynonyms = new TabPage("Synonyms");
+            var tabInput = new TabPage("Input Data");
+            var tabUnknowns = new TabPage("Unknowns");
+            var tabVariability = new TabPage("Variability");
+            var tabValidation = new TabPage("Validation");
+
+            _tabs.TabPages.Add(tabInput);
+            _tabs.TabPages.Add(tabLibrary);
+            _tabs.TabPages.Add(tabSynonyms);
+            _tabs.TabPages.Add(tabUnknowns);
+            _tabs.TabPages.Add(tabVariability);
+            _tabs.TabPages.Add(tabValidation);
+
+            Controls.Add(_tabs);
+
+            _libraryGrid = MakeEditableGrid();
+            _synonymsGrid = MakeEditableGrid();
+            _inputGrid = MakeReadOnlyGrid();
+            _unknownsGrid = MakeEditableGrid();
+            _variabilityGrid = MakeReadOnlyGrid();
+            _validationGrid = MakeReadOnlyGrid();
+
+            // Input tab layout: SplitContainer (left grid, right row-details)
+            var split = new SplitContainer
+            {
+                Dock = DockStyle.Fill,
+                Orientation = Orientation.Vertical,
+                SplitterDistance = 1050
+            };
+
+            split.Panel1.Controls.Add(_inputGrid);
+
+            _inputDetailsGrid = new DataGridView
+            {
+                Dock = DockStyle.Fill,
+                ReadOnly = true,
+                AllowUserToAddRows = false,
+                AllowUserToDeleteRows = false,
+                RowHeadersVisible = false,
+                SelectionMode = DataGridViewSelectionMode.CellSelect,
+                MultiSelect = false,
+                AutoSizeColumnsMode = DataGridViewAutoSizeColumnsMode.Fill,
+                DefaultCellStyle = { Font = new Font("Segoe UI", 9F) },
+                ColumnHeadersDefaultCellStyle = { Font = new Font("Segoe UI", 9F, FontStyle.Bold) }
+            };
+            _inputDetailsGrid.Columns.Add("Field", "Field");
+            _inputDetailsGrid.Columns.Add("Value", "Value");
+
+            split.Panel2.Controls.Add(_inputDetailsGrid);
+            tabInput.Controls.Add(split);
+
+            tabLibrary.Controls.Add(_libraryGrid);
+            tabSynonyms.Controls.Add(_synonymsGrid);
+            tabUnknowns.Controls.Add(_unknownsGrid);
+            tabVariability.Controls.Add(_variabilityGrid);
+            tabValidation.Controls.Add(_validationGrid);
+
+            // =========================
+            // DB init + initial load
+            // =========================
             EnsureDatabase();
             LoadLibraryFromDb();
             LoadSynonymsFromDb();
 
-            BindTableToGrid(_gridLibrary, _libraryTable, ref _bsLibrary);
-            BindTableToGrid(_gridSynonyms, _synonymsTable, ref _bsSynonyms);
+            _libraryGrid.DataSource = _libraryTable;
+            _synonymsGrid.DataSource = _synonymsTable;
 
-            SetStatus("Ready");
-            UpdateEnablement();
-        }
-
-        // =========================
-        // UI construction
-        // =========================
-        private void BuildUi()
-        {
-            // ---------- MenuStrip ----------
-            _menu = new MenuStrip();
-
-            var mFile = new ToolStripMenuItem("File");
-            var miOpenInput = new ToolStripMenuItem("Open Input Excel...");
-            var miSaveOutput = new ToolStripMenuItem("Save Output Excel...");
-            var miChooseCols = new ToolStripMenuItem("Choose Output Columns...");
-            var miExportDocs = new ToolStripMenuItem("Export Documentation...");
-            var miExit = new ToolStripMenuItem("Exit");
-
-            miOpenInput.Click += (_, __) => OpenInputExcel();
-            miSaveOutput.Click += (_, __) => SaveOutputExcel();
-            miChooseCols.Click += (_, __) => ChooseOutputColumns();
-            miExportDocs.Click += (_, __) => ExportDocumentation();
-            miExit.Click += (_, __) => Close();
-
-            mFile.DropDownItems.Add(miOpenInput);
-            mFile.DropDownItems.Add(new ToolStripSeparator());
-            mFile.DropDownItems.Add(miSaveOutput);
-            mFile.DropDownItems.Add(miChooseCols);
-            mFile.DropDownItems.Add(new ToolStripSeparator());
-            mFile.DropDownItems.Add(miExportDocs);
-            mFile.DropDownItems.Add(new ToolStripSeparator());
-            mFile.DropDownItems.Add(miExit);
-
-            var mLibrary = new ToolStripMenuItem("Library");
-            var miLoadLib = new ToolStripMenuItem("Load Library");
-            var miImportLib = new ToolStripMenuItem("Import Library (Excel)...");
-            var miSaveLib = new ToolStripMenuItem("Save Library");
-            miLoadLib.Click += (_, __) => { LoadLibraryFromDb(); BindTableToGrid(_gridLibrary, _libraryTable, ref _bsLibrary); SetStatus($"Library loaded ({_libraryTable.Rows.Count})."); };
-            miImportLib.Click += (_, __) => ImportLibraryExcel();
-            miSaveLib.Click += (_, __) => { SaveIngredientsToDb(_libraryTable); LoadLibraryFromDb(); BindTableToGrid(_gridLibrary, _libraryTable, ref _bsLibrary); SetStatus($"Library saved ({_libraryTable.Rows.Count})."); };
-            mLibrary.DropDownItems.Add(miLoadLib);
-            mLibrary.DropDownItems.Add(miImportLib);
-            mLibrary.DropDownItems.Add(miSaveLib);
-
-            var mSyn = new ToolStripMenuItem("Synonyms");
-            var miLoadSyn = new ToolStripMenuItem("Load Synonyms");
-            var miImportSyn = new ToolStripMenuItem("Import Synonyms (Excel)...");
-            var miSaveSyn = new ToolStripMenuItem("Save Synonyms");
-            miLoadSyn.Click += (_, __) => { LoadSynonymsFromDb(); BindTableToGrid(_gridSynonyms, _synonymsTable, ref _bsSynonyms); SetStatus($"Synonyms loaded ({_synonymsTable.Rows.Count})."); };
-            miImportSyn.Click += (_, __) => ImportSynonymsExcel();
-            miSaveSyn.Click += (_, __) => { SaveSynonymsToDb(_synonymsTable); LoadSynonymsFromDb(); BindTableToGrid(_gridSynonyms, _synonymsTable, ref _bsSynonyms); SetStatus($"Synonyms saved ({_synonymsTable.Rows.Count})."); };
-            mSyn.DropDownItems.Add(miLoadSyn);
-            mSyn.DropDownItems.Add(miImportSyn);
-            mSyn.DropDownItems.Add(miSaveSyn);
-
-            var mTools = new ToolStripMenuItem("Tools");
-            var miRunStd = new ToolStripMenuItem("Run Standardization");
-            var miVar = new ToolStripMenuItem("Analyze Variability");
-            var miVal = new ToolStripMenuItem("Generate Validation Examples");
-            var miCost = new ToolStripMenuItem("Cost-Savings Opportunity Finder");
-            var miSpend = new ToolStripMenuItem("Therapeutic Category Spend Trends");
-
-            miRunStd.Click += (_, __) => RunStandardization();
-            miVar.Click += (_, __) => RunVariability();
-            miVal.Click += (_, __) => RunValidation();
-            miCost.Click += (_, __) => RunCostSavingsTool();
-            miSpend.Click += (_, __) => RunSpendTrendsTool();
-
-            mTools.DropDownItems.Add(miRunStd);
-            mTools.DropDownItems.Add(miVar);
-            mTools.DropDownItems.Add(miVal);
-            mTools.DropDownItems.Add(new ToolStripSeparator());
-            mTools.DropDownItems.Add(miCost);
-            mTools.DropDownItems.Add(miSpend);
-
-            var mView = new ToolStripMenuItem("View");
-            var miFit = new ToolStripMenuItem("Fit Columns to Screen") { Checked = true, CheckOnClick = true };
-            var miAutoSize = new ToolStripMenuItem("AutoSize Columns (DisplayedCells)");
-            var miClearFilterAll = new ToolStripMenuItem("Clear Filter (Active Tab)");
-            miFit.Click += (_, __) => { _fitColumnsToScreen = miFit.Checked; ApplyGridSizingMode(); };
-            miAutoSize.Click += (_, __) => { _fitColumnsToScreen = false; miFit.Checked = false; ApplyGridSizingMode(); };
-            miClearFilterAll.Click += (_, __) => ClearActiveGridFilter();
-            mView.DropDownItems.Add(miFit);
-            mView.DropDownItems.Add(miAutoSize);
-            mView.DropDownItems.Add(new ToolStripSeparator());
-            mView.DropDownItems.Add(miClearFilterAll);
-
-            var mHelp = new ToolStripMenuItem("Help");
-            var miAbout = new ToolStripMenuItem("About");
-            miAbout.Click += (_, __) => MessageBox.Show("DrugNameStandardizer\nWinForms + SQLite + ClosedXML\n\nMenu/Tool-based layout with added analytics tools.", "About");
-            mHelp.DropDownItems.Add(miAbout);
-
-            _menu.Items.AddRange(new ToolStripItem[] { mFile, mLibrary, mSyn, mTools, mView, mHelp });
-
-            // ---------- ToolStrip ("Ribbon-like" row) ----------
-            _toolStrip = new ToolStrip { GripStyle = ToolStripGripStyle.Hidden };
-
-            _toolPicker.DropDownStyle = ComboBoxStyle.DropDownList;
-            _toolPicker.Items.AddRange(new object[]
-            {
-                "Run Standardization",
-                "Analyze Variability",
-                "Generate Validation Examples",
-                "Cost-Savings Opportunity Finder",
-                "Therapeutic Category Spend Trends"
-            });
-            _toolPicker.SelectedIndex = 0;
-
-            _btnRunTool.Click += (_, __) =>
-            {
-                switch (_toolPicker.SelectedItem?.ToString())
-                {
-                    case "Run Standardization": RunStandardization(); break;
-                    case "Analyze Variability": RunVariability(); break;
-                    case "Generate Validation Examples": RunValidation(); break;
-                    case "Cost-Savings Opportunity Finder": RunCostSavingsTool(); break;
-                    case "Therapeutic Category Spend Trends": RunSpendTrendsTool(); break;
-                    default: RunStandardization(); break;
-                }
-            };
-
-            _txtSearch.AutoSize = false;
-            _txtSearch.Width = 260;
-            _txtSearch.ToolTipText = "Search text";
-
-            _searchScope.DropDownStyle = ComboBoxStyle.DropDownList;
-            _searchScope.Items.AddRange(new object[] { "Active Tab", "Input Data", "Library", "Synonyms", "Unknowns", "All" });
-            _searchScope.SelectedIndex = 0;
-
-            _btnFindNext.Click += (_, __) => FindNext();
-            _btnFilter.Click += (_, __) => ApplyFilter();
-            _btnClearFilter.Click += (_, __) => ClearActiveGridFilter();
-
-            _toolStrip.Items.Add(new ToolStripLabel("Tool:"));
-            _toolStrip.Items.Add(_toolPicker);
-            _toolStrip.Items.Add(_btnRunTool);
-            _toolStrip.Items.Add(new ToolStripSeparator());
-            _toolStrip.Items.Add(new ToolStripLabel("Search:"));
-            _toolStrip.Items.Add(_txtSearch);
-            _toolStrip.Items.Add(new ToolStripLabel("Scope:"));
-            _toolStrip.Items.Add(_searchScope);
-            _toolStrip.Items.Add(_btnFindNext);
-            _toolStrip.Items.Add(_btnFilter);
-            _toolStrip.Items.Add(_btnClearFilter);
-
-            // ---------- StatusStrip ----------
-            _statusStrip = new StatusStrip();
-            _statusLabel = new ToolStripStatusLabel("Ready");
-            _statusStrip.Items.Add(_statusLabel);
-
-            // ---------- Tabs ----------
-            _tabs = new TabControl { Dock = DockStyle.Fill };
-
-            var tabInput = new TabPage("Input Data");
-            var tabLib = new TabPage("Library");
-            var tabSyn = new TabPage("Synonyms");
-            var tabUnk = new TabPage("Unknowns");
-            var tabVar = new TabPage("Variability");
-            var tabVal = new TabPage("Validation");
-            var tabCost = new TabPage("Cost Savings");
-            var tabSpend = new TabPage("Spend Trends");
-            var tabSearch = new TabPage("Search Results");
-
-            _gridInput = MakeGrid(readOnly: true);
-            _gridLibrary = MakeGrid(readOnly: false);
-            _gridSynonyms = MakeGrid(readOnly: false);
-            _gridUnknowns = MakeGrid(readOnly: false);
-            _gridVariability = MakeGrid(readOnly: true);
-            _gridValidation = MakeGrid(readOnly: true);
-
-            _gridCostSavingsSummary = MakeGrid(readOnly: true);
-            _gridCostSavingsTop = MakeGrid(readOnly: true);
-            _gridSpendTrends = MakeGrid(readOnly: true);
-            _gridSearchResults = MakeGrid(readOnly: true);
-
-            // Cost savings tab layout: summary (top) + top opportunities (bottom)
-            var costSplit = new SplitContainer
-            {
-                Dock = DockStyle.Fill,
-                Orientation = Orientation.Horizontal,
-                SplitterDistance = 220
-            };
-            costSplit.Panel1.Controls.Add(_gridCostSavingsSummary);
-            costSplit.Panel2.Controls.Add(_gridCostSavingsTop);
-            tabCost.Controls.Add(costSplit);
-
-            tabInput.Controls.Add(_gridInput);
-            tabLib.Controls.Add(_gridLibrary);
-            tabSyn.Controls.Add(_gridSynonyms);
-            tabUnk.Controls.Add(_gridUnknowns);
-            tabVar.Controls.Add(_gridVariability);
-            tabVal.Controls.Add(_gridValidation);
-            tabSpend.Controls.Add(_gridSpendTrends);
-            tabSearch.Controls.Add(_gridSearchResults);
-
-            _tabs.TabPages.AddRange(new[]
-            {
-                tabInput, tabLib, tabSyn, tabUnk, tabVar, tabVal, tabCost, tabSpend, tabSearch
-            });
-
-            // ---------- Add to form ----------
-            Controls.Add(_tabs);
-            Controls.Add(_statusStrip);
-            Controls.Add(_toolStrip);
-            Controls.Add(_menu);
-
-            MainMenuStrip = _menu;
-
-            _menu.Dock = DockStyle.Top;
-            _toolStrip.Dock = DockStyle.Top;
-            _statusStrip.Dock = DockStyle.Bottom;
-
-            ApplyGridSizingMode();
-
-            // ---------- Keep Feature A: Right-click column header -> Delete Column (Input preview) ----------
-            _inputHeaderMenu = new ContextMenuStrip();
+            // =========================
+            // Feature A) Right-click column header -> Delete Column (Preview)
+            // =========================
+            var inputHeaderMenu = new ContextMenuStrip();
             var miDeleteColumn = new ToolStripMenuItem("Delete Column");
-            _inputHeaderMenu.Items.Add(miDeleteColumn);
+            inputHeaderMenu.Items.Add(miDeleteColumn);
 
-            _gridInput.ColumnHeaderMouseClick += (_, e) =>
+            string? lastRightClickedColumnName = null;
+
+            _inputGrid.ColumnHeaderMouseClick += (_, e) =>
             {
                 if (e.Button != MouseButtons.Right) return;
                 if (e.ColumnIndex < 0) return;
 
-                _lastRightClickedColumnName = _gridInput.Columns[e.ColumnIndex].Name;
+                lastRightClickedColumnName = _inputGrid.Columns[e.ColumnIndex].Name;
 
-                _gridInput.ClearSelection();
-                _gridInput.Columns[e.ColumnIndex].Selected = true;
+                _inputGrid.ClearSelection();
+                _inputGrid.Columns[e.ColumnIndex].Selected = true;
 
-                _inputHeaderMenu.Show(Cursor.Position);
+                inputHeaderMenu.Show(Cursor.Position);
             };
 
             miDeleteColumn.Click += (_, __) =>
             {
                 if (_inputTable == null) return;
-                if (string.IsNullOrWhiteSpace(_lastRightClickedColumnName)) return;
+                if (string.IsNullOrWhiteSpace(lastRightClickedColumnName)) return;
 
                 var protectedCols = new HashSet<string>(StringComparer.OrdinalIgnoreCase) { "generic_name" };
-                if (protectedCols.Contains(_lastRightClickedColumnName))
+
+                if (protectedCols.Contains(lastRightClickedColumnName))
                 {
-                    MessageBox.Show($"You cannot delete required column: {_lastRightClickedColumnName}", "Protected Column");
+                    MessageBox.Show($"You cannot delete required column: {lastRightClickedColumnName}", "Protected Column");
                     return;
                 }
 
-                if (!_inputTable.Columns.Contains(_lastRightClickedColumnName)) return;
+                if (!_inputTable.Columns.Contains(lastRightClickedColumnName)) return;
 
                 var confirm = MessageBox.Show(
-                    $"Delete column '{_lastRightClickedColumnName}' from the preview table?\n\nThis removes it from the current loaded data in the program.",
+                    $"Delete column '{lastRightClickedColumnName}' from the preview table?\n\nThis removes it from the current loaded data in the program.",
                     "Confirm Delete Column",
                     MessageBoxButtons.YesNo,
                     MessageBoxIcon.Warning
                 );
+
                 if (confirm != DialogResult.Yes) return;
 
-                _inputTable.Columns.Remove(_lastRightClickedColumnName);
-                _selectedOutputColumns?.Remove(_lastRightClickedColumnName);
+                _inputTable.Columns.Remove(lastRightClickedColumnName);
+                _selectedOutputColumns?.Remove(lastRightClickedColumnName);
 
-                BindTableToGrid(_gridInput, _inputTable, ref _bsInput);
-                SetStatus($"Deleted column '{_lastRightClickedColumnName}' from preview.");
+                _inputGrid.DataSource = _inputTable;
+                _inputGrid.Refresh();
+
+                SetStatus($"Deleted column '{lastRightClickedColumnName}' from preview.");
             };
 
-            // ---------- Keep Feature B: Click PrimaryIngredient cell -> popup count + unique forms ----------
-            _gridInput.CellClick += (_, e) =>
+            // =========================
+            // Feature B) Click PrimaryIngredient cell -> popup count + unique forms
+            // =========================
+            _inputGrid.CellClick += (_, e) =>
             {
                 if (e.RowIndex < 0 || e.ColumnIndex < 0) return;
                 if (_inputTable == null) return;
 
-                var clickedColName = _gridInput.Columns[e.ColumnIndex].Name;
+                var clickedColName = _inputGrid.Columns[e.ColumnIndex].Name;
                 if (!clickedColName.Equals("PrimaryIngredient", StringComparison.OrdinalIgnoreCase))
                     return;
 
-                var ingredient = _gridInput.Rows[e.RowIndex].Cells[e.ColumnIndex].Value?.ToString()?.Trim();
+                var ingredient = _inputGrid.Rows[e.RowIndex].Cells[e.ColumnIndex].Value?.ToString()?.Trim();
                 if (string.IsNullOrWhiteSpace(ingredient)) return;
 
                 var primaryCol = FindColumn(_inputTable, "PrimaryIngredient");
@@ -471,61 +402,277 @@ namespace DrugNameStandardizer
 
                 ShowBigPopup(sb.ToString(), $"Ingredient Summary — {ingredient}");
             };
-        }
 
-        private static DataGridView MakeGrid(bool readOnly)
-        {
-            return new DataGridView
+            // Row details pane update
+            _inputGrid.SelectionChanged += (_, __) =>
             {
-                Dock = DockStyle.Fill,
-                ReadOnly = readOnly,
-                AllowUserToAddRows = !readOnly,
-                AllowUserToDeleteRows = !readOnly,
-                AllowUserToOrderColumns = true,
-                SelectionMode = DataGridViewSelectionMode.CellSelect,
-                MultiSelect = false
+                if (_inputTable == null) return;
+                if (_inputDetailsGrid == null) return;
+                if (_inputGrid.CurrentRow == null) return;
+                int idx = _inputGrid.CurrentRow.Index;
+                if (idx < 0 || idx >= _inputTable.Rows.Count) return;
+
+                var row = _inputTable.Rows[idx];
+                _inputDetailsGrid.Rows.Clear();
+                foreach (DataColumn col in _inputTable.Columns)
+                {
+                    var val = row[col]?.ToString() ?? "";
+                    _inputDetailsGrid.Rows.Add(col.ColumnName, val);
+                }
             };
         }
 
-        private void ApplyGridSizingMode()
+        // =========================
+        // Ctrl+F support
+        // =========================
+        private void Form1_KeyDown(object? sender, KeyEventArgs e)
         {
-            var mode = _fitColumnsToScreen
-                ? DataGridViewAutoSizeColumnsMode.Fill
-                : DataGridViewAutoSizeColumnsMode.DisplayedCells;
+            if (e.Control && e.KeyCode == Keys.F)
+            {
+                FocusSearch();
+                e.SuppressKeyPress = true;
+                return;
+            }
 
-            foreach (var g in AllGrids())
-                g.AutoSizeColumnsMode = mode;
+            if (e.KeyCode == Keys.F3)
+            {
+                bool prev = e.Shift;
+                FindInActiveGrid(next: !prev);
+                e.SuppressKeyPress = true;
+                return;
+            }
         }
 
-        private IEnumerable<DataGridView> AllGrids()
+        private void SearchBox_KeyDown(object? sender, KeyEventArgs e)
         {
-            yield return _gridInput;
-            yield return _gridLibrary;
-            yield return _gridSynonyms;
-            yield return _gridUnknowns;
-            yield return _gridVariability;
-            yield return _gridValidation;
-            yield return _gridCostSavingsSummary;
-            yield return _gridCostSavingsTop;
-            yield return _gridSpendTrends;
-            yield return _gridSearchResults;
+            if (e.KeyCode == Keys.Enter)
+            {
+                FindInActiveGrid(next: true);
+                e.SuppressKeyPress = true;
+            }
         }
 
-        private void SetStatus(string msg)
+        private void FocusSearch()
         {
-            _statusLabel.Text = "Status: " + msg;
-        }
-
-        private void UpdateEnablement()
-        {
-            // No buttons to enable/disable; we just keep the dropdown runnable.
-            // But we can guard inside each tool method.
+            if (_searchBox == null) return;
+            _searchBox.Focus();
+            _searchBox.SelectAll();
+            SetStatus("Search: ready (Enter=Next, Shift+F3=Prev).");
         }
 
         // =========================
-        // Core actions (Menu/Tool driven)
+        // Search logic (Active tab / Input tab only)
         // =========================
-        private void OpenInputExcel()
+        private void FindInActiveGrid(bool next)
+        {
+            if (_searchBox == null || _tabs == null) return;
+
+            var term = (_searchBox.Text ?? "").Trim();
+            if (string.IsNullOrWhiteSpace(term))
+            {
+                SetStatus("Search: type something first.");
+                return;
+            }
+
+            bool scopeInputOnly = (_searchScope?.SelectedIndex ?? 0) == 1;
+
+            DataGridView? grid = null;
+            DataTable? table = null;
+
+            if (scopeInputOnly)
+            {
+                grid = _inputGrid;
+                table = _inputTable;
+            }
+            else
+            {
+                grid = GetActiveGrid();
+                table = GetActiveTableForGrid(grid);
+            }
+
+            if (grid == null || table == null)
+            {
+                SetStatus("Search: no data table available on this tab.");
+                return;
+            }
+
+            // Reset find pointer if new search term
+            if (!term.Equals(_lastSearchText, StringComparison.OrdinalIgnoreCase))
+            {
+                _lastSearchText = term;
+                _lastFoundRow = -1;
+                _lastFoundCol = -1;
+            }
+
+            bool found = FindNextInTable(grid, table, term, next);
+
+            if (!found)
+                SetStatus($"Search: '{term}' not found.");
+        }
+
+        private DataGridView? GetActiveGrid()
+        {
+            if (_tabs == null) return null;
+            if (_tabs.SelectedTab == null) return null;
+
+            // each tab contains either a single grid or split container containing _inputGrid
+            if (_tabs.SelectedTab.Text.Equals("Input Data", StringComparison.OrdinalIgnoreCase))
+                return _inputGrid;
+
+            var grids = _tabs.SelectedTab.Controls.OfType<DataGridView>().ToList();
+            return grids.Count > 0 ? grids[0] : null;
+        }
+
+        private DataTable? GetActiveTableForGrid(DataGridView? grid)
+        {
+            if (grid == null) return null;
+
+            if (grid == _inputGrid) return _inputTable;
+            if (grid == _libraryGrid) return _libraryTable;
+            if (grid == _synonymsGrid) return _synonymsTable;
+            if (grid == _unknownsGrid) return _unknownsTable;
+            if (grid == _variabilityGrid) return _variabilityTable;
+            if (grid == _validationGrid) return _validationTable;
+
+            return null;
+        }
+
+        private bool FindNextInTable(DataGridView grid, DataTable table, string term, bool next)
+        {
+            // Search visible columns only (so it matches what user sees)
+            var visibleCols = grid.Columns
+                .Cast<DataGridViewColumn>()
+                .Where(c => c.Visible)
+                .OrderBy(c => c.DisplayIndex)
+                .Select(c => c.Name)
+                .ToList();
+
+            if (visibleCols.Count == 0)
+                visibleCols = table.Columns.Cast<DataColumn>().Select(c => c.ColumnName).ToList();
+
+            int rowStart = _lastFoundRow;
+            int colStart = _lastFoundCol;
+
+            // Starting position
+            int r = rowStart;
+            int c = colStart;
+
+            if (r < 0 || c < 0)
+            {
+                r = 0;
+                c = -1;
+            }
+
+            if (next)
+            {
+                for (int rr = r; rr < table.Rows.Count; rr++)
+                {
+                    int ccStart = (rr == r) ? c + 1 : 0;
+                    for (int cc = ccStart; cc < visibleCols.Count; cc++)
+                    {
+                        var colName = visibleCols[cc];
+                        if (!table.Columns.Contains(colName)) continue;
+
+                        var val = table.Rows[rr][colName]?.ToString() ?? "";
+                        if (val.IndexOf(term, StringComparison.OrdinalIgnoreCase) >= 0)
+                        {
+                            SelectGridCell(grid, rr, colName);
+                            _lastFoundRow = rr;
+                            _lastFoundCol = cc;
+                            SetStatus($"Search: found '{term}' at row {rr + 1}, column '{colName}'.");
+                            return true;
+                        }
+                    }
+                }
+
+                // Wrap
+                for (int rr = 0; rr <= r; rr++)
+                {
+                    for (int cc = 0; cc < visibleCols.Count; cc++)
+                    {
+                        if (rr == r && cc >= c) break;
+
+                        var colName = visibleCols[cc];
+                        if (!table.Columns.Contains(colName)) continue;
+
+                        var val = table.Rows[rr][colName]?.ToString() ?? "";
+                        if (val.IndexOf(term, StringComparison.OrdinalIgnoreCase) >= 0)
+                        {
+                            SelectGridCell(grid, rr, colName);
+                            _lastFoundRow = rr;
+                            _lastFoundCol = cc;
+                            SetStatus($"Search: found '{term}' at row {rr + 1}, column '{colName}' (wrapped).");
+                            return true;
+                        }
+                    }
+                }
+            }
+            else
+            {
+                for (int rr = r; rr >= 0; rr--)
+                {
+                    int ccStart = (rr == r) ? c - 1 : visibleCols.Count - 1;
+                    for (int cc = ccStart; cc >= 0; cc--)
+                    {
+                        var colName = visibleCols[cc];
+                        if (!table.Columns.Contains(colName)) continue;
+
+                        var val = table.Rows[rr][colName]?.ToString() ?? "";
+                        if (val.IndexOf(term, StringComparison.OrdinalIgnoreCase) >= 0)
+                        {
+                            SelectGridCell(grid, rr, colName);
+                            _lastFoundRow = rr;
+                            _lastFoundCol = cc;
+                            SetStatus($"Search: found '{term}' at row {rr + 1}, column '{colName}'.");
+                            return true;
+                        }
+                    }
+                }
+
+                // Wrap
+                for (int rr = table.Rows.Count - 1; rr >= r; rr--)
+                {
+                    for (int cc = visibleCols.Count - 1; cc >= 0; cc--)
+                    {
+                        if (rr == r && cc <= c) break;
+
+                        var colName = visibleCols[cc];
+                        if (!table.Columns.Contains(colName)) continue;
+
+                        var val = table.Rows[rr][colName]?.ToString() ?? "";
+                        if (val.IndexOf(term, StringComparison.OrdinalIgnoreCase) >= 0)
+                        {
+                            SelectGridCell(grid, rr, colName);
+                            _lastFoundRow = rr;
+                            _lastFoundCol = cc;
+                            SetStatus($"Search: found '{term}' at row {rr + 1}, column '{colName}' (wrapped).");
+                            return true;
+                        }
+                    }
+                }
+            }
+
+            return false;
+        }
+
+        private static void SelectGridCell(DataGridView grid, int rowIndex, string colName)
+        {
+            if (rowIndex < 0 || rowIndex >= grid.Rows.Count) return;
+            if (!grid.Columns.Contains(colName)) return;
+
+            int colIndex = grid.Columns[colName].Index;
+
+            grid.ClearSelection();
+            grid.CurrentCell = grid.Rows[rowIndex].Cells[colIndex];
+            grid.Rows[rowIndex].Selected = true;
+
+            grid.FirstDisplayedScrollingRowIndex = Math.Max(0, rowIndex - 3);
+        }
+
+        // =========================
+        // Actions: Open / Run / Save / Reports
+        // =========================
+        private void UploadInputExcel()
         {
             using var ofd = new OpenFileDialog { Filter = "Excel Files (*.xlsx)|*.xlsx", Title = "Select Input Excel" };
             if (ofd.ShowDialog() != DialogResult.OK) return;
@@ -533,134 +680,20 @@ namespace DrugNameStandardizer
             try
             {
                 _inputTable = LoadFirstSheetToDataTable(ofd.FileName);
-                BindTableToGrid(_gridInput, _inputTable, ref _bsInput);
+                if (_inputGrid != null) _inputGrid.DataSource = _inputTable;
+
+                // Default column profile: Essential
+                if (_inputTable != null && _inputGrid != null)
+                    ApplyInputColumnProfile(_inputTable, _inputGrid, "Essential");
 
                 _selectedOutputColumns = null;
-                _unknownsTable = new DataTable();
-                _variabilityTable = new DataTable();
-                _validationTable = new DataTable();
-                _costSavingsSummaryTable = new DataTable();
-                _costSavingsTopTable = new DataTable();
-                _spendTrendsTable = new DataTable();
 
-                SetStatus($"Input loaded ({_inputTable.Rows.Count} rows). Right-click column header to delete preview columns.");
-                _tabs.SelectedIndex = 0; // Input
+                _tabs?.SelectTab(0);
+                SetStatus($"Input loaded ({_inputTable.Rows.Count} rows). Ctrl+F to search.");
             }
             catch (Exception ex)
             {
                 MessageBox.Show(ex.Message, "Input Load Error");
-            }
-        }
-
-        private void ChooseOutputColumns()
-        {
-            if (_inputTable == null)
-            {
-                MessageBox.Show("Upload an input Excel file first.");
-                return;
-            }
-
-            var allCols = _inputTable.Columns.Cast<DataColumn>().Select(c => c.ColumnName).ToList();
-
-            if (_selectedOutputColumns == null)
-                _selectedOutputColumns = new HashSet<string>(allCols, StringComparer.OrdinalIgnoreCase);
-
-            using var dlg = new ColumnPickerDialog(allCols, _selectedOutputColumns);
-            if (dlg.ShowDialog() == DialogResult.OK)
-            {
-                _selectedOutputColumns = dlg.SelectedColumns;
-                SetStatus($"Output columns selected ({_selectedOutputColumns.Count} columns).");
-            }
-        }
-
-        private void SaveOutputExcel()
-        {
-            if (_inputTable == null)
-            {
-                MessageBox.Show("No input loaded.");
-                return;
-            }
-
-            using var sfd = new SaveFileDialog
-            {
-                Filter = "Excel Files (*.xlsx)|*.xlsx",
-                Title = "Save Output",
-                FileName = "output.xlsx"
-            };
-            if (sfd.ShowDialog() != DialogResult.OK) return;
-
-            try
-            {
-                DataTable toSave = _inputTable;
-
-                if (_selectedOutputColumns != null)
-                    toSave = CreateFilteredTable(_inputTable, _selectedOutputColumns);
-
-                SaveDataTableToExcel(toSave, sfd.FileName);
-                SetStatus($"Output saved -> {sfd.FileName}");
-            }
-            catch (Exception ex)
-            {
-                MessageBox.Show(ex.Message, "Save Output Error");
-            }
-        }
-
-        private void ExportDocumentation()
-        {
-            using var sfd = new SaveFileDialog
-            {
-                Filter = "Text Files (*.txt)|*.txt",
-                Title = "Save Documentation",
-                FileName = "Standardization_Documentation.txt"
-            };
-            if (sfd.ShowDialog() != DialogResult.OK) return;
-
-            try
-            {
-                File.WriteAllText(sfd.FileName, BuildDocumentationText(), Encoding.UTF8);
-                SetStatus($"Documentation exported -> {sfd.FileName}");
-            }
-            catch (Exception ex)
-            {
-                MessageBox.Show(ex.Message, "Export Documentation Error");
-            }
-        }
-
-        private void ImportLibraryExcel()
-        {
-            using var ofd = new OpenFileDialog { Filter = "Excel Files (*.xlsx)|*.xlsx", Title = "Select Ingredient Library Excel" };
-            if (ofd.ShowDialog() != DialogResult.OK) return;
-
-            try
-            {
-                int added = ImportIngredientsFromExcel(ofd.FileName);
-                LoadLibraryFromDb();
-                BindTableToGrid(_gridLibrary, _libraryTable, ref _bsLibrary);
-                SetStatus($"Imported ingredients. Added {added}. Total {_libraryTable.Rows.Count}.");
-                _tabs.SelectedTab = _tabs.TabPages["Library"] ?? _tabs.TabPages[1];
-            }
-            catch (Exception ex)
-            {
-                MessageBox.Show(ex.Message, "Import Library Error");
-            }
-        }
-
-        private void ImportSynonymsExcel()
-        {
-            using var ofd = new OpenFileDialog { Filter = "Excel Files (*.xlsx)|*.xlsx", Title = "Select Synonyms Excel" };
-            if (ofd.ShowDialog() != DialogResult.OK) return;
-
-            try
-            {
-                int added = ImportSynonymsFromExcel(ofd.FileName);
-                LoadSynonymsFromDb();
-                BindTableToGrid(_gridSynonyms, _synonymsTable, ref _bsSynonyms);
-                SetStatus($"Imported synonyms. Added {added}. Total {_synonymsTable.Rows.Count}.");
-                _tabs.SelectedTab = _tabs.TabPages["Synonyms"] ?? _tabs.TabPages[2];
-            }
-            catch (Exception ex)
-            {
-                MessageBox.Show(ex.Message, "Import Synonyms Error");
             }
         }
 
@@ -686,11 +719,10 @@ namespace DrugNameStandardizer
             }
 
             EnsureOutputColumns(_inputTable);
+            BuildUnknownsTableSchema();
 
             SetStatus("Standardizing...");
             Application.DoEvents();
-
-            BuildUnknownsTableSchema();
 
             int unknownCount = 0;
 
@@ -711,8 +743,8 @@ namespace DrugNameStandardizer
                 }
             }
 
-            BindTableToGrid(_gridInput, _inputTable, ref _bsInput);
-            BindTableToGrid(_gridUnknowns, _unknownsTable, ref _bsUnknowns);
+            if (_inputGrid != null) _inputGrid.Refresh();
+            if (_unknownsGrid != null) _unknownsGrid.DataSource = _unknownsTable;
 
             _selectedOutputColumns = new HashSet<string>(
                 _inputTable.Columns.Cast<DataColumn>().Select(c => c.ColumnName),
@@ -721,635 +753,69 @@ namespace DrugNameStandardizer
 
             LogRun(_inputTable.Rows.Count, unknownCount);
 
-            SetStatus($"Done. Unknowns: {unknownCount}. Click PrimaryIngredient cell for popup.");
-            _tabs.SelectedIndex = 0;
+            SetStatus($"Done. Unknowns: {unknownCount}. Click PrimaryIngredient for popup. Ctrl+F to search.");
         }
 
         private void RunVariability()
         {
-            if (_inputTable == null) { MessageBox.Show("Load input first."); return; }
+            if (_inputTable == null)
+            {
+                MessageBox.Show("Upload an input Excel file first.");
+                return;
+            }
 
             _variabilityTable = BuildVariabilityReport(_inputTable);
-            BindTableToGrid(_gridVariability, _variabilityTable, ref _bsVariability);
+            if (_variabilityGrid != null) _variabilityGrid.DataSource = _variabilityTable;
 
             SetStatus($"Variability report created ({_variabilityTable.Rows.Count} ingredients).");
-            _tabs.SelectedTab = _tabs.TabPages["Variability"] ?? _tabs.TabPages[4];
+            _tabs?.SelectTab("Variability");
         }
 
         private void RunValidation()
         {
-            if (_inputTable == null) { MessageBox.Show("Load input first."); return; }
+            if (_inputTable == null)
+            {
+                MessageBox.Show("Upload an input Excel file first.");
+                return;
+            }
 
             _validationTable = BuildValidationExamples(_inputTable, topIngredients: 20, examplesPerIngredient: 10);
-            BindTableToGrid(_gridValidation, _validationTable, ref _bsValidation);
+            if (_validationGrid != null) _validationGrid.DataSource = _validationTable;
 
             SetStatus($"Validation examples created ({_validationTable.Rows.Count} rows).");
-            _tabs.SelectedTab = _tabs.TabPages["Validation"] ?? _tabs.TabPages[5];
+            _tabs?.SelectTab("Validation");
         }
 
-        // =========================
-        // NEW TOOL 1: Cost-Savings Opportunity Finder
-        // =========================
-        private void RunCostSavingsTool()
+        private void SaveOutputExcel()
         {
             if (_inputTable == null)
             {
-                MessageBox.Show("Load input first.");
+                MessageBox.Show("No input loaded.");
                 return;
             }
 
-            var required = new[]
+            using var sfd = new SaveFileDialog
             {
-                "Vizient_ABC_WAC",
-                "Vizient_MCK_WAC",
-                "Vizient_MDX_WAC",
-                "fdb_current_wac_price"
+                Filter = "Excel Files (*.xlsx)|*.xlsx",
+                Title = "Save Output",
+                FileName = "standardized_output.xlsx"
             };
+            if (sfd.ShowDialog() != DialogResult.OK) return;
 
-            var missing = required.Where(c => FindColumn(_inputTable, c) == null).ToList();
-            if (missing.Count > 0)
+            try
             {
-                MessageBox.Show("Missing required pricing columns:\n\n" + string.Join("\n", missing), "Cost-Savings Tool: Validation Error");
-                return;
+                DataTable toSave = _inputTable;
+
+                if (_selectedOutputColumns != null)
+                    toSave = CreateFilteredTable(_inputTable, _selectedOutputColumns);
+
+                SaveDataTableToExcel(toSave, sfd.FileName);
+                SetStatus($"Output saved -> {sfd.FileName}");
             }
-
-            // Ensure computed columns exist
-            EnsureCol(_inputTable, "pricing_item_key", typeof(string));
-            EnsureCol(_inputTable, "lowest_distributor", typeof(string));
-            EnsureCol(_inputTable, "lowest_wholesaler_wac", typeof(decimal));
-            EnsureCol(_inputTable, "highest_wholesaler_wac", typeof(decimal));
-            EnsureCol(_inputTable, "wholesaler_spread_abs", typeof(decimal));
-            EnsureCol(_inputTable, "wholesaler_spread_pct", typeof(decimal));
-            EnsureCol(_inputTable, "wholesaler_avg_wac", typeof(decimal));
-            EnsureCol(_inputTable, "wholesaler_std_wac", typeof(decimal));
-            EnsureCol(_inputTable, "fdb_vs_lowest_abs", typeof(decimal));
-            EnsureCol(_inputTable, "fdb_vs_lowest_pct", typeof(decimal));
-            EnsureCol(_inputTable, "abnormal_variance", typeof(bool));
-            EnsureCol(_inputTable, "incomplete_wholesaler_pricing", typeof(bool));
-
-            // Add computed columns into selection by default (if user already chose columns)
-            AddNewColumnsToSelectionIfAny(_inputTable, new[]
+            catch (Exception ex)
             {
-                "pricing_item_key","lowest_distributor","lowest_wholesaler_wac","highest_wholesaler_wac",
-                "wholesaler_spread_abs","wholesaler_spread_pct","wholesaler_avg_wac","wholesaler_std_wac",
-                "fdb_vs_lowest_abs","fdb_vs_lowest_pct","abnormal_variance","incomplete_wholesaler_pricing"
-            });
-
-            SetStatus("Running Cost-Savings Opportunity Finder...");
-            Application.DoEvents();
-
-            var colNdc = FindColumn(_inputTable, "ndc");
-            var colCross = FindColumn(_inputTable, "crossrefkey");
-
-            var cABC = FindColumn(_inputTable, "Vizient_ABC_WAC")!;
-            var cMCK = FindColumn(_inputTable, "Vizient_MCK_WAC")!;
-            var cMDX = FindColumn(_inputTable, "Vizient_MDX_WAC")!;
-            var cFDB = FindColumn(_inputTable, "fdb_current_wac_price")!;
-
-            int lowestABC = 0, lowestMCK = 0, lowestMDX = 0;
-
-            // histogram buckets
-            int b0_5 = 0, b5_10 = 0, b10_20 = 0, b20p = 0;
-
-            // build an in-memory list for top 25
-            var opportunities = new List<(int RowIndex, decimal SpreadAbs, decimal SpreadPct)>();
-
-            for (int i = 0; i < _inputTable.Rows.Count; i++)
-            {
-                var r = _inputTable.Rows[i];
-
-                string key = GetRowKey(r, i, colNdc, colCross);
-                r["pricing_item_key"] = key;
-
-                var abc = ParseMoneyToDecimal(r[cABC]?.ToString());
-                var mck = ParseMoneyToDecimal(r[cMCK]?.ToString());
-                var mdx = ParseMoneyToDecimal(r[cMDX]?.ToString());
-                var fdb = ParseMoneyToDecimal(r[cFDB]?.ToString());
-
-                var values = new List<(string Dist, decimal Val)>();
-                if (abc.HasValue) values.Add(("ABC", abc.Value));
-                if (mck.HasValue) values.Add(("MCK", mck.Value));
-                if (mdx.HasValue) values.Add(("MDX", mdx.Value));
-
-                bool anyPresent = values.Count > 0;
-                bool incomplete = anyPresent && (values.Count < 3);
-
-                r["incomplete_wholesaler_pricing"] = incomplete;
-
-                if (!anyPresent)
-                {
-                    // nothing to compute
-                    r["lowest_distributor"] = "";
-                    r["lowest_wholesaler_wac"] = 0m;
-                    r["highest_wholesaler_wac"] = 0m;
-                    r["wholesaler_spread_abs"] = 0m;
-                    r["wholesaler_spread_pct"] = 0m;
-                    r["wholesaler_avg_wac"] = 0m;
-                    r["wholesaler_std_wac"] = 0m;
-                    r["fdb_vs_lowest_abs"] = 0m;
-                    r["fdb_vs_lowest_pct"] = 0m;
-                    r["abnormal_variance"] = false;
-                    continue;
-                }
-
-                var lowest = values.OrderBy(x => x.Val).First();
-                var highest = values.OrderByDescending(x => x.Val).First();
-
-                decimal spreadAbs = highest.Val - lowest.Val;
-                decimal spreadPct = SafePct(spreadAbs, lowest.Val);
-
-                decimal avg = values.Average(x => x.Val);
-                decimal std = StdDev(values.Select(x => x.Val).ToList());
-
-                decimal fdbVsLowestAbs = (fdb ?? 0m) - lowest.Val;
-                decimal fdbVsLowestPct = SafePct(fdbVsLowestAbs, lowest.Val);
-
-                r["lowest_distributor"] = lowest.Dist;
-                r["lowest_wholesaler_wac"] = lowest.Val;
-                r["highest_wholesaler_wac"] = highest.Val;
-                r["wholesaler_spread_abs"] = spreadAbs;
-                r["wholesaler_spread_pct"] = spreadPct;
-                r["wholesaler_avg_wac"] = avg;
-                r["wholesaler_std_wac"] = std;
-                r["fdb_vs_lowest_abs"] = fdbVsLowestAbs;
-                r["fdb_vs_lowest_pct"] = fdbVsLowestPct;
-
-                // Abnormal variance rule (default):
-                // TRUE if spread_pct >= 0.20 OR spread_abs >= 100
-                bool abnormal = (spreadPct >= 0.20m) || (spreadAbs >= 100m);
-                r["abnormal_variance"] = abnormal;
-
-                // lowest distributor counts
-                if (lowest.Dist == "ABC") lowestABC++;
-                else if (lowest.Dist == "MCK") lowestMCK++;
-                else if (lowest.Dist == "MDX") lowestMDX++;
-
-                // buckets
-                if (spreadPct < 0.05m) b0_5++;
-                else if (spreadPct < 0.10m) b5_10++;
-                else if (spreadPct < 0.20m) b10_20++;
-                else b20p++;
-
-                opportunities.Add((i, spreadAbs, spreadPct));
+                MessageBox.Show(ex.Message, "Save Output Error");
             }
-
-            // summary table
-            _costSavingsSummaryTable = new DataTable();
-            _costSavingsSummaryTable.Columns.Add("Metric", typeof(string));
-            _costSavingsSummaryTable.Columns.Add("Value", typeof(string));
-
-            _costSavingsSummaryTable.Rows.Add("Lowest distributor count — ABC", lowestABC.ToString());
-            _costSavingsSummaryTable.Rows.Add("Lowest distributor count — MCK", lowestMCK.ToString());
-            _costSavingsSummaryTable.Rows.Add("Lowest distributor count — MDX", lowestMDX.ToString());
-            _costSavingsSummaryTable.Rows.Add("Spread % bucket — 0–5%", b0_5.ToString());
-            _costSavingsSummaryTable.Rows.Add("Spread % bucket — 5–10%", b5_10.ToString());
-            _costSavingsSummaryTable.Rows.Add("Spread % bucket — 10–20%", b10_20.ToString());
-            _costSavingsSummaryTable.Rows.Add("Spread % bucket — >20%", b20p.ToString());
-            _costSavingsSummaryTable.Rows.Add("Abnormal variance rule", "TRUE if spread_pct >= 20% OR spread_abs >= 100");
-            _costSavingsSummaryTable.Rows.Add("Incomplete wholesaler pricing flag", "TRUE if at least one wholesaler WAC missing while others present");
-
-            // top 25 opportunities
-            _costSavingsTopTable = BuildTopOpportunitiesTable(_inputTable, opportunities, topN: 25);
-
-            // bind
-            BindTableToGrid(_gridCostSavingsSummary, _costSavingsSummaryTable, ref _bsCostSavingsSummary);
-            BindTableToGrid(_gridCostSavingsTop, _costSavingsTopTable, ref _bsCostSavingsTop);
-
-            // refresh input view (new columns exist)
-            BindTableToGrid(_gridInput, _inputTable, ref _bsInput);
-
-            SetStatus("Cost-Savings Opportunity Finder complete. (Computed columns added to input + top opportunities tab updated.)");
-            _tabs.SelectedTab = _tabs.TabPages["Cost Savings"] ?? _tabs.TabPages[6];
-        }
-
-        private static DataTable BuildTopOpportunitiesTable(DataTable input, List<(int RowIndex, decimal SpreadAbs, decimal SpreadPct)> opportunities, int topN)
-        {
-            var dt = new DataTable();
-            dt.Columns.Add("pricing_item_key", typeof(string));
-            dt.Columns.Add("ndc", typeof(string));
-            dt.Columns.Add("crossrefkey", typeof(string));
-            dt.Columns.Add("generic_name", typeof(string));
-            dt.Columns.Add("lowest_distributor", typeof(string));
-            dt.Columns.Add("lowest_wholesaler_wac", typeof(decimal));
-            dt.Columns.Add("highest_wholesaler_wac", typeof(decimal));
-            dt.Columns.Add("wholesaler_spread_abs", typeof(decimal));
-            dt.Columns.Add("wholesaler_spread_pct", typeof(decimal));
-            dt.Columns.Add("fdb_current_wac_price", typeof(string));
-            dt.Columns.Add("fdb_vs_lowest_abs", typeof(decimal));
-            dt.Columns.Add("fdb_vs_lowest_pct", typeof(decimal));
-            dt.Columns.Add("abnormal_variance", typeof(bool));
-            dt.Columns.Add("incomplete_wholesaler_pricing", typeof(bool));
-            dt.Columns.Add("row_index", typeof(int));
-
-            var ranked = opportunities
-                .OrderByDescending(x => x.SpreadAbs)
-                .ThenByDescending(x => x.SpreadPct)
-                .Take(topN)
-                .ToList();
-
-            var cKey = FindColumn(input, "pricing_item_key");
-            var cNdc = FindColumn(input, "ndc");
-            var cCross = FindColumn(input, "crossrefkey");
-            var cGen = FindColumn(input, "generic_name");
-
-            foreach (var x in ranked)
-            {
-                var r = input.Rows[x.RowIndex];
-
-                dt.Rows.Add(
-                    cKey == null ? "" : (r[cKey]?.ToString() ?? ""),
-                    cNdc == null ? "" : (r[cNdc]?.ToString() ?? ""),
-                    cCross == null ? "" : (r[cCross]?.ToString() ?? ""),
-                    cGen == null ? "" : (r[cGen]?.ToString() ?? ""),
-                    r["lowest_distributor"]?.ToString() ?? "",
-                    r.Field<decimal>("lowest_wholesaler_wac"),
-                    r.Field<decimal>("highest_wholesaler_wac"),
-                    r.Field<decimal>("wholesaler_spread_abs"),
-                    r.Field<decimal>("wholesaler_spread_pct"),
-                    r["fdb_current_wac_price"]?.ToString() ?? "",
-                    r.Field<decimal>("fdb_vs_lowest_abs"),
-                    r.Field<decimal>("fdb_vs_lowest_pct"),
-                    r.Field<bool>("abnormal_variance"),
-                    r.Field<bool>("incomplete_wholesaler_pricing"),
-                    x.RowIndex
-                );
-            }
-
-            return dt;
-        }
-
-        // =========================
-        // NEW TOOL 2: Therapeutic Category Spend Trends
-        // Use: etc1, etc2, AHFS_therapeutic_description
-        // Pivot: Sum WAC by ETC_Lowest_lvl
-        // Insight: most costly classes, inflation risk proxy, competition proxy
-        // =========================
-        private void RunSpendTrendsTool()
-        {
-            if (_inputTable == null)
-            {
-                MessageBox.Show("Load input first.");
-                return;
-            }
-
-            var cEtcLowest = FindColumn(_inputTable, "ETC_Lowest_lvl");
-            var cFdbWac = FindColumn(_inputTable, "fdb_current_wac_price");
-            if (cEtcLowest == null || cFdbWac == null)
-            {
-                MessageBox.Show("Spend Trends requires columns:\n\n- ETC_Lowest_lvl\n- fdb_current_wac_price", "Spend Trends: Validation Error");
-                return;
-            }
-
-            var cEtc1 = FindColumn(_inputTable, "etc1");
-            var cEtc2 = FindColumn(_inputTable, "etc2");
-            var cAhfs = FindColumn(_inputTable, "ahfs_therapeutic_description");
-            var cComp = FindColumn(_inputTable, "competition");
-            var cMfr = FindColumn(_inputTable, "manufacturer_vizient");
-            var cWacChangeDate = FindColumn(_inputTable, "fdb_last_wac_price_change_date");
-
-            SetStatus("Running Therapeutic Category Spend Trends...");
-            Application.DoEvents();
-
-            // compute rows with parsed WAC
-            var rows = _inputTable.Rows.Cast<DataRow>()
-                .Select(r => new
-                {
-                    EtcLowest = (r[cEtcLowest]?.ToString() ?? "").Trim(),
-                    Wac = ParseMoneyToDecimal(r[cFdbWac]?.ToString()) ?? 0m,
-                    Etc1 = cEtc1 == null ? "" : (r[cEtc1]?.ToString() ?? "").Trim(),
-                    Etc2 = cEtc2 == null ? "" : (r[cEtc2]?.ToString() ?? "").Trim(),
-                    Ahfs = cAhfs == null ? "" : (r[cAhfs]?.ToString() ?? "").Trim(),
-                    Competition = cComp == null ? (decimal?)null : ParseMoneyToDecimal(r[cComp]?.ToString()), // may not be money; still parses numbers
-                    Mfr = cMfr == null ? "" : (r[cMfr]?.ToString() ?? "").Trim(),
-                    LastChange = cWacChangeDate == null ? (DateTime?)null : TryParseDate(r[cWacChangeDate]?.ToString())
-                })
-                .Where(x => !string.IsNullOrWhiteSpace(x.EtcLowest))
-                .ToList();
-
-            var groups = rows
-                .GroupBy(x => x.EtcLowest, StringComparer.OrdinalIgnoreCase)
-                .Select(g =>
-                {
-                    var total = g.Sum(x => x.Wac);
-                    var count = g.Count();
-                    var avg = count == 0 ? 0m : total / count;
-
-                    // "High competition classes" proxy:
-                    // - prefer unique manufacturers count if available
-                    var uniqMfr = g.Select(x => x.Mfr).Where(s => !string.IsNullOrWhiteSpace(s)).Distinct(StringComparer.OrdinalIgnoreCase).Count();
-                    bool highCompetition = uniqMfr >= 5;
-
-                    // Inflation risk proxy:
-                    // - proportion of items with WAC change date within 90 days
-                    int withDate = g.Count(x => x.LastChange.HasValue);
-                    int recent90 = g.Count(x => x.LastChange.HasValue && (DateTime.Today - x.LastChange.Value.Date).TotalDays <= 90);
-                    decimal recentPct = withDate == 0 ? 0m : (decimal)recent90 / withDate;
-                    string inflationRisk =
-                        recentPct >= 0.50m ? "High" :
-                        recentPct >= 0.20m ? "Moderate" :
-                        "Low";
-
-                    string topEtc1 = Mode(g.Select(x => x.Etc1));
-                    string topEtc2 = Mode(g.Select(x => x.Etc2));
-                    string topAhfs = Mode(g.Select(x => x.Ahfs));
-
-                    return new
-                    {
-                        EtcLowest = g.Key,
-                        ItemCount = count,
-                        TotalWac = total,
-                        AvgWac = avg,
-                        UniqueManufacturers = uniqMfr,
-                        HighCompetition = highCompetition,
-                        InflationRisk = inflationRisk,
-                        RecentWacChangePct = recentPct,
-                        TopEtc1 = topEtc1,
-                        TopEtc2 = topEtc2,
-                        TopAhfs = topAhfs
-                    };
-                })
-                .OrderByDescending(x => x.TotalWac)
-                .ToList();
-
-            _spendTrendsTable = new DataTable();
-            _spendTrendsTable.Columns.Add("ETC_Lowest_lvl", typeof(string));
-            _spendTrendsTable.Columns.Add("ItemCount", typeof(int));
-            _spendTrendsTable.Columns.Add("Total_WAC", typeof(decimal));
-            _spendTrendsTable.Columns.Add("Avg_WAC", typeof(decimal));
-            _spendTrendsTable.Columns.Add("UniqueManufacturers", typeof(int));
-            _spendTrendsTable.Columns.Add("HighCompetitionClass", typeof(bool));
-            _spendTrendsTable.Columns.Add("InflationRisk", typeof(string));
-            _spendTrendsTable.Columns.Add("RecentWacChangePct_90d", typeof(decimal));
-            _spendTrendsTable.Columns.Add("Top_etc1", typeof(string));
-            _spendTrendsTable.Columns.Add("Top_etc2", typeof(string));
-            _spendTrendsTable.Columns.Add("Top_AHFS_therapeutic_description", typeof(string));
-
-            foreach (var g in groups)
-            {
-                _spendTrendsTable.Rows.Add(
-                    g.EtcLowest,
-                    g.ItemCount,
-                    g.TotalWac,
-                    g.AvgWac,
-                    g.UniqueManufacturers,
-                    g.HighCompetition,
-                    g.InflationRisk,
-                    g.RecentWacChangePct,
-                    g.TopEtc1,
-                    g.TopEtc2,
-                    g.TopAhfs
-                );
-            }
-
-            BindTableToGrid(_gridSpendTrends, _spendTrendsTable, ref _bsSpendTrends);
-
-            SetStatus($"Spend Trends ready (groups: {_spendTrendsTable.Rows.Count}).");
-            _tabs.SelectedTab = _tabs.TabPages["Spend Trends"] ?? _tabs.TabPages[7];
-        }
-
-        private static string Mode(IEnumerable<string> values)
-        {
-            var best = values
-                .Where(x => !string.IsNullOrWhiteSpace(x))
-                .GroupBy(x => x.Trim(), StringComparer.OrdinalIgnoreCase)
-                .OrderByDescending(g => g.Count())
-                .Select(g => g.Key)
-                .FirstOrDefault();
-            return best ?? "";
-        }
-
-        // =========================
-        // Search / Filter
-        // =========================
-        private DataGridView? GetActiveGrid()
-        {
-            var tab = _tabs.SelectedTab?.Text ?? "";
-            return tab switch
-            {
-                "Input Data" => _gridInput,
-                "Library" => _gridLibrary,
-                "Synonyms" => _gridSynonyms,
-                "Unknowns" => _gridUnknowns,
-                "Variability" => _gridVariability,
-                "Validation" => _gridValidation,
-                "Cost Savings" => _gridCostSavingsTop,
-                "Spend Trends" => _gridSpendTrends,
-                "Search Results" => _gridSearchResults,
-                _ => _gridInput
-            };
-        }
-
-        private void FindNext()
-        {
-            var q = (_txtSearch.Text ?? "").Trim();
-            if (string.IsNullOrWhiteSpace(q)) return;
-
-            var scope = _searchScope.SelectedItem?.ToString() ?? "Active Tab";
-            if (scope == "All")
-            {
-                BuildSearchResults(q, searchAllTabs: true);
-                return;
-            }
-
-            if (scope != "Active Tab")
-            {
-                BuildSearchResults(q, searchAllTabs: false, forcedScope: scope);
-                return;
-            }
-
-            var grid = GetActiveGrid();
-            if (grid == null || grid.Rows.Count == 0) return;
-
-            if (!string.Equals(_lastSearchText, q, StringComparison.OrdinalIgnoreCase))
-            {
-                _lastSearchText = q;
-                _lastSearchRow = 0;
-                _lastSearchCol = 0;
-            }
-
-            for (int r = _lastSearchRow; r < grid.Rows.Count; r++)
-            {
-                for (int c = (r == _lastSearchRow ? _lastSearchCol : 0); c < grid.Columns.Count; c++)
-                {
-                    var val = grid.Rows[r].Cells[c].Value?.ToString() ?? "";
-                    if (val.IndexOf(q, StringComparison.OrdinalIgnoreCase) >= 0)
-                    {
-                        grid.ClearSelection();
-                        grid.CurrentCell = grid.Rows[r].Cells[c];
-                        grid.Rows[r].Cells[c].Selected = true;
-                        grid.FirstDisplayedScrollingRowIndex = Math.Max(0, r - 3);
-
-                        _lastSearchRow = r;
-                        _lastSearchCol = c + 1;
-                        if (_lastSearchCol >= grid.Columns.Count) { _lastSearchRow = r + 1; _lastSearchCol = 0; }
-                        SetStatus($"Found in '{_tabs.SelectedTab?.Text}': row {r + 1}, col '{grid.Columns[c].Name}'.");
-                        return;
-                    }
-                }
-            }
-
-            // wrap
-            _lastSearchRow = 0;
-            _lastSearchCol = 0;
-            SetStatus("No more matches (wrapped to start).");
-        }
-
-        private void ApplyFilter()
-        {
-            var q = (_txtSearch.Text ?? "").Trim();
-            if (string.IsNullOrWhiteSpace(q)) return;
-
-            var scope = _searchScope.SelectedItem?.ToString() ?? "Active Tab";
-            if (scope == "All")
-            {
-                BuildSearchResults(q, searchAllTabs: true);
-                return;
-            }
-
-            if (scope != "Active Tab")
-            {
-                BuildSearchResults(q, searchAllTabs: false, forcedScope: scope);
-                return;
-            }
-
-            var grid = GetActiveGrid();
-            if (grid == null) return;
-
-            var bs = GetBindingSourceForGrid(grid);
-            if (bs == null) return;
-
-            if (bs.DataSource is DataTable dt)
-            {
-                // OR across all columns (string-safe)
-                string escaped = q.Replace("'", "''");
-                var parts = new List<string>();
-
-                foreach (DataColumn col in dt.Columns)
-                {
-                    // bracket column names for safety
-                    parts.Add($"CONVERT([{col.ColumnName}], 'System.String') LIKE '%{escaped}%'");
-                }
-
-                if (parts.Count == 0) return;
-
-                try
-                {
-                    bs.Filter = string.Join(" OR ", parts);
-                    SetStatus($"Filter applied on '{_tabs.SelectedTab?.Text}': contains \"{q}\"");
-                }
-                catch
-                {
-                    // if filter fails due to special chars, fallback to search results
-                    BuildSearchResults(q, searchAllTabs: false, forcedScope: "Active Tab");
-                }
-            }
-        }
-
-        private void ClearActiveGridFilter()
-        {
-            var grid = GetActiveGrid();
-            if (grid == null) return;
-
-            var bs = GetBindingSourceForGrid(grid);
-            if (bs == null) return;
-
-            bs.RemoveFilter();
-            SetStatus($"Filter cleared on '{_tabs.SelectedTab?.Text}'.");
-        }
-
-        private BindingSource? GetBindingSourceForGrid(DataGridView grid)
-        {
-            if (ReferenceEquals(grid, _gridInput)) return _bsInput;
-            if (ReferenceEquals(grid, _gridLibrary)) return _bsLibrary;
-            if (ReferenceEquals(grid, _gridSynonyms)) return _bsSynonyms;
-            if (ReferenceEquals(grid, _gridUnknowns)) return _bsUnknowns;
-            if (ReferenceEquals(grid, _gridVariability)) return _bsVariability;
-            if (ReferenceEquals(grid, _gridValidation)) return _bsValidation;
-            if (ReferenceEquals(grid, _gridCostSavingsSummary)) return _bsCostSavingsSummary;
-            if (ReferenceEquals(grid, _gridCostSavingsTop)) return _bsCostSavingsTop;
-            if (ReferenceEquals(grid, _gridSpendTrends)) return _bsSpendTrends;
-            if (ReferenceEquals(grid, _gridSearchResults)) return _bsSearchResults;
-            return null;
-        }
-
-        private void BuildSearchResults(string q, bool searchAllTabs, string? forcedScope = null)
-        {
-            _searchResultsTable = new DataTable();
-            _searchResultsTable.Columns.Add("Tab", typeof(string));
-            _searchResultsTable.Columns.Add("RowIndex", typeof(int));
-            _searchResultsTable.Columns.Add("Column", typeof(string));
-            _searchResultsTable.Columns.Add("Value", typeof(string));
-
-            void SearchTable(string tabName, DataTable? dt)
-            {
-                if (dt == null) return;
-                for (int r = 0; r < dt.Rows.Count; r++)
-                {
-                    for (int c = 0; c < dt.Columns.Count; c++)
-                    {
-                        var val = dt.Rows[r][c]?.ToString() ?? "";
-                        if (val.IndexOf(q, StringComparison.OrdinalIgnoreCase) >= 0)
-                            _searchResultsTable.Rows.Add(tabName, r + 1, dt.Columns[c].ColumnName, val);
-                    }
-                }
-            }
-
-            if (searchAllTabs)
-            {
-                SearchTable("Input Data", _inputTable);
-                SearchTable("Library", _libraryTable);
-                SearchTable("Synonyms", _synonymsTable);
-                SearchTable("Unknowns", _unknownsTable);
-                SearchTable("Variability", _variabilityTable);
-                SearchTable("Validation", _validationTable);
-                SearchTable("Cost Savings (Summary)", _costSavingsSummaryTable);
-                SearchTable("Cost Savings (Top)", _costSavingsTopTable);
-                SearchTable("Spend Trends", _spendTrendsTable);
-            }
-            else
-            {
-                switch (forcedScope)
-                {
-                    case "Input Data": SearchTable("Input Data", _inputTable); break;
-                    case "Library": SearchTable("Library", _libraryTable); break;
-                    case "Synonyms": SearchTable("Synonyms", _synonymsTable); break;
-                    case "Unknowns": SearchTable("Unknowns", _unknownsTable); break;
-                    case "Active Tab":
-                    default:
-                        {
-                            var tabName = _tabs.SelectedTab?.Text ?? "Active Tab";
-                            var dt = tabName switch
-                            {
-                                "Input Data" => _inputTable,
-                                "Library" => _libraryTable,
-                                "Synonyms" => _synonymsTable,
-                                "Unknowns" => _unknownsTable,
-                                "Variability" => _variabilityTable,
-                                "Validation" => _validationTable,
-                                "Cost Savings" => _costSavingsTopTable,
-                                "Spend Trends" => _spendTrendsTable,
-                                _ => _inputTable
-                            };
-                            SearchTable(tabName, dt);
-                            break;
-                        }
-                }
-            }
-
-            BindTableToGrid(_gridSearchResults, _searchResultsTable, ref _bsSearchResults);
-            SetStatus($"Search Results: {_searchResultsTable.Rows.Count} match(es) for \"{q}\".");
-            _tabs.SelectedTab = _tabs.TabPages["Search Results"] ?? _tabs.TabPages[8];
-        }
-
-        // =========================
-        // Binding helper
-        // =========================
-        private static void BindTableToGrid(DataGridView grid, DataTable dt, ref BindingSource? bs)
-        {
-            bs ??= new BindingSource();
-            bs.DataSource = dt;
-            grid.DataSource = bs;
-            grid.Refresh();
         }
 
         // =========================
@@ -1386,6 +852,94 @@ namespace DrugNameStandardizer
             f.Controls.Add(box);
             f.Controls.Add(btn);
             f.ShowDialog(this);
+        }
+
+        private void SetStatus(string text)
+        {
+            if (_statusLabel != null) _statusLabel.Text = "Status: " + text;
+        }
+
+        // =========================
+        // UI helpers
+        // =========================
+        private static DataGridView MakeEditableGrid()
+        {
+            var g = new DataGridView
+            {
+                Dock = DockStyle.Fill,
+                AutoSizeColumnsMode = DataGridViewAutoSizeColumnsMode.Fill,
+                AllowUserToAddRows = true,
+                AllowUserToDeleteRows = true,
+                AllowUserToOrderColumns = true,
+                RowHeadersVisible = false,
+                SelectionMode = DataGridViewSelectionMode.FullRowSelect,
+                MultiSelect = false,
+                DefaultCellStyle = { Font = new Font("Segoe UI", 9F) },
+                ColumnHeadersDefaultCellStyle = { Font = new Font("Segoe UI", 9F, FontStyle.Bold) },
+                AllowUserToResizeRows = false,
+                RowTemplate = { Height = 26 },
+                ScrollBars = ScrollBars.Both
+            };
+            return g;
+        }
+
+        private static DataGridView MakeReadOnlyGrid()
+        {
+            var g = new DataGridView
+            {
+                Dock = DockStyle.Fill,
+                ReadOnly = true,
+                AutoSizeColumnsMode = DataGridViewAutoSizeColumnsMode.Fill,
+                AllowUserToOrderColumns = true,
+                RowHeadersVisible = false,
+                SelectionMode = DataGridViewSelectionMode.FullRowSelect,
+                MultiSelect = false,
+                DefaultCellStyle = { Font = new Font("Segoe UI", 9F) },
+                ColumnHeadersDefaultCellStyle = { Font = new Font("Segoe UI", 9F, FontStyle.Bold) },
+                AllowUserToResizeRows = false,
+                RowTemplate = { Height = 26 },
+                ScrollBars = ScrollBars.Both
+            };
+            return g;
+        }
+
+        private static void ApplyInputColumnProfile(DataTable dt, DataGridView grid, string profile)
+        {
+            var essential = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
+            {
+                "ndc",
+                "generic_name",
+                "PrimaryIngredient",
+                "RuleApplied",
+                "Vizient_ABC_WAC",
+                "Vizient_MCK_WAC",
+                "Vizient_MDX_WAC",
+                "fdb_current_wac_price",
+                "etc1",
+                "etc2",
+                "AHFS_therapeutic_description",
+                "ETC_Lowest_lvl"
+            };
+
+            bool showAll = profile.Equals("All", StringComparison.OrdinalIgnoreCase);
+
+            foreach (DataGridViewColumn col in grid.Columns)
+            {
+                col.Visible = showAll || essential.Contains(col.Name);
+            }
+
+            FreezeIfExists(grid, "ndc");
+            FreezeIfExists(grid, "generic_name");
+            FreezeIfExists(grid, "PrimaryIngredient");
+        }
+
+        private static void FreezeIfExists(DataGridView grid, string colName)
+        {
+            var col = grid.Columns
+                .Cast<DataGridViewColumn>()
+                .FirstOrDefault(c => c.Name.Equals(colName, StringComparison.OrdinalIgnoreCase));
+
+            if (col != null) col.Frozen = true;
         }
 
         // =========================
@@ -1464,89 +1018,6 @@ namespace DrugNameStandardizer
             }
         }
 
-        private void SaveIngredientsToDb(DataTable table)
-        {
-            var names = table.Rows
-                .Cast<DataRow>()
-                .Select(r => (r["Name"]?.ToString() ?? "").Trim())
-                .Where(n => !string.IsNullOrWhiteSpace(n))
-                .Distinct(StringComparer.OrdinalIgnoreCase)
-                .ToList();
-
-            using var conn = new SqliteConnection($"Data Source={_dbPath}");
-            conn.Open();
-            using var tx = conn.BeginTransaction();
-
-            using (var del = conn.CreateCommand())
-            {
-                del.CommandText = "DELETE FROM Ingredients;";
-                del.ExecuteNonQuery();
-            }
-
-            foreach (var name in names)
-            {
-                var norm = NormalizeIngredient(name);
-                if (string.IsNullOrWhiteSpace(norm)) continue;
-
-                using var ins = conn.CreateCommand();
-                ins.CommandText = "INSERT INTO Ingredients (Name, Normalized) VALUES ($n, $nn);";
-                ins.Parameters.AddWithValue("$n", name);
-                ins.Parameters.AddWithValue("$nn", norm);
-                ins.ExecuteNonQuery();
-            }
-
-            tx.Commit();
-        }
-
-        private int ImportIngredientsFromExcel(string path)
-        {
-            using var wb = new XLWorkbook(path);
-            var ws = wb.Worksheets.First();
-            var range = ws.RangeUsed();
-            if (range == null) throw new Exception("The ingredient library Excel is empty.");
-
-            var headerRow = range.FirstRowUsed();
-            var headers = headerRow.CellsUsed().Select(c => c.GetString().Trim().ToLowerInvariant()).ToList();
-
-            int nameIndex = headers.FindIndex(h => h == "ingredient_name" || h == "name" || h == "ingredient");
-            if (nameIndex < 0) throw new Exception("Library Excel must have a header column: ingredient_name (or name/ingredient).");
-
-            int added = 0;
-
-            using var conn = new SqliteConnection($"Data Source={_dbPath}");
-            conn.Open();
-            using var tx = conn.BeginTransaction();
-
-            var firstDataRowNumber = headerRow.RowNumber() + 1;
-            var lastRowNumber = range.LastRowUsed().RowNumber();
-
-            for (int r = firstDataRowNumber; r <= lastRowNumber; r++)
-            {
-                var name = ws.Row(r).Cell(nameIndex + 1).GetValue<string>()?.Trim();
-                if (string.IsNullOrWhiteSpace(name)) continue;
-
-                var norm = NormalizeIngredient(name);
-                if (string.IsNullOrWhiteSpace(norm)) continue;
-
-                using var cmd = conn.CreateCommand();
-                cmd.CommandText = "INSERT OR IGNORE INTO Ingredients (Name, Normalized) VALUES ($n, $nn);";
-                cmd.Parameters.AddWithValue("$n", name);
-                cmd.Parameters.AddWithValue("$nn", norm);
-
-                var before = GetChangesCount(conn);
-                cmd.ExecuteNonQuery();
-                var after = GetChangesCount(conn);
-
-                if (after > before) added++;
-            }
-
-            tx.Commit();
-            return added;
-        }
-
-        // =========================
-        // Synonyms: Load / Save / Import
-        // =========================
         private void LoadSynonymsFromDb()
         {
             _synonymsTable = new DataTable();
@@ -1577,118 +1048,6 @@ namespace DrugNameStandardizer
                 if (!string.IsNullOrWhiteSpace(normPattern) && !string.IsNullOrWhiteSpace(normMapsTo))
                     _synonymMap[normPattern] = normMapsTo;
             }
-        }
-
-        private void SaveSynonymsToDb(DataTable table)
-        {
-            var rows = table.Rows
-                .Cast<DataRow>()
-                .Select(r => new
-                {
-                    Pattern = (r["Pattern"]?.ToString() ?? "").Trim(),
-                    MapsTo = (r["MapsToIngredient"]?.ToString() ?? "").Trim(),
-                    Source = (r.Table.Columns.Contains("Source") ? (r["Source"]?.ToString() ?? "manual").Trim() : "manual")
-                })
-                .Where(x => !string.IsNullOrWhiteSpace(x.Pattern) && !string.IsNullOrWhiteSpace(x.MapsTo))
-                .ToList();
-
-            using var conn = new SqliteConnection($"Data Source={_dbPath}");
-            conn.Open();
-            using var tx = conn.BeginTransaction();
-
-            using (var del = conn.CreateCommand())
-            {
-                del.CommandText = "DELETE FROM Synonyms;";
-                del.ExecuteNonQuery();
-            }
-
-            foreach (var row in rows)
-            {
-                var normPattern = NormalizeIngredient(row.Pattern);
-                var normMapsTo = NormalizeIngredient(row.MapsTo);
-
-                if (string.IsNullOrWhiteSpace(normPattern) || string.IsNullOrWhiteSpace(normMapsTo)) continue;
-
-                using var ins = conn.CreateCommand();
-                ins.CommandText =
-                    "INSERT INTO Synonyms (Pattern, NormalizedPattern, MapsToIngredient, NormalizedMapsTo, Source) " +
-                    "VALUES ($p, $np, $m, $nm, $s);";
-                ins.Parameters.AddWithValue("$p", row.Pattern);
-                ins.Parameters.AddWithValue("$np", normPattern);
-                ins.Parameters.AddWithValue("$m", row.MapsTo);
-                ins.Parameters.AddWithValue("$nm", normMapsTo);
-                ins.Parameters.AddWithValue("$s", string.IsNullOrWhiteSpace(row.Source) ? "manual" : row.Source);
-
-                ins.ExecuteNonQuery();
-            }
-
-            tx.Commit();
-        }
-
-        private int ImportSynonymsFromExcel(string path)
-        {
-            using var wb = new XLWorkbook(path);
-            var ws = wb.Worksheets.First();
-            var range = ws.RangeUsed();
-            if (range == null) throw new Exception("Synonyms Excel is empty.");
-
-            var headerRow = range.FirstRowUsed();
-            var headers = headerRow.CellsUsed().Select(c => c.GetString().Trim().ToLowerInvariant()).ToList();
-
-            int patternIndex = headers.FindIndex(h => h == "pattern" || h == "synonym" || h == "alias");
-            int mapsToIndex = headers.FindIndex(h => h == "mapstoingredient" || h == "mapsto" || h == "ingredient" || h == "target");
-            int sourceIndex = headers.FindIndex(h => h == "source");
-
-            if (patternIndex < 0 || mapsToIndex < 0)
-                throw new Exception("Synonyms Excel must have columns: Pattern and MapsToIngredient.");
-
-            int added = 0;
-
-            using var conn = new SqliteConnection($"Data Source={_dbPath}");
-            conn.Open();
-            using var tx = conn.BeginTransaction();
-
-            var firstDataRowNumber = headerRow.RowNumber() + 1;
-            var lastRowNumber = range.LastRowUsed().RowNumber();
-
-            for (int r = firstDataRowNumber; r <= lastRowNumber; r++)
-            {
-                var pattern = ws.Row(r).Cell(patternIndex + 1).GetValue<string>()?.Trim();
-                var mapsTo = ws.Row(r).Cell(mapsToIndex + 1).GetValue<string>()?.Trim();
-                var source = sourceIndex >= 0 ? ws.Row(r).Cell(sourceIndex + 1).GetValue<string>()?.Trim() : "import";
-
-                if (string.IsNullOrWhiteSpace(pattern) || string.IsNullOrWhiteSpace(mapsTo)) continue;
-
-                var normPattern = NormalizeIngredient(pattern);
-                var normMapsTo = NormalizeIngredient(mapsTo);
-                if (string.IsNullOrWhiteSpace(normPattern) || string.IsNullOrWhiteSpace(normMapsTo)) continue;
-
-                using var cmd = conn.CreateCommand();
-                cmd.CommandText =
-                    "INSERT OR IGNORE INTO Synonyms (Pattern, NormalizedPattern, MapsToIngredient, NormalizedMapsTo, Source) " +
-                    "VALUES ($p, $np, $m, $nm, $s);";
-                cmd.Parameters.AddWithValue("$p", pattern);
-                cmd.Parameters.AddWithValue("$np", normPattern);
-                cmd.Parameters.AddWithValue("$m", mapsTo);
-                cmd.Parameters.AddWithValue("$nm", normMapsTo);
-                cmd.Parameters.AddWithValue("$s", string.IsNullOrWhiteSpace(source) ? "import" : source);
-
-                var before = GetChangesCount(conn);
-                cmd.ExecuteNonQuery();
-                var after = GetChangesCount(conn);
-
-                if (after > before) added++;
-            }
-
-            tx.Commit();
-            return added;
-        }
-
-        private static long GetChangesCount(SqliteConnection conn)
-        {
-            using var cmd = conn.CreateCommand();
-            cmd.CommandText = "SELECT changes();";
-            return (long)cmd.ExecuteScalar();
         }
 
         // =========================
@@ -1733,7 +1092,6 @@ namespace DrugNameStandardizer
                 return result;
             }
 
-            // Combo detection
             var parts = SplitComboParts(genericName);
             if (parts.Count >= 2)
             {
@@ -1789,7 +1147,6 @@ namespace DrugNameStandardizer
                 return result;
             }
 
-            // 1) Synonym match
             var syn = LongestMatch(cleaned, synonymMap.Keys);
             if (!string.IsNullOrWhiteSpace(syn))
             {
@@ -1800,7 +1157,6 @@ namespace DrugNameStandardizer
                 return result;
             }
 
-            // 2) Ingredient longest match
             var ing = LongestMatch(cleaned, ingredientSet);
             if (!string.IsNullOrWhiteSpace(ing))
             {
@@ -1810,7 +1166,6 @@ namespace DrugNameStandardizer
                 return result;
             }
 
-            // 3) Insulin fallback
             if (cleaned.Contains("insulin"))
             {
                 result.PrimaryIngredient = "insulin";
@@ -1819,7 +1174,6 @@ namespace DrugNameStandardizer
                 return result;
             }
 
-            // 4) Non-drug heuristic
             if (!ContainsDrugLikeToken(cleaned))
             {
                 result.PrimaryIngredient = "NON_DRUG";
@@ -1827,7 +1181,6 @@ namespace DrugNameStandardizer
                 return result;
             }
 
-            // 5) Unknown
             result.RuleApplied = "UNKNOWN_NO_MATCH";
             result.IsUnknown = true;
             result.SuggestedIngredient = SuggestIngredient(cleaned, ingredientSet);
@@ -1926,10 +1279,8 @@ namespace DrugNameStandardizer
                  .Replace(")", " ")
                  .Replace("-", " ");
 
-            // remove "U-100" style
             s = Regex.Replace(s, @"\bu\s*[-]?\s*\d+\b", " ");
 
-            // remove strengths/units
             s = Regex.Replace(s, @"\b\d+(\.\d+)?\s*(mg|mcg|g|gram|grams|ml|mL|l|meq|units|iu|%)\b", " ");
             s = Regex.Replace(s, @"\b\d+(\.\d+)?\s*(mg\/ml|mg\/mL|mcg\/ml|g\/l|mg\/g)\b", " ");
 
@@ -2083,46 +1434,6 @@ namespace DrugNameStandardizer
         }
 
         // =========================
-        // Documentation
-        // =========================
-        private string BuildDocumentationText()
-        {
-            var sb = new StringBuilder();
-
-            sb.AppendLine("Project: Standardizing Generic Drug Names to Identify Primary Active Ingredient");
-            sb.AppendLine("Generated by: DrugNameStandardizer (WinForms + SQLite + ClosedXML)");
-            sb.AppendLine($"Generated on: {DateTime.Now}");
-            sb.AppendLine();
-
-            sb.AppendLine("Approach Summary");
-            sb.AppendLine("- Input: Excel sheet with 'generic_name'.");
-            sb.AppendLine("- Output: PrimaryIngredient, AllIngredients, RuleApplied, NormalizedGeneric.");
-            sb.AppendLine("- Method: normalization (remove packaging/strength/salts) + synonym mapping + longest n-gram match to Ingredient Library.");
-            sb.AppendLine("- Combo products: split on '/', '+', 'and'; AllIngredients keeps all; PrimaryIngredient is first.");
-            sb.AppendLine("- Unknown capture: saved into Unknowns tab with suggestion.");
-            sb.AppendLine();
-
-            sb.AppendLine("Validation/Reporting");
-            sb.AppendLine("- Variability report: ingredient frequency and # unique variants.");
-            sb.AppendLine("- Validation examples: before/after examples for high-variability ingredients.");
-            sb.AppendLine();
-
-            sb.AppendLine("Analytics Tools");
-            sb.AppendLine("- Cost-Savings Opportunity Finder: compares Vizient wholesaler WAC (ABC/MCK/MDX) vs FDB WAC, computes spread and flags abnormal variance.");
-            sb.AppendLine("- Therapeutic Category Spend Trends: pivots Sum WAC by ETC_Lowest_lvl and shows top classes + competition/inflation-risk proxies.");
-            sb.AppendLine();
-
-            sb.AppendLine("Usability");
-            sb.AppendLine("- Menu/Tool layout: File/Library/Synonyms/Tools/View.");
-            sb.AppendLine("- Search bar: Find Next + Filter + Search Results tab.");
-            sb.AppendLine("- Click PrimaryIngredient cell => popup with count + unique generic_name forms (no duplicates).");
-            sb.AppendLine("- Right-click a column header in Input Data => Delete Column (generic_name protected).");
-            sb.AppendLine("- Choose Output Columns => export only what user wants.");
-
-            return sb.ToString();
-        }
-
-        // =========================
         // Output columns
         // =========================
         private static void EnsureOutputColumns(DataTable dt)
@@ -2143,16 +1454,6 @@ namespace DrugNameStandardizer
         {
             return dt.Columns.Cast<DataColumn>()
                 .FirstOrDefault(c => string.Equals(c.ColumnName, name, StringComparison.OrdinalIgnoreCase));
-        }
-
-        private void AddNewColumnsToSelectionIfAny(DataTable dt, IEnumerable<string> cols)
-        {
-            if (_selectedOutputColumns == null) return;
-            foreach (var c in cols)
-            {
-                if (dt.Columns.Contains(c))
-                    _selectedOutputColumns.Add(c);
-            }
         }
 
         // =========================
@@ -2209,7 +1510,7 @@ namespace DrugNameStandardizer
                     k++;
                 }
 
-                dt.Columns.Add(name); // default type object/string; numeric computed cols will be added later
+                dt.Columns.Add(name);
             }
 
             var firstDataRowNumber = headerRow.RowNumber() + 1;
@@ -2242,206 +1543,11 @@ namespace DrugNameStandardizer
             for (int r = 0; r < dt.Rows.Count; r++)
             {
                 for (int c = 0; c < dt.Columns.Count; c++)
-                {
-                    var v = dt.Rows[r][c];
-                    var cell = ws.Cell(r + 2, c + 1);
-
-                    if (v == null || v == DBNull.Value)
-                    {
-                        cell.Value = "";
-                    }
-                    else if (v is decimal dec)
-                    {
-                        cell.Value = dec;
-                    }
-                    else if (v is double dbl)
-                    {
-                        cell.Value = dbl;
-                    }
-                    else if (v is int i32)
-                    {
-                        cell.Value = i32;
-                    }
-                    else if (v is long i64)
-                    {
-                        cell.Value = i64;
-                    }
-                    else if (v is bool b)
-                    {
-                        cell.Value = b;
-                    }
-                    else if (v is DateTime dtv)
-                    {
-                        cell.Value = dtv;
-                    }
-                    else
-                    {
-                        cell.Value = v.ToString() ?? "";
-                    }
-                }
+                    ws.Cell(r + 2, c + 1).Value = dt.Rows[r][c]?.ToString() ?? "";
             }
 
             ws.Columns().AdjustToContents();
             wb.SaveAs(path);
         }
-
-        // =========================
-        // Helpers for pricing parsing + stats
-        // =========================
-        private static decimal? ParseMoneyToDecimal(string? raw)
-        {
-            if (string.IsNullOrWhiteSpace(raw)) return null;
-
-            var s = raw.Trim();
-
-            // handle parentheses negatives: (123.45)
-            bool neg = false;
-            if (s.StartsWith("(") && s.EndsWith(")"))
-            {
-                neg = true;
-                s = s.Substring(1, s.Length - 2);
-            }
-
-            s = s.Replace("$", "").Replace(",", "").Trim();
-
-            // allow plain numeric
-            if (!decimal.TryParse(s, NumberStyles.Any, CultureInfo.InvariantCulture, out var val))
-            {
-                // try current culture as fallback
-                if (!decimal.TryParse(s, NumberStyles.Any, CultureInfo.CurrentCulture, out val))
-                    return null;
-            }
-
-            if (neg) val = -val;
-            return val;
-        }
-
-        private static decimal SafePct(decimal numerator, decimal denominator)
-        {
-            if (denominator == 0m) return 0m;
-            return numerator / denominator;
-        }
-
-        private static decimal StdDev(List<decimal> vals)
-        {
-            if (vals == null || vals.Count <= 1) return 0m;
-            decimal mean = vals.Average();
-            decimal var = 0m;
-            foreach (var v in vals)
-            {
-                var diff = v - mean;
-                var += diff * diff;
-            }
-            var /= (vals.Count - 1); // sample std dev
-            return (decimal)Math.Sqrt((double)var);
-        }
-
-        private static DateTime? TryParseDate(string? s)
-        {
-            if (string.IsNullOrWhiteSpace(s)) return null;
-            if (DateTime.TryParse(s, out var d)) return d;
-            return null;
-        }
-
-        private static string GetRowKey(DataRow r, int index, DataColumn? colNdc, DataColumn? colCross)
-        {
-            string ndc = colNdc == null ? "" : (r[colNdc]?.ToString() ?? "").Trim();
-            if (!string.IsNullOrWhiteSpace(ndc)) return ndc;
-
-            string cross = colCross == null ? "" : (r[colCross]?.ToString() ?? "").Trim();
-            if (!string.IsNullOrWhiteSpace(cross)) return cross;
-
-            return $"ROW_{index + 1}";
-        }
-
-        // =========================
-        // Column picker dialog
-        // =========================
-        private class ColumnPickerDialog : Form
-        {
-            private readonly CheckedListBox _list = new CheckedListBox();
-            private readonly Button _ok = new Button();
-            private readonly Button _cancel = new Button();
-            private readonly Button _selectAll = new Button();
-            private readonly Button _selectNone = new Button();
-
-            public HashSet<string> SelectedColumns { get; private set; }
-
-            public ColumnPickerDialog(List<string> allColumns, HashSet<string> currentlySelected)
-            {
-                Text = "Choose Output Columns";
-                Width = 520;
-                Height = 520;
-                StartPosition = FormStartPosition.CenterParent;
-
-                _list.Left = 15;
-                _list.Top = 15;
-                _list.Width = 470;
-                _list.Height = 380;
-                _list.CheckOnClick = true;
-
-                foreach (var c in allColumns)
-                {
-                    bool isChecked = currentlySelected.Contains(c);
-                    _list.Items.Add(c, isChecked);
-                }
-
-                _selectAll.Text = "Select All";
-                _selectAll.Left = 15; _selectAll.Top = 405; _selectAll.Width = 110; _selectAll.Height = 30;
-
-                _selectNone.Text = "Select None";
-                _selectNone.Left = 135; _selectNone.Top = 405; _selectNone.Width = 110; _selectNone.Height = 30;
-
-                _ok.Text = "OK";
-                _ok.Left = 295; _ok.Top = 405; _ok.Width = 90; _ok.Height = 30;
-
-                _cancel.Text = "Cancel";
-                _cancel.Left = 395; _cancel.Top = 405; _cancel.Width = 90; _cancel.Height = 30;
-
-                _selectAll.Click += (_, __) =>
-                {
-                    for (int i = 0; i < _list.Items.Count; i++)
-                        _list.SetItemChecked(i, true);
-                };
-
-                _selectNone.Click += (_, __) =>
-                {
-                    for (int i = 0; i < _list.Items.Count; i++)
-                        _list.SetItemChecked(i, false);
-                };
-
-                _ok.Click += (_, __) =>
-                {
-                    var selected = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-                    foreach (var item in _list.CheckedItems)
-                        selected.Add(item.ToString() ?? "");
-
-                    if (selected.Count == 0)
-                    {
-                        MessageBox.Show("Please select at least one column.");
-                        return;
-                    }
-
-                    SelectedColumns = selected;
-                    DialogResult = DialogResult.OK;
-                    Close();
-                };
-
-                _cancel.Click += (_, __) =>
-                {
-                    DialogResult = DialogResult.Cancel;
-                    Close();
-                };
-
-                Controls.Add(_list);
-                Controls.Add(_selectAll);
-                Controls.Add(_selectNone);
-                Controls.Add(_ok);
-                Controls.Add(_cancel);
-
-                SelectedColumns = new HashSet<string>(currentlySelected, StringComparer.OrdinalIgnoreCase);
-            }
-        }
     }
 }
-
