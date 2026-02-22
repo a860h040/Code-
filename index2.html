@@ -1,144 +1,111 @@
-Slide 1 — Title (0:30)
+Slide 29 — Interactive Workshop (10 minutes)
 
-Speaker notes:
-“Hi everyone, I’m Alhamza. Today’s learner-led discussion is on forecasting pharmacy spend in a volatile market using Vizient’s Spend Management Outlook and Drug Budget Forecast. We’ll focus on what drives volatility, what a practical forecast workflow looks like, what ‘good’ accuracy means, and how Vizient could enhance these tools.”
+Breakout or group chat activity:
+“Design the perfect forecasting dashboard for APPE students to use.”
 
-Slide 2 — Session Goals (1:00)
+Ask them to choose:
 
-Speaker notes:
-“By the end, you’ll be able to explain why pharmacy budgets miss, walk through a simple forecasting workflow, define what success looks like for forecast accuracy, and think through the pros and cons of benchmarking forecast accuracy across hospitals. I’ll also ask a few interactive questions along the way.”
+3 KPIs
 
-Slide 4 — Interactive Poll #1 (1:30 total including answers)
+2 alerts
 
-Speaker notes:
-“Quick warm-up: what do you think causes the biggest pharmacy budget miss—shortages, launches, mix/site-of-care shifts, contract changes, or utilization growth? Raise your hand or call out your pick. No wrong answers—this just tells me where you’re starting from.”
+1 scenario button
 
-(Let them answer ~45–60 seconds, then transition.)
-“Nice—today we’ll build a way to capture all of these.”
+1 ‘variance story’ output
 
-Slide 5 — Baseline Knowledge (1:30)
+You collect answers live.
 
-Speaker notes:
-“Just to level set: a budget is the plan, a forecast is our best estimate using current info, and variance is the gap between actual and forecast. Explainable variance is the key concept—leaders can tolerate misses if we can clearly name and quantify the driver.”
+Slide 30 — Suggested “Best” KPI Set (Answer slide)
 
-Slide 6 — Why Pharmacy Forecasting Is Uniquely Hard (1:30)
+KPIs (starter set):
 
-Speaker notes:
-“Pharmacy spend is uniquely sensitive because a few high-cost drugs can swing totals. Shortages force substitutions, launches ramp unpredictably, contracting changes net cost, and site-of-care shifts move spend between buckets. That’s why forecasting isn’t a one-and-done exercise—it’s a monthly process.”
+Total forecast accuracy (monthly absolute % error)
 
-Slide 7 — The Spend Equation (1:30)
+Bias (over vs under)
 
-Speaker notes:
-“The simplest model: Spend equals volume times net price. Most variance comes from either volume changes, price changes, or both. Net price gets messy because it’s influenced by contract terms, shortages, inflation, rebates/fees, and where the drug is administered.”
+Explainable variance rate
 
-Slide 8 — Driver #1: Drug Shortages (1:45)
+Top 20 drug forecast accuracy
 
-Speaker notes:
-“Shortages are one of the biggest disruptors. They drive substitutions to different NDCs, often with different pricing and contract coverage. You can also see spot buys and emergency purchasing. Even if utilization stays the same, your net price and product mix can change overnight.”
+Time to identify driver (days)
 
-Slide 9 — Driver #2: New Launches (1:30)
+Slide 31 — Mini Case #1 (Interactive)
 
-Speaker notes:
-“New launches disrupt forecasts because timing and adoption curves vary. Some systems adopt early, some later due to access, prior authorization, or formulary steps. If a high-cost therapy ramps faster than expected, it can blow up the budget.”
+Case: “Shortage hits your top antibiotic; spend jumps $400k.”
+Ask:
 
-Slide 10 — Driver #3: Biosimilars & Competition (1:30)
+What do you change in forecast? (scenario)
 
-Speaker notes:
-“Biosimilars can reduce spend—but adoption is rarely instant. Contracting strategy, provider comfort, interchange policies, and patient factors all influence the conversion curve. Forecasting needs a realistic ramp, not a cliff drop.”
+What do you report as driver? (shortage/substitution)
 
-Slide 11 — Driver #4: Utilization Growth & Mix Shift (1:30)
+What metric shows this was explainable? (variance attribution)
 
-Speaker notes:
-“Volume and mix are steady drivers—patient growth, higher acuity, new service lines like oncology or infusion, and guideline changes all increase use. This is where internal signals—like admission trends or clinic expansion—matter.”
+Slide 32 — Mini Case #2 (Interactive)
 
-Slide 12 — Driver #5: Site-of-Care Shifts (1:45)
+Case: “Biosimilar adoption is slower than expected.”
+Ask:
 
-Speaker notes:
-“Site-of-care is huge. Even if total utilization is unchanged, moving therapy from hospital outpatient to ambulatory or home infusion shifts spend across departments and budgets. It can look like a miss for one area even if enterprise spend is stable.”
+Which parameter would you adjust? (adoption curve)
 
-Slide 13 — Interactive Checkpoint #2 (2:00 including answers)
+What data would you use to estimate ramp? (historic conversion rate, provider adoption, policy timeline)
 
-Speaker notes:
-“Scenario: your top variance drug jumped 40% this month. What’s your first question—volume, price, site-of-care, shortage/substitution, or ‘all of the above’ in order? Let’s vote quickly.”
+Slide 33 — Mini Case #3 (Interactive)
 
-(After vote)
-“The best approach is: confirm volume, confirm net price, check site-of-care, then check shortage/substitution and contracting changes.”
+Case: “Site-of-care shift moves infusion spend out of hospital outpatient.”
+Ask:
 
-Slide 14 — Forecasting Workflow (2:00)
+Is total spend changed or just location?
 
-Speaker notes:
-“This is the repeatable workflow: start with baseline actuals, adjust with signals, build scenarios, monitor monthly variance, and act. The point isn’t a perfect forecast—it’s a forecast you can update, explain, and use to guide decisions.”
+How should the forecast report handle it? (separate by site)
 
-Slide 15 — Define “Good” Forecast Accuracy (2:00)
+Slide 34 — Common Pitfalls (Quick)
 
-Speaker notes:
-“Here’s what ‘good’ can look like: enterprise total spend within plus or minus 3–5% monthly, top 20 drugs within 5–10%, and most importantly—80–90% of variance explainable. Even if you miss, if you can explain the miss, you’re doing useful forecasting.”
+Forecasting only total spend (misses drug-level drivers)
 
-Slide 16 — Accuracy Metrics (1:45)
+Ignoring mix/site-of-care
 
-Speaker notes:
-“We keep it simple: percent error, absolute percent error, and bias—do we consistently over-forecast or under-forecast? Then explainability rate—how much variance can we tie to known drivers. These metrics help you improve month-to-month.”
+No standard definitions of “accuracy”
 
-Slide 17 — Interactive Checkpoint #3 (2:00 including answers)
+No routine monthly variance review cadence
 
-Speaker notes:
-“Quick example: Forecast 10.0M, actual 10.6M. That’s +6%. If our goal is ±5%, it’s technically a miss. But if most of that 6% is from a known shortage with documented substitutions, would you call the forecast ‘bad’ or ‘acceptable with explanation’? Quick show of hands.”
+Slide 35 — Implementation Checklist (Deliverable Slide)
 
-(Tie back to explainability.)
+Forecasting cadence (monthly):
 
-Slide 18 — Why Explainable Variance Matters (1:30)
+Refresh actuals
 
-Speaker notes:
-“Explainability is what makes forecasting credible to leadership. It supports actions—like contracting decisions, shortage mitigation, or policy changes—rather than just reporting a number.”
+Review top variances
 
-Slide 19 — Tool Overview: Spend Management Outlook (1:30)
+Attribute drivers
 
-Speaker notes:
-“Spend Management Outlook provides market signals likely to impact purchasing patterns over the next several months—things like market changes, emerging pressures, and areas to watch. It’s most useful as an early warning and planning input.”
+Update scenarios
 
-Slide 20 — Tool Overview: Drug Budget Forecast (DBF) (1:45)
+Communicate “variance story”
 
-Speaker notes:
-“Drug Budget Forecast supports line-item projections tailored to the member’s spend mix. The goal is to create a defensible budget and allow updates as reality changes. The best use is pairing DBF with monthly variance review.”
+Track accuracy + explainability
 
-Slide 21 — Where Tools Typically Struggle (1:45)
+Slide 36 — Quick Kahoot / Quiz (5 questions)
 
-Speaker notes:
-“Common pain points: market signals don’t always translate cleanly into dollar impact, scenario modeling may be limited or not intuitive, benchmarking accuracy is complex, and users want faster ‘why did we miss?’ driver attribution.”
+Spend = ___ × ___
 
-Slide 22 — Enhancement #1: Better Scenario Modeling (2:00)
+“Good accuracy” should include % error AND ___
 
-Speaker notes:
-“Enhancement idea: one-click scenarios—shortage, biosimilar ramp, site-of-care shift, launch acceleration. Also let users adjust adoption curves and show forecast ranges rather than one number. That would make DBF more practical for real-world planning.”
+Name 2 volatility drivers
 
-(Optional quick question: “Which scenario button would you want first?” ~20 seconds.)
+Why is benchmarking hard? (definitions + peer grouping)
 
-Slide 23 — Enhancement #2: Predictive Signals & Early Warning (1:45)
+Name one DBF enhancement that would help APPE users
 
-Speaker notes:
-“Another enhancement: predictive signals that link market outlook to your specific exposure. For example, if a market signal affects a category where you spend heavily, flag it early. Add thresholds and alerts when price or utilization starts drifting.”
+Slide 37 — Key Takeaways (Wrap)
 
-Slide 24 — Enhancement #3: Usability / Workflow (1:30)
+Forecasting is manageable with a repeatable workflow
 
-Speaker notes:
-“For APPE-level users, usability matters: guided steps, definitions built into the tool, and an auto-generated ‘variance story’ that summarizes the top drivers. This shortens the time from data to action.”
+Define “good” as accuracy + explainability
 
-Slide 25 — Enhancement #4: Driver Attribution Dashboard (1:45)
+Benchmarking can be powerful if definitions and peer groups are aligned
 
-Speaker notes:
-“This is the biggest value-add: automatically break variance into volume, price, mix/site-of-care, shortage substitution, and contracting effects. If the tool can generate that decomposition, it strengthens credibility and speeds monthly reviews.”
+Vizient tools can be strengthened with scenario modeling + early warning + driver attribution
 
-Slide 26 — Enhancement #5: Benchmarking Visibility (1:45)
+Slide 38 — Q&A
 
-Speaker notes:
-“Benchmarking is powerful but risky. If Vizient adds benchmarking visibility, it needs context—definitions, peer grouping, and tagging extraordinary events. Otherwise it becomes an apples-to-oranges comparison.”
-
-Slide 27 — Benchmarking Accuracy: Why It’s Tricky (2:00)
-
-Speaker notes:
-“For Vizient, benchmarking accuracy means strong governance—aligned definitions and data quality checks. For clients, it can be helpful for learning, but it could also feel like grading if context isn’t built in. So the implementation has to be careful.”
-
-Slide 28 — How to Benchmark Fairly (2:00)
-
-Speaker notes:
-“To do this fairly, you need standard metrics, consistent scope, and peer grouping—size, service lines, specialty mix, 340B status, and major events like M&A. Also define exclusions for unusual months. If done right, benchmarking could help members learn what success looks like.”
+“Ask anything—tools, metrics, or how you’d implement at a hospital.”
