@@ -1,17 +1,17 @@
 /**
- * GOOGLE APPS SCRIPT APP LAUNCHER
+ * APP LAUNCHER
  *
- * Google Sheet format:
+ * Google Sheet:
  * Column A = App name
- * Column B = App link
- * Column C = App image URL
+ * Column B = App destination link
+ * Column C = Image link or shortened image link
  *
- * Row 1 = headings
- * Data starts on row 2
+ * Row 1 contains headings.
+ * App data begins on row 2.
  */
 
 /* =========================================================
-   UPDATE THESE TWO VALUES
+   SETTINGS
    ========================================================= */
 
 const SPREADSHEET_ID = 'PASTE_YOUR_SPREADSHEET_ID_HERE';
@@ -21,9 +21,6 @@ const SHEET_NAME = 'Apps';
    WEB APP
    ========================================================= */
 
-/**
- * Opens Index.html when the web-app URL is visited.
- */
 function doGet() {
   return HtmlService
     .createHtmlOutputFromFile('Index')
@@ -35,39 +32,37 @@ function doGet() {
 }
 
 /* =========================================================
-   GET APPS FROM GOOGLE SHEETS
+   GET APPLICATIONS
    ========================================================= */
 
-/**
- * Called by Index.html using google.script.run.
- */
 function getApps() {
   try {
     validateSettings_();
 
-    const spreadsheet = SpreadsheetApp.openById(SPREADSHEET_ID);
-    const sheet = spreadsheet.getSheetByName(SHEET_NAME);
+    const spreadsheet =
+      SpreadsheetApp.openById(SPREADSHEET_ID);
+
+    const sheet =
+      spreadsheet.getSheetByName(SHEET_NAME);
 
     if (!sheet) {
       throw new Error(
-        'The sheet tab named "' +
-          SHEET_NAME +
-          '" was not found. Check SHEET_NAME in Code.gs.'
+        'The sheet named "' +
+        SHEET_NAME +
+        '" was not found.'
       );
     }
 
     const lastRow = sheet.getLastRow();
 
-    // The sheet only contains headings or is completely empty.
     if (lastRow < 2) {
       return {
         success: true,
         apps: [],
-        message: 'No app rows were found below the headings.'
+        message: 'No applications were found.'
       };
     }
 
-    // Read columns A, B, and C starting from row 2.
     const rows = sheet
       .getRange(2, 1, lastRow - 1, 3)
       .getDisplayValues();
@@ -75,11 +70,18 @@ function getApps() {
     const apps = [];
 
     rows.forEach(function (row, index) {
-      const appName = cleanText_(row[0]);
-      const appUrl = cleanHttpUrl_(row[1]);
-      const imageUrl = cleanHttpUrl_(row[2]);
+      const appName =
+        cleanText_(row[0]);
 
-      // Ignore completely empty rows.
+      const appUrl =
+        cleanHttpUrl_(row[1]);
+
+      const originalImageUrl =
+        cleanHttpUrl_(row[2]);
+
+      const rowNumber =
+        index + 2;
+
       const rowIsEmpty =
         !cleanText_(row[0]) &&
         !cleanText_(row[1]) &&
@@ -89,27 +91,43 @@ function getApps() {
         return;
       }
 
-      /*
-       * A usable app requires:
-       * 1. An app name
-       * 2. A valid HTTP or HTTPS destination URL
-       *
-       * The image URL is optional.
-       */
-      if (!appName || !appUrl) {
+      if (!appName) {
         console.log(
-          'Skipped spreadsheet row ' +
-            (index + 2) +
-            ': missing app name or valid URL.'
+          'Skipped row ' +
+          rowNumber +
+          ': app name is missing.'
         );
 
         return;
       }
 
+      if (!appUrl) {
+        console.log(
+          'Skipped row ' +
+          rowNumber +
+          ': app URL is missing or invalid.'
+        );
+
+        return;
+      }
+
+      let imageData = '';
+
+      if (originalImageUrl) {
+        imageData =
+          getImageDataUrl_(originalImageUrl);
+      }
+
       apps.push({
         name: appName,
         url: appUrl,
-        imageUrl: imageUrl
+
+        /*
+         * imageData contains the downloaded image.
+         * originalImageUrl is retained as a secondary fallback.
+         */
+        imageData: imageData,
+        imageUrl: originalImageUrl
       });
     });
 
@@ -137,35 +155,156 @@ function getApps() {
 }
 
 /* =========================================================
-   CONFIGURATION VALIDATION
+   IMAGE DOWNLOADER
+   ========================================================= */
+
+/**
+ * Downloads an image through Google Apps Script.
+ *
+ * This supports:
+ * - Direct image URLs
+ * - Shortened image URLs
+ * - Redirecting URLs
+ *
+ * The downloaded image is returned as a base64 data URL.
+ */
+function getImageDataUrl_(imageUrl) {
+  try {
+    const response = UrlFetchApp.fetch(
+      imageUrl,
+      {
+        method: 'get',
+        followRedirects: true,
+        muteHttpExceptions: true,
+        validateHttpsCertificates: true,
+        headers: {
+          'User-Agent':
+            'Mozilla/5.0 AppLauncher/1.0',
+          Accept:
+            'image/avif,image/webp,image/apng,image/svg+xml,image/*,*/*;q=0.8'
+        }
+      }
+    );
+
+    const responseCode =
+      response.getResponseCode();
+
+    if (
+      responseCode < 200 ||
+      responseCode >= 400
+    ) {
+      console.log(
+        'Image request failed with HTTP ' +
+        responseCode +
+        ': ' +
+        imageUrl
+      );
+
+      return '';
+    }
+
+    const headers =
+      response.getAllHeaders();
+
+    const contentTypeHeader =
+      headers['Content-Type'] ||
+      headers['content-type'] ||
+      '';
+
+    const contentType =
+      String(contentTypeHeader)
+        .split(';')[0]
+        .trim()
+        .toLowerCase();
+
+    /*
+     * Reject HTML pages returned by short-link services.
+     * The final response must actually be an image.
+     */
+    if (
+      !contentType.startsWith('image/')
+    ) {
+      console.log(
+        'The URL did not return an image. ' +
+        'Content type: ' +
+        contentType +
+        '. URL: ' +
+        imageUrl
+      );
+
+      return '';
+    }
+
+    const blob =
+      response.getBlob();
+
+    const bytes =
+      blob.getBytes();
+
+    /*
+     * Protect the web app from extremely large images.
+     * Maximum image size: approximately 4 MB.
+     */
+    if (bytes.length > 4 * 1024 * 1024) {
+      console.log(
+        'Image is larger than 4 MB: ' +
+        imageUrl
+      );
+
+      return '';
+    }
+
+    const base64 =
+      Utilities.base64Encode(bytes);
+
+    return (
+      'data:' +
+      contentType +
+      ';base64,' +
+      base64
+    );
+  } catch (error) {
+    console.log(
+      'Could not download image: ' +
+      imageUrl +
+      '. Error: ' +
+      error.message
+    );
+
+    return '';
+  }
+}
+
+/* =========================================================
+   VALIDATION
    ========================================================= */
 
 function validateSettings_() {
   if (
     !SPREADSHEET_ID ||
-    SPREADSHEET_ID === 'PASTE_YOUR_SPREADSHEET_ID_HERE'
+    SPREADSHEET_ID ===
+      'PASTE_YOUR_SPREADSHEET_ID_HERE'
   ) {
     throw new Error(
-      'The spreadsheet ID has not been entered in Code.gs.'
+      'Enter your Google Spreadsheet ID in Code.gs.'
     );
   }
 
-  if (!SHEET_NAME || !String(SHEET_NAME).trim()) {
+  if (
+    !SHEET_NAME ||
+    !String(SHEET_NAME).trim()
+  ) {
     throw new Error(
-      'The sheet name has not been entered in Code.gs.'
+      'Enter the sheet tab name in Code.gs.'
     );
   }
 }
 
-/* =========================================================
-   DATA CLEANING
-   ========================================================= */
-
-/**
- * Cleans app names and other text.
- */
 function cleanText_(value) {
-  if (value === null || value === undefined) {
+  if (
+    value === null ||
+    value === undefined
+  ) {
     return '';
   }
 
@@ -179,25 +318,23 @@ function cleanText_(value) {
 }
 
 /**
- * Allows only HTTP and HTTPS links.
- *
- * This version deliberately avoids URL.getProtocol(),
- * which caused the previous code to reject every URL.
+ * Accepts any valid HTTP or HTTPS URL,
+ * including shortened URLs.
  */
 function cleanHttpUrl_(value) {
-  const url = cleanText_(value);
+  const url =
+    cleanText_(value);
 
-  if (!url || url.length > 2048) {
+  if (
+    !url ||
+    url.length > 4096
+  ) {
     return '';
   }
 
-  // Reject spaces inside the URL.
-  if (/\s/.test(url)) {
-    return '';
-  }
-
-  // Only allow HTTP and HTTPS.
-  if (!/^https?:\/\/.+/i.test(url)) {
+  if (
+    !/^https?:\/\/\S+$/i.test(url)
+  ) {
     return '';
   }
 
@@ -205,15 +342,1050 @@ function cleanHttpUrl_(value) {
 }
 
 /* =========================================================
-   TEST FUNCTION
+   TEST
    ========================================================= */
 
-/**
- * Run this function manually from the Apps Script editor.
- *
- * The execution log will show exactly what getApps() returns.
- */
 function testGetApps() {
-  const result = getApps();
-  console.log(JSON.stringify(result, null, 2));
+  const result =
+    getApps();
+
+  console.log(
+    JSON.stringify(result, null, 2)
+  );
 }
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+         
+
+
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <base target="_top">
+
+  <meta charset="UTF-8">
+
+  <meta
+    name="viewport"
+    content="width=device-width, initial-scale=1"
+  >
+
+  <title>App Launcher</title>
+
+  <style>
+    :root {
+      --background-start: #f7f9fc;
+      --background-end: #e9eef8;
+      --surface: rgba(255, 255, 255, 0.9);
+      --text-primary: #172033;
+      --text-secondary: #68738a;
+      --border: rgba(23, 32, 51, 0.1);
+      --accent: #3468f5;
+      --accent-dark: #2453d4;
+      --danger-background: #fff1f1;
+      --danger-border: #ffcaca;
+      --danger-text: #a31d1d;
+      --shadow-small:
+        0 6px 18px rgba(31, 45, 80, 0.08);
+      --shadow-large:
+        0 15px 40px rgba(31, 45, 80, 0.15);
+    }
+
+    * {
+      box-sizing: border-box;
+    }
+
+    html {
+      min-height: 100%;
+    }
+
+    body {
+      min-height: 100vh;
+      margin: 0;
+
+      color: var(--text-primary);
+
+      font-family:
+        -apple-system,
+        BlinkMacSystemFont,
+        "Segoe UI",
+        Roboto,
+        Arial,
+        sans-serif;
+
+      background:
+        radial-gradient(
+          circle at 10% 0%,
+          rgba(82, 125, 255, 0.17),
+          transparent 32%
+        ),
+        radial-gradient(
+          circle at 100% 20%,
+          rgba(93, 218, 191, 0.13),
+          transparent 29%
+        ),
+        linear-gradient(
+          145deg,
+          var(--background-start),
+          var(--background-end)
+        );
+
+      background-attachment: fixed;
+    }
+
+    button {
+      font: inherit;
+    }
+
+    .page-shell {
+      width: min(1400px, 100%);
+      min-height: 100vh;
+      margin: 0 auto;
+
+      padding:
+        28px
+        clamp(16px, 4vw, 56px)
+        48px;
+    }
+
+    /* =====================================================
+       TOP BAR
+       ===================================================== */
+
+    .top-bar {
+      position: sticky;
+      top: 12px;
+      z-index: 20;
+
+      display: flex;
+      align-items: center;
+
+      margin-bottom: 34px;
+      padding: 18px 20px;
+
+      border: 1px solid var(--border);
+      border-radius: 25px;
+
+      background: var(--surface);
+      box-shadow: var(--shadow-small);
+
+      backdrop-filter: blur(20px);
+      -webkit-backdrop-filter: blur(20px);
+    }
+
+    .brand {
+      display: flex;
+      align-items: center;
+      gap: 13px;
+    }
+
+    .brand-icon {
+      display: grid;
+
+      width: 48px;
+      height: 48px;
+
+      flex: 0 0 48px;
+
+      place-items: center;
+
+      color: white;
+
+      border-radius: 15px;
+
+      background:
+        linear-gradient(
+          145deg,
+          var(--accent),
+          #7658f4
+        );
+
+      box-shadow:
+        0 10px 22px
+        rgba(52, 104, 245, 0.26);
+    }
+
+    .brand-icon svg {
+      width: 25px;
+      height: 25px;
+    }
+
+    .brand-title {
+      margin: 0;
+
+      font-size: 1.08rem;
+      font-weight: 750;
+    }
+
+    .brand-subtitle {
+      margin: 3px 0 0;
+
+      color: var(--text-secondary);
+
+      font-size: 0.82rem;
+    }
+
+    /* =====================================================
+       CONTENT
+       ===================================================== */
+
+    .content-header {
+      display: flex;
+      align-items: end;
+      justify-content: space-between;
+      gap: 20px;
+
+      margin-bottom: 20px;
+    }
+
+    .content-heading {
+      margin: 0;
+
+      font-size:
+        clamp(1.45rem, 2.3vw, 2rem);
+
+      font-weight: 760;
+    }
+
+    .content-description {
+      margin: 7px 0 0;
+
+      color: var(--text-secondary);
+
+      font-size: 0.95rem;
+    }
+
+    .app-count {
+      flex: 0 0 auto;
+
+      margin: 0;
+      padding: 7px 12px;
+
+      color: var(--text-secondary);
+
+      border: 1px solid var(--border);
+      border-radius: 999px;
+
+      font-size: 0.83rem;
+      font-weight: 650;
+
+      background:
+        rgba(255, 255, 255, 0.65);
+    }
+
+    /* =====================================================
+       APP GRID
+       ===================================================== */
+
+    .app-grid {
+      display: grid;
+
+      grid-template-columns:
+        repeat(
+          auto-fill,
+          minmax(min(100%, 190px), 1fr)
+        );
+
+      gap: 18px;
+    }
+
+    .app-card {
+      position: relative;
+
+      display: flex;
+      min-height: 190px;
+
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+
+      gap: 16px;
+
+      padding: 24px 18px 21px;
+
+      color: inherit;
+      text-align: center;
+      text-decoration: none;
+
+      border: 1px solid var(--border);
+      border-radius: 18px;
+
+      background:
+        rgba(255, 255, 255, 0.84);
+
+      box-shadow: var(--shadow-small);
+
+      transition:
+        transform 180ms ease,
+        box-shadow 180ms ease,
+        border-color 180ms ease;
+    }
+
+    .app-card:hover {
+      border-color:
+        rgba(52, 104, 245, 0.25);
+
+      box-shadow: var(--shadow-large);
+
+      transform: translateY(-5px);
+    }
+
+    .app-card:focus-visible {
+      outline:
+        3px solid
+        rgba(52, 104, 245, 0.25);
+
+      outline-offset: 3px;
+    }
+
+    .app-image-container {
+      display: grid;
+
+      width: 82px;
+      height: 82px;
+
+      place-items: center;
+
+      overflow: hidden;
+
+      border:
+        1px solid
+        rgba(23, 32, 51, 0.08);
+
+      border-radius: 22px;
+
+      background: white;
+
+      box-shadow:
+        0 8px 19px
+        rgba(31, 45, 80, 0.1);
+    }
+
+    .app-image {
+      width: 100%;
+      height: 100%;
+
+      padding: 8px;
+
+      object-fit: contain;
+    }
+
+    .app-name {
+      width: 100%;
+      margin: 0;
+
+      overflow: hidden;
+
+      font-size: 0.98rem;
+      font-weight: 700;
+      line-height: 1.35;
+
+      overflow-wrap: anywhere;
+
+      display: -webkit-box;
+      -webkit-box-orient: vertical;
+      -webkit-line-clamp: 2;
+    }
+
+    .open-indicator {
+      position: absolute;
+      top: 13px;
+      right: 13px;
+
+      width: 17px;
+      height: 17px;
+
+      color: #8791a5;
+
+      opacity: 0;
+
+      transition: opacity 180ms ease;
+    }
+
+    .app-card:hover .open-indicator {
+      opacity: 1;
+    }
+
+    /* =====================================================
+       STATUS PANELS
+       ===================================================== */
+
+    .status-panel {
+      display: grid;
+      min-height: 280px;
+
+      place-items: center;
+
+      padding: 38px 20px;
+
+      border:
+        1px dashed
+        rgba(23, 32, 51, 0.16);
+
+      border-radius: 18px;
+
+      text-align: center;
+
+      background:
+        rgba(255, 255, 255, 0.58);
+    }
+
+    .status-content {
+      width: min(460px, 100%);
+    }
+
+    .loading-spinner {
+      width: 46px;
+      height: 46px;
+
+      margin: 0 auto 18px;
+
+      border:
+        4px solid
+        rgba(52, 104, 245, 0.15);
+
+      border-top-color: var(--accent);
+      border-radius: 50%;
+
+      animation:
+        spin 800ms linear infinite;
+    }
+
+    @keyframes spin {
+      to {
+        transform: rotate(360deg);
+      }
+    }
+
+    .status-title {
+      margin: 0;
+
+      font-size: 1.1rem;
+      font-weight: 740;
+    }
+
+    .status-message {
+      margin: 8px 0 0;
+
+      color: var(--text-secondary);
+
+      font-size: 0.93rem;
+      line-height: 1.6;
+    }
+
+    .error-panel {
+      border-style: solid;
+      border-color: var(--danger-border);
+
+      background:
+        var(--danger-background);
+    }
+
+    .error-panel .status-title,
+    .error-panel .status-message {
+      color: var(--danger-text);
+    }
+
+    .retry-button {
+      margin-top: 20px;
+      padding: 11px 18px;
+
+      color: white;
+
+      border: 0;
+      border-radius: 12px;
+
+      cursor: pointer;
+
+      font-weight: 700;
+
+      background: var(--accent);
+    }
+
+    .retry-button:hover {
+      background: var(--accent-dark);
+    }
+
+    .hidden {
+      display: none !important;
+    }
+
+    @media (max-width: 720px) {
+      .page-shell {
+        padding-top: 14px;
+      }
+
+      .top-bar {
+        top: 8px;
+        margin-bottom: 28px;
+        padding: 16px;
+      }
+
+      .app-grid {
+        grid-template-columns:
+          repeat(2, minmax(0, 1fr));
+
+        gap: 13px;
+      }
+
+      .app-card {
+        min-height: 158px;
+        padding: 19px 12px 16px;
+      }
+
+      .app-image-container {
+        width: 68px;
+        height: 68px;
+
+        border-radius: 19px;
+      }
+
+      .open-indicator {
+        display: none;
+      }
+    }
+
+    @media (max-width: 380px) {
+      .app-grid {
+        grid-template-columns: 1fr;
+      }
+    }
+  </style>
+</head>
+
+<body>
+  <main class="page-shell">
+
+    <header class="top-bar">
+      <div class="brand">
+
+        <div
+          class="brand-icon"
+          aria-hidden="true"
+        >
+          <svg
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            stroke-width="2"
+          >
+            <rect
+              x="3"
+              y="3"
+              width="7"
+              height="7"
+              rx="2"
+            ></rect>
+
+            <rect
+              x="14"
+              y="3"
+              width="7"
+              height="7"
+              rx="2"
+            ></rect>
+
+            <rect
+              x="3"
+              y="14"
+              width="7"
+              height="7"
+              rx="2"
+            ></rect>
+
+            <rect
+              x="14"
+              y="14"
+              width="7"
+              height="7"
+              rx="2"
+            ></rect>
+          </svg>
+        </div>
+
+        <div>
+          <h1 class="brand-title">
+            App Launcher
+          </h1>
+
+          <p class="brand-subtitle">
+            Your applications in one place
+          </p>
+        </div>
+
+      </div>
+    </header>
+
+    <section>
+
+      <div class="content-header">
+        <div>
+          <h2 class="content-heading">
+            Applications
+          </h2>
+
+          <p class="content-description">
+            Select an application to open it.
+          </p>
+        </div>
+
+        <p
+          id="appCount"
+          class="app-count hidden"
+        ></p>
+      </div>
+
+      <div
+        id="loadingPanel"
+        class="status-panel"
+      >
+        <div class="status-content">
+
+          <div
+            class="loading-spinner"
+            aria-hidden="true"
+          ></div>
+
+          <h3 class="status-title">
+            Loading applications
+          </h3>
+
+          <p class="status-message">
+            Retrieving applications from Google Sheets.
+          </p>
+
+        </div>
+      </div>
+
+      <div
+        id="errorPanel"
+        class="status-panel error-panel hidden"
+      >
+        <div class="status-content">
+
+          <h3 class="status-title">
+            Unable to load applications
+          </h3>
+
+          <p
+            id="errorMessage"
+            class="status-message"
+          ></p>
+
+          <button
+            id="retryButton"
+            class="retry-button"
+            type="button"
+          >
+            Try again
+          </button>
+
+        </div>
+      </div>
+
+      <div
+        id="emptyPanel"
+        class="status-panel hidden"
+      >
+        <div class="status-content">
+
+          <h3 class="status-title">
+            No applications available
+          </h3>
+
+          <p class="status-message">
+            Add applications to the Google Sheet beginning on row 2.
+          </p>
+
+        </div>
+      </div>
+
+      <div
+        id="appGrid"
+        class="app-grid"
+      ></div>
+
+    </section>
+  </main>
+
+  <script>
+    'use strict';
+
+    const elements = {
+      retryButton:
+        document.getElementById('retryButton'),
+
+      loadingPanel:
+        document.getElementById('loadingPanel'),
+
+      errorPanel:
+        document.getElementById('errorPanel'),
+
+      errorMessage:
+        document.getElementById('errorMessage'),
+
+      emptyPanel:
+        document.getElementById('emptyPanel'),
+
+      appGrid:
+        document.getElementById('appGrid'),
+
+      appCount:
+        document.getElementById('appCount')
+    };
+
+    const DEFAULT_APP_ICON =
+      createDefaultIconDataUrl();
+
+    document.addEventListener(
+      'DOMContentLoaded',
+      function () {
+        elements.retryButton.addEventListener(
+          'click',
+          loadApps
+        );
+
+        loadApps();
+      }
+    );
+
+    function loadApps() {
+      setLoadingState();
+
+      google.script.run
+        .withSuccessHandler(handleAppsLoaded)
+        .withFailureHandler(handleFailure)
+        .getApps();
+    }
+
+    function handleAppsLoaded(response) {
+      elements.loadingPanel.classList.add(
+        'hidden'
+      );
+
+      if (
+        !response ||
+        response.success !== true
+      ) {
+        showError(
+          response && response.message
+            ? response.message
+            : 'The server returned an invalid response.'
+        );
+
+        return;
+      }
+
+      const apps =
+        Array.isArray(response.apps)
+          ? response.apps
+          : [];
+
+      if (apps.length === 0) {
+        elements.emptyPanel.classList.remove(
+          'hidden'
+        );
+
+        updateCount(0);
+
+        return;
+      }
+
+      renderApps(apps);
+      updateCount(apps.length);
+    }
+
+    function handleFailure(error) {
+      showError(
+        error && error.message
+          ? error.message
+          : 'A server error occurred.'
+      );
+    }
+
+    function renderApps(apps) {
+      elements.appGrid.replaceChildren();
+
+      const fragment =
+        document.createDocumentFragment();
+
+      apps.forEach(function (app) {
+        if (
+          !app ||
+          !app.name ||
+          !isValidHttpUrl(app.url)
+        ) {
+          return;
+        }
+
+        fragment.appendChild(
+          createAppCard(app)
+        );
+      });
+
+      elements.appGrid.appendChild(fragment);
+    }
+
+    function createAppCard(app) {
+      const card =
+        document.createElement('a');
+
+      card.className = 'app-card';
+      card.href = app.url;
+
+      /*
+       * Opens in a new browser tab or window.
+       * Chrome decides whether it becomes a tab,
+       * window, or split-view destination.
+       */
+      card.target = '_blank';
+      card.rel = 'noopener noreferrer';
+
+      card.setAttribute(
+        'aria-label',
+        'Open ' + app.name
+      );
+
+      const imageContainer =
+        document.createElement('div');
+
+      imageContainer.className =
+        'app-image-container';
+
+      const image =
+        document.createElement('img');
+
+      image.className = 'app-image';
+      image.alt = '';
+      image.loading = 'lazy';
+
+      /*
+       * First choice:
+       * The image downloaded and converted by Code.gs.
+       *
+       * Second choice:
+       * The original short image URL.
+       *
+       * Final choice:
+       * Built-in default icon.
+       */
+      image.src =
+        app.imageData ||
+        app.imageUrl ||
+        DEFAULT_APP_ICON;
+
+      image.addEventListener(
+        'error',
+        function () {
+          image.onerror = null;
+          image.src = DEFAULT_APP_ICON;
+        },
+        { once: true }
+      );
+
+      imageContainer.appendChild(image);
+
+      const appName =
+        document.createElement('p');
+
+      appName.className = 'app-name';
+      appName.textContent = app.name;
+
+      const indicator =
+        createOpenIndicator();
+
+      card.appendChild(imageContainer);
+      card.appendChild(appName);
+      card.appendChild(indicator);
+
+      return card;
+    }
+
+    function createOpenIndicator() {
+      const namespace =
+        'http://www.w3.org/2000/svg';
+
+      const svg =
+        document.createElementNS(
+          namespace,
+          'svg'
+        );
+
+      svg.classList.add(
+        'open-indicator'
+      );
+
+      svg.setAttribute(
+        'viewBox',
+        '0 0 24 24'
+      );
+
+      svg.setAttribute(
+        'fill',
+        'none'
+      );
+
+      svg.setAttribute(
+        'stroke',
+        'currentColor'
+      );
+
+      svg.setAttribute(
+        'stroke-width',
+        '2'
+      );
+
+      const firstPath =
+        document.createElementNS(
+          namespace,
+          'path'
+        );
+
+      firstPath.setAttribute(
+        'd',
+        'M14 4h6v6'
+      );
+
+      const secondPath =
+        document.createElementNS(
+          namespace,
+          'path'
+        );
+
+      secondPath.setAttribute(
+        'd',
+        'M10 14 20 4'
+      );
+
+      const thirdPath =
+        document.createElementNS(
+          namespace,
+          'path'
+        );
+
+      thirdPath.setAttribute(
+        'd',
+        'M20 14v5a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1V5a1 1 0 0 1 1-1h5'
+      );
+
+      svg.appendChild(firstPath);
+      svg.appendChild(secondPath);
+      svg.appendChild(thirdPath);
+
+      return svg;
+    }
+
+    function setLoadingState() {
+      elements.appGrid.replaceChildren();
+
+      elements.errorPanel.classList.add(
+        'hidden'
+      );
+
+      elements.emptyPanel.classList.add(
+        'hidden'
+      );
+
+      elements.appCount.classList.add(
+        'hidden'
+      );
+
+      elements.loadingPanel.classList.remove(
+        'hidden'
+      );
+    }
+
+    function showError(message) {
+      elements.loadingPanel.classList.add(
+        'hidden'
+      );
+
+      elements.emptyPanel.classList.add(
+        'hidden'
+      );
+
+      elements.appGrid.replaceChildren();
+
+      elements.errorMessage.textContent =
+        String(message || 'Unknown error');
+
+      elements.errorPanel.classList.remove(
+        'hidden'
+      );
+    }
+
+    function updateCount(total) {
+      elements.appCount.textContent =
+        total +
+        ' app' +
+        (total === 1 ? '' : 's');
+
+      elements.appCount.classList.remove(
+        'hidden'
+      );
+    }
+
+    function isValidHttpUrl(value) {
+      if (
+        typeof value !== 'string' ||
+        !value.trim()
+      ) {
+        return false;
+      }
+
+      try {
+        const parsed =
+          new URL(value.trim());
+
+        return (
+          parsed.protocol === 'https:' ||
+          parsed.protocol === 'http:'
+        );
+      } catch (error) {
+        return false;
+      }
+    }
+
+    function createDefaultIconDataUrl() {
+      const svg =
+        '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 96 96">' +
+          '<defs>' +
+            '<linearGradient id="g" x1="0" y1="0" x2="1" y2="1">' +
+              '<stop offset="0" stop-color="#3468f5"/>' +
+              '<stop offset="1" stop-color="#7658f4"/>' +
+            '</linearGradient>' +
+          '</defs>' +
+          '<rect width="96" height="96" rx="24" fill="#eef2ff"/>' +
+          '<rect x="20" y="20" width="23" height="23" rx="7" fill="url(#g)"/>' +
+          '<rect x="53" y="20" width="23" height="23" rx="7" fill="url(#g)"/>' +
+          '<rect x="20" y="53" width="23" height="23" rx="7" fill="url(#g)"/>' +
+          '<rect x="53" y="53" width="23" height="23" rx="7" fill="url(#g)"/>' +
+        '</svg>';
+
+      return (
+        'data:image/svg+xml;charset=UTF-8,' +
+        encodeURIComponent(svg)
+      );
+    }
+  </script>
+</body>
+</html>
+         
