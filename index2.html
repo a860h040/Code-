@@ -1,46 +1,65 @@
 /**
- * Renal Dose Adjustment Web Application
+ * RENAL DOSE ADJUSTMENT WEB APPLICATION
  * Google Apps Script Backend
  *
- * Each medication should have its own worksheet tab.
+ * Spreadsheet setup:
+ * - One worksheet/tab for each medication
+ * - Column A contains labels
+ * - Column B contains values and recommendations
  *
- * Column A contains:
- * - Drug Name
- * - Note
- * - Peritoneal Dialysis
- * - Hemodialysis
- * - CAPD
- * - CRRT
- * - Creatinine clearance values
+ * Example:
  *
- * Column B contains the corresponding information.
+ * A                         B
+ * Drug Name                 Acyclovir IV
+ * Note                      Use adjusted body weight when appropriate
+ * Peritoneal Dialysis       Recommendation
+ * Hemodialysis              Recommendation
+ * CAPD                      Recommendation
+ * CRRT                      Recommendation
+ * 0                         Recommendation
+ * 1                         Recommendation
+ * ...
+ * 60                        Usual dose
  */
 
 
 /**
- * Your Google Spreadsheet ID.
+ * Google Spreadsheet ID.
  *
- * Do not enter the complete spreadsheet URL.
- * Do not enter a sheet number.
- * Do not enter a worksheet/tab name.
+ * Do not paste the full spreadsheet URL.
+ * Do not enter a sheet/tab number.
  */
-const SPREADSHEET_ID = "1eLZAx2V1bo7Lm2JDFcMsPgqWzgc669THvIVD4uXdnu4";
+const SPREADSHEET_ID =
+  "1eLZAx2V1bo7Lm2JDFcMsPgqWzgc669THvIVD4uXdnu4";
+
 
 /**
- * Medication list cache duration in seconds.
+ * Medication-list cache duration.
+ *
+ * 300 seconds = 5 minutes.
  */
 const MEDICATION_CACHE_SECONDS = 300;
 
 
 /**
- * Displays Index.html when the web app is opened.
+ * Cache key used by CacheService.
+ */
+const MEDICATION_CACHE_KEY =
+  "RENAL_DOSE_MEDICATION_LIST_V3";
+
+
+/**
+ * Serves Index.html as the web application.
  *
- * @return {HtmlOutput}
+ * @return {GoogleAppsScript.HTML.HtmlOutput}
  */
 function doGet() {
-  return HtmlService.createHtmlOutputFromFile("Index")
+  return HtmlService
+    .createHtmlOutputFromFile("Index")
     .setTitle("Renal Dose Adjustment")
-    .setXFrameOptionsMode(HtmlService.XFrameOptionsMode.ALLOWALL)
+    .setXFrameOptionsMode(
+      HtmlService.XFrameOptionsMode.ALLOWALL
+    )
     .addMetaTag(
       "viewport",
       "width=device-width, initial-scale=1"
@@ -49,18 +68,25 @@ function doGet() {
 
 
 /**
- * Opens the medication spreadsheet.
+ * Opens the Google Spreadsheet.
  *
  * @return {GoogleAppsScript.Spreadsheet.Spreadsheet}
  */
 function getSpreadsheet_() {
   try {
-    const spreadsheet = SpreadsheetApp.openById(
-      SPREADSHEET_ID
-    );
+    if (!SPREADSHEET_ID) {
+      throw new Error(
+        "The Spreadsheet ID is missing in Code.gs."
+      );
+    }
+
+    const spreadsheet =
+      SpreadsheetApp.openById(SPREADSHEET_ID);
 
     if (!spreadsheet) {
-      throw new Error("Spreadsheet could not be opened.");
+      throw new Error(
+        "The spreadsheet could not be opened."
+      );
     }
 
     return spreadsheet;
@@ -68,70 +94,78 @@ function getSpreadsheet_() {
     console.error("getSpreadsheet_ error:", error);
 
     throw new Error(
-      "Unable to open the medication spreadsheet. Verify the Spreadsheet ID and make sure you have permission to access the spreadsheet."
+      "Unable to open the medication spreadsheet. " +
+      "Verify the Spreadsheet ID and confirm that the " +
+      "Google account running the web app has access."
     );
   }
 }
 
 
 /**
- * Returns the medication list from every worksheet.
+ * Returns a list of all medications.
  *
- * The medication list is cached so the spreadsheet is not read
- * every time the user types in the search box.
+ * The medication name is found using:
+ * 1. The value beside Drug Name in columns A and B
+ * 2. The worksheet/tab name as a fallback
  *
  * @return {Object}
  */
 function getMedicationList() {
   try {
     const cache = CacheService.getScriptCache();
-    const cacheKey = "renalDoseMedicationList";
+    const cachedValue = cache.get(
+      MEDICATION_CACHE_KEY
+    );
 
-    const cachedMedicationList = cache.get(cacheKey);
-
-    if (cachedMedicationList) {
+    if (cachedValue) {
       return {
         success: true,
-        medications: JSON.parse(cachedMedicationList),
+        medications: JSON.parse(cachedValue),
         cached: true
       };
     }
 
     const spreadsheet = getSpreadsheet_();
     const sheets = spreadsheet.getSheets();
-
     const medicationMap = {};
 
     sheets.forEach(function (sheet) {
-      const medicationData = readMedicationSheet_(sheet);
+      const medicationData =
+        readMedicationSheet_(sheet);
 
       if (!medicationData) {
         return;
       }
 
-      const normalizedName = normalizeText_(
+      const medicationName = cleanText_(
         medicationData.medicationName
       );
 
-      if (!normalizedName) {
+      if (!medicationName) {
         return;
       }
 
-      if (!medicationMap[normalizedName]) {
-        medicationMap[normalizedName] = {
-          name: medicationData.medicationName,
+      const normalizedMedicationName =
+        normalizeText_(medicationName);
+
+      if (!medicationMap[normalizedMedicationName]) {
+        medicationMap[normalizedMedicationName] = {
+          name: medicationName,
           worksheetName: sheet.getName()
         };
       }
     });
 
-    const medications = Object.keys(medicationMap)
-      .map(function (normalizedName) {
-        return medicationMap[normalizedName];
+    const medications = Object.keys(
+      medicationMap
+    )
+      .map(function (key) {
+        return medicationMap[key];
       })
-      .sort(function (firstMedication, secondMedication) {
-        return firstMedication.name.localeCompare(
-          secondMedication.name,
+      .sort(function (first, second) {
+        return first.name.localeCompare(
+          second.name,
           undefined,
           {
             sensitivity: "base"
@@ -141,13 +175,13 @@ function getMedicationList() {
 
     try {
       cache.put(
-        cacheKey,
+        MEDICATION_CACHE_KEY,
         JSON.stringify(medications),
         MEDICATION_CACHE_SECONDS
       );
     } catch (cacheError) {
       console.warn(
-        "Medication list could not be cached:",
+        "Medication list cache error:",
         cacheError
       );
     }
@@ -170,22 +204,15 @@ function getMedicationList() {
 
 
 /**
- * Searches every worksheet for a medication.
- *
- * Medication matching ignores:
- * - Capitalization
- * - Leading spaces
- * - Trailing spaces
- * - Repeated spaces
+ * Searches for a medication.
  *
  * @param {string} medicationName
  * @return {Object}
  */
 function searchMedication(medicationName) {
   try {
-    const cleanedMedicationName = cleanText_(
-      medicationName
-    );
+    const cleanedMedicationName =
+      cleanText_(medicationName);
 
     if (!cleanedMedicationName) {
       return {
@@ -195,9 +222,8 @@ function searchMedication(medicationName) {
       };
     }
 
-    const medicationData = locateMedication_(
-      cleanedMedicationName
-    );
+    const medicationData =
+      locateMedication_(cleanedMedicationName);
 
     if (!medicationData) {
       return {
@@ -213,9 +239,10 @@ function searchMedication(medicationName) {
       medication: {
         name: medicationData.medicationName,
         note:
-          medicationData.note ||
+          cleanText_(medicationData.note) ||
           "No medication note available.",
-        worksheetName: medicationData.sheet.getName()
+        worksheetName:
+          medicationData.sheet.getName()
       }
     };
   } catch (error) {
@@ -231,7 +258,7 @@ function searchMedication(medicationName) {
 
 
 /**
- * Finds the renal or dialysis dosing recommendation.
+ * Finds the dose recommendation.
  *
  * @param {string} medicationName
  * @param {number|string|null} creatinineClearance
@@ -244,9 +271,8 @@ function findDose(
   dialysisMethod
 ) {
   try {
-    const cleanedMedicationName = cleanText_(
-      medicationName
-    );
+    const cleanedMedicationName =
+      cleanText_(medicationName);
 
     if (!cleanedMedicationName) {
       return {
@@ -267,9 +293,8 @@ function findDose(
       };
     }
 
-    const medicationData = locateMedication_(
-      cleanedMedicationName
-    );
+    const medicationData =
+      locateMedication_(cleanedMedicationName);
 
     if (!medicationData) {
       return {
@@ -284,65 +309,77 @@ function findDose(
     let usedCrCl = null;
 
     if (
-      normalizedDialysisMethod !== "not_on_dialysis"
+      normalizedDialysisMethod !==
+      "not_on_dialysis"
     ) {
-      recommendation = findDialysisRecommendation_(
-        medicationData.rows,
-        normalizedDialysisMethod
-      );
+      recommendation =
+        findDialysisRecommendation_(
+          medicationData.rows,
+          normalizedDialysisMethod
+        );
     } else {
-      const crClResult = validateCreatinineClearance_(
-        creatinineClearance
-      );
+      const crClValidation =
+        validateCreatinineClearance_(
+          creatinineClearance
+        );
 
-      if (!crClResult.valid) {
+      if (!crClValidation.valid) {
         return {
           success: false,
           found: true,
-          message: crClResult.message
+          message: crClValidation.message
         };
       }
 
-      enteredCrCl = crClResult.originalValue;
+      enteredCrCl =
+        crClValidation.originalValue;
 
-      usedCrCl = determineCrClValue_(
-        crClResult.roundedValue,
+      usedCrCl = determineCrClLookupValue_(
+        crClValidation.roundedValue,
         medicationData.rows
       );
 
-      recommendation = findCrClRecommendation_(
-        medicationData.rows,
-        usedCrCl
-      );
+      recommendation =
+        findCrClRecommendation_(
+          medicationData.rows,
+          usedCrCl
+        );
     }
 
     recommendation = cleanText_(recommendation);
 
     if (!recommendation) {
-      recommendation = "No recommendation available.";
+      recommendation =
+        "No recommendation available.";
     }
 
     return {
       success: true,
       found: true,
       result: {
-        medication: medicationData.medicationName,
+        medication:
+          medicationData.medicationName,
 
-        creatinineClearanceEntered: enteredCrCl,
+        creatinineClearanceEntered:
+          enteredCrCl,
 
-        creatinineClearanceUsed: usedCrCl,
+        creatinineClearanceUsed:
+          usedCrCl,
 
-        dialysisMethod: getDialysisDisplayName_(
-          normalizedDialysisMethod
-        ),
+        dialysisMethod:
+          getDialysisDisplayName_(
+            normalizedDialysisMethod
+          ),
 
-        recommendedDose: recommendation,
+        recommendedDose:
+          recommendation,
 
         medicationNote:
           cleanText_(medicationData.note) ||
           "No medication note available.",
 
-        worksheetName: medicationData.sheet.getName()
+        worksheetName:
+          medicationData.sheet.getName()
       }
     };
   } catch (error) {
@@ -358,18 +395,23 @@ function findDose(
 
 
 /**
- * Searches every worksheet for an exact medication match.
+ * Locates the worksheet for a medication.
  *
- * It first checks the Drug Name value.
- * It then checks the worksheet name as a fallback.
+ * Matching ignores:
+ * - Uppercase/lowercase
+ * - Leading or trailing spaces
+ * - Repeated spaces
+ *
+ * It matches against both:
+ * - Drug Name value
+ * - Worksheet/tab name
  *
  * @param {string} medicationName
  * @return {Object|null}
  */
 function locateMedication_(medicationName) {
-  const normalizedSearchName = normalizeText_(
-    medicationName
-  );
+  const normalizedSearchName =
+    normalizeText_(medicationName);
 
   if (!normalizedSearchName) {
     return null;
@@ -378,49 +420,55 @@ function locateMedication_(medicationName) {
   const spreadsheet = getSpreadsheet_();
   const sheets = spreadsheet.getSheets();
 
-  let worksheetNameMatch = null;
+  let tabNameFallback = null;
 
   for (
-    let sheetIndex = 0;
-    sheetIndex < sheets.length;
-    sheetIndex += 1
+    let index = 0;
+    index < sheets.length;
+    index += 1
   ) {
-    const sheet = sheets[sheetIndex];
+    const sheet = sheets[index];
 
-    const medicationData = readMedicationSheet_(sheet);
+    const medicationData =
+      readMedicationSheet_(sheet);
 
     if (!medicationData) {
       continue;
     }
 
-    const normalizedMedicationName = normalizeText_(
-      medicationData.medicationName
-    );
+    const normalizedDrugName =
+      normalizeText_(
+        medicationData.medicationName
+      );
+
+    const normalizedTabName =
+      normalizeText_(sheet.getName());
 
     if (
-      normalizedMedicationName === normalizedSearchName
+      normalizedDrugName ===
+      normalizedSearchName
     ) {
       return medicationData;
     }
 
-    const normalizedWorksheetName = normalizeText_(
-      sheet.getName()
-    );
-
     if (
-      !worksheetNameMatch &&
-      normalizedWorksheetName === normalizedSearchName
+      !tabNameFallback &&
+      normalizedTabName ===
+      normalizedSearchName
     ) {
-      worksheetNameMatch = medicationData;
+      tabNameFallback = medicationData;
     }
   }
 
-  return worksheetNameMatch;
+  return tabNameFallback;
 }
 
 
 /**
- * Reads columns A and B from one medication worksheet.
+ * Reads a medication worksheet.
+ *
+ * The code searches columns A and B for the medication name.
+ * It is not required to be on row 1.
  *
  * @param {GoogleAppsScript.Spreadsheet.Sheet} sheet
  * @return {Object|null}
@@ -432,46 +480,95 @@ function readMedicationSheet_(sheet) {
     return null;
   }
 
-  const displayedValues = sheet
+  const values = sheet
     .getRange(1, 1, lastRow, 2)
     .getDisplayValues();
 
-  const rows = displayedValues.map(function (row) {
+  const rows = values.map(function (row) {
     return {
       key: cleanText_(row[0]),
       value: cleanText_(row[1])
     };
   });
 
-  const drugNameRow = rows.find(function (row) {
-    return normalizeLabel_(row.key) === "drug name";
-  });
+  const drugNameRow = rows.find(
+    function (row) {
+      const label =
+        normalizeLabel_(row.key);
 
-  /*
-   * Skip worksheets that do not contain:
-   *
-   * Column A: Drug Name
-   * Column B: Medication name
-   */
-  if (!drugNameRow || !drugNameRow.value) {
+      return (
+        label === "drug name" ||
+        label === "medication name" ||
+        label === "drug" ||
+        label === "medication"
+      );
+    }
+  );
+
+  const normalizedTabName =
+    normalizeText_(sheet.getName());
+
+  const excludedTabs = [
+    "instructions",
+    "instruction",
+    "settings",
+    "template",
+    "data",
+    "configuration",
+    "config",
+    "read me",
+    "readme"
+  ];
+
+  if (
+    !drugNameRow &&
+    excludedTabs.includes(normalizedTabName)
+  ) {
     return null;
   }
 
-  const noteRow = rows.find(function (row) {
-    return normalizeLabel_(row.key) === "note";
-  });
+  let medicationName = "";
+
+  if (
+    drugNameRow &&
+    cleanText_(drugNameRow.value)
+  ) {
+    medicationName =
+      cleanText_(drugNameRow.value);
+  } else {
+    medicationName =
+      cleanText_(sheet.getName());
+  }
+
+  if (!medicationName) {
+    return null;
+  }
+
+  const noteRow = rows.find(
+    function (row) {
+      const label =
+        normalizeLabel_(row.key);
+
+      return (
+        label === "note" ||
+        label === "notes" ||
+        label === "medication note" ||
+        label === "drug note"
+      );
+    }
+  );
 
   return {
     sheet: sheet,
     rows: rows,
-    medicationName: drugNameRow.value,
+    medicationName: medicationName,
     note: noteRow ? noteRow.value : ""
   };
 }
 
 
 /**
- * Finds the selected dialysis recommendation.
+ * Finds a dialysis recommendation.
  *
  * @param {Array<Object>} rows
  * @param {string} dialysisMethod
@@ -481,7 +578,7 @@ function findDialysisRecommendation_(
   rows,
   dialysisMethod
 ) {
-  const dialysisLabels = {
+  const acceptedLabels = {
     peritoneal_dialysis: [
       "peritoneal dialysis",
       "peritoneal",
@@ -491,6 +588,7 @@ function findDialysisRecommendation_(
     hemodialysis: [
       "hemodialysis",
       "haemodialysis",
+      "hemodialysis hd",
       "hd"
     ],
 
@@ -504,82 +602,97 @@ function findDialysisRecommendation_(
     ]
   };
 
-  const possibleLabels =
-    dialysisLabels[dialysisMethod] || [];
+  const targetLabels =
+    acceptedLabels[dialysisMethod] || [];
 
-  const matchingRow = rows.find(function (row) {
-    const normalizedRowLabel = normalizeLabel_(row.key);
+  const matchingRow = rows.find(
+    function (row) {
+      const normalizedRowLabel =
+        normalizeLabel_(row.key);
 
-    return possibleLabels.some(function (possibleLabel) {
-      return normalizedRowLabel === possibleLabel;
-    });
-  });
+      return targetLabels.some(
+        function (acceptedLabel) {
+          return (
+            normalizedRowLabel ===
+            acceptedLabel
+          );
+        }
+      );
+    }
+  );
 
-  return matchingRow ? matchingRow.value : "";
+  return matchingRow
+    ? matchingRow.value
+    : "";
 }
 
 
 /**
- * Finds an exact CrCl recommendation.
+ * Finds the recommendation for an exact CrCl row.
  *
  * @param {Array<Object>} rows
- * @param {number} creatinineClearance
+ * @param {number} crCl
  * @return {string}
  */
-function findCrClRecommendation_(
-  rows,
-  creatinineClearance
-) {
-  const matchingRow = rows.find(function (row) {
-    const numericRowValue = parseNumericKey_(row.key);
+function findCrClRecommendation_(rows, crCl) {
+  const matchingRow = rows.find(
+    function (row) {
+      const numericKey =
+        parseNumericKey_(row.key);
 
-    return (
-      numericRowValue !== null &&
-      numericRowValue === creatinineClearance
-    );
-  });
+      return (
+        numericKey !== null &&
+        numericKey === crCl
+      );
+    }
+  );
 
-  return matchingRow ? matchingRow.value : "";
+  return matchingRow
+    ? matchingRow.value
+    : "";
 }
 
 
 /**
- * Determines the CrCl row to use.
+ * Determines the CrCl value to search.
  *
- * Values from 0 through 60 use the matching rounded row.
- *
- * Values greater than 60:
- * - Use an exact row if it exists.
- * - Otherwise use row 60.
+ * Rules:
+ * - Decimal values are rounded
+ * - Values 0 through 60 use the rounded value
+ * - Values greater than 60 use an exact row if present
+ * - Otherwise values greater than 60 use row 60
  *
  * @param {number} roundedCrCl
  * @param {Array<Object>} rows
  * @return {number}
  */
-function determineCrClValue_(roundedCrCl, rows) {
+function determineCrClLookupValue_(
+  roundedCrCl,
+  rows
+) {
   if (roundedCrCl <= 60) {
     return roundedCrCl;
   }
 
-  const exactHigherRowExists = rows.some(function (row) {
-    const numericRowValue = parseNumericKey_(row.key);
+  const exactHigherRowExists =
+    rows.some(function (row) {
+      const numericKey =
+        parseNumericKey_(row.key);
 
-    return (
-      numericRowValue !== null &&
-      numericRowValue === roundedCrCl
-    );
-  });
+      return (
+        numericKey !== null &&
+        numericKey === roundedCrCl
+      );
+    });
 
-  if (exactHigherRowExists) {
-    return roundedCrCl;
-  }
-
-  return 60;
+  return exactHigherRowExists
+    ? roundedCrCl
+    : 60;
 }
 
 
 /**
- * Validates and rounds creatinine clearance.
+ * Validates creatinine clearance.
  *
  * @param {number|string|null} value
  * @return {Object}
@@ -597,9 +710,8 @@ function validateCreatinineClearance_(value) {
     };
   }
 
-  const numericValue = Number(
-    String(value).trim()
-  );
+  const numericValue =
+    Number(String(value).trim());
 
   if (!Number.isFinite(numericValue)) {
     return {
@@ -626,50 +738,79 @@ function validateCreatinineClearance_(value) {
 
 
 /**
- * Normalizes dialysis values sent by Index.html.
+ * Normalizes dialysis values sent from Index.html.
  *
  * @param {string} value
  * @return {string}
  */
 function normalizeDialysisMethod_(value) {
-  const normalizedValue = normalizeText_(value)
-    .replace(/[\s-]+/g, "_");
+  const normalized =
+    normalizeText_(value)
+      .replace(/[\s-]+/g, "_");
 
   const acceptedValues = {
-    not_on_dialysis: "not_on_dialysis",
-    notondialysis: "not_on_dialysis",
-    none: "not_on_dialysis",
+    not_on_dialysis:
+      "not_on_dialysis",
 
-    peritoneal_dialysis: "peritoneal_dialysis",
-    peritonealdialysis: "peritoneal_dialysis",
-    pd: "peritoneal_dialysis",
+    notondialysis:
+      "not_on_dialysis",
 
-    hemodialysis: "hemodialysis",
-    haemodialysis: "hemodialysis",
-    hd: "hemodialysis",
+    none:
+      "not_on_dialysis",
 
-    capd: "capd",
+    peritoneal_dialysis:
+      "peritoneal_dialysis",
 
-    crrt: "crrt"
+    peritonealdialysis:
+      "peritoneal_dialysis",
+
+    pd:
+      "peritoneal_dialysis",
+
+    hemodialysis:
+      "hemodialysis",
+
+    haemodialysis:
+      "hemodialysis",
+
+    hd:
+      "hemodialysis",
+
+    capd:
+      "capd",
+
+    crrt:
+      "crrt"
   };
 
-  return acceptedValues[normalizedValue] || "";
+  return acceptedValues[normalized] || "";
 }
 
 
 /**
- * Returns the dialysis name displayed in the result card.
+ * Returns the dialysis name shown in the result.
  *
  * @param {string} dialysisMethod
  * @return {string}
  */
-function getDialysisDisplayName_(dialysisMethod) {
+function getDialysisDisplayName_(
+  dialysisMethod
+) {
   const displayNames = {
-    not_on_dialysis: "Not on Dialysis",
-    peritoneal_dialysis: "Peritoneal Dialysis",
-    hemodialysis: "Hemodialysis",
-    capd: "CAPD",
-    crrt: "CRRT"
+    not_on_dialysis:
+      "Not on Dialysis",
+
+    peritoneal_dialysis:
+      "Peritoneal Dialysis",
+
+    hemodialysis:
+      "Hemodialysis",
+
+    capd:
+      "CAPD",
+
+    crrt:
+      "CRRT"
   };
 
   return displayNames[dialysisMethod] || "";
@@ -677,32 +818,34 @@ function getDialysisDisplayName_(dialysisMethod) {
 
 
 /**
- * Converts a worksheet label such as "40" to a number.
- *
- * Non-numeric labels return null.
+ * Converts a worksheet key to a number.
  *
  * @param {*} value
  * @return {number|null}
  */
 function parseNumericKey_(value) {
-  const cleanedValue = cleanText_(value);
+  const cleanedValue =
+    cleanText_(value);
 
-  if (!/^-?\d+(?:\.\d+)?$/.test(cleanedValue)) {
+  if (
+    !/^-?\d+(?:\.\d+)?$/.test(
+      cleanedValue
+    )
+  ) {
     return null;
   }
 
-  const numericValue = Number(cleanedValue);
+  const numericValue =
+    Number(cleanedValue);
 
-  if (!Number.isFinite(numericValue)) {
-    return null;
-  }
-
-  return numericValue;
+  return Number.isFinite(numericValue)
+    ? numericValue
+    : null;
 }
 
 
 /**
- * Normalizes medication names for matching.
+ * Cleans searchable text.
  *
  * @param {*} value
  * @return {string}
@@ -715,27 +858,30 @@ function normalizeText_(value) {
 
 
 /**
- * Normalizes labels from column A.
+ * Cleans labels in column A.
  *
  * @param {*} value
  * @return {string}
  */
 function normalizeLabel_(value) {
   return normalizeText_(value)
-    .replace(/[_-]+/g, " ")
+    .replace(/[_:.-]+/g, " ")
     .replace(/\s+/g, " ")
     .trim();
 }
 
 
 /**
- * Cleans text values.
+ * Trims text and removes repeated spaces.
  *
  * @param {*} value
  * @return {string}
  */
 function cleanText_(value) {
-  if (value === null || value === undefined) {
+  if (
+    value === null ||
+    value === undefined
+  ) {
     return "";
   }
 
@@ -746,7 +892,7 @@ function cleanText_(value) {
 
 
 /**
- * Returns a safe error message.
+ * Returns a readable error message.
  *
  * @param {*} error
  * @return {string}
@@ -756,18 +902,25 @@ function getErrorMessage_(error) {
     return String(error.message);
   }
 
-  return "An unexpected error occurred. Please try again.";
+  return (
+    "An unexpected error occurred. " +
+    "Please try again."
+  );
 }
 
 
 /**
- * Run this function manually after adding or renaming medication
- * worksheets if you want to immediately clear the medication cache.
+ * Run this manually when medication tabs are added,
+ * renamed, or deleted.
+ *
+ * It removes the medication list cache.
+ *
+ * @return {Object}
  */
 function clearMedicationCache() {
-  CacheService.getScriptCache().remove(
-    "renalDoseMedicationList"
-  );
+  CacheService
+    .getScriptCache()
+    .remove(MEDICATION_CACHE_KEY);
 
   return {
     success: true,
@@ -777,30 +930,2393 @@ function clearMedicationCache() {
 
 
 /**
- * Run this function manually from the Apps Script editor to verify
- * that the spreadsheet can be opened and medication tabs can be read.
+ * Run this manually to test the spreadsheet connection.
+ *
+ * View the result in the execution log.
+ *
+ * @return {Object}
  */
 function testSpreadsheetConnection() {
   const spreadsheet = getSpreadsheet_();
   const sheets = spreadsheet.getSheets();
 
-  const results = sheets.map(function (sheet) {
-    const medicationData = readMedicationSheet_(sheet);
+  const worksheetResults =
+    sheets.map(function (sheet) {
+      const medicationData =
+        readMedicationSheet_(sheet);
 
-    return {
-      worksheetName: sheet.getName(),
-      medicationName: medicationData
-        ? medicationData.medicationName
-        : "Drug Name row not found"
-    };
-  });
+      return {
+        worksheetName: sheet.getName(),
+        medicationName: medicationData
+          ? medicationData.medicationName
+          : "Not recognized as a medication worksheet"
+      };
+    });
 
-  console.log(results);
-
-  return {
+  const result = {
     success: true,
-    spreadsheetName: spreadsheet.getName(),
-    numberOfWorksheets: sheets.length,
-    worksheets: results
+    spreadsheetName:
+      spreadsheet.getName(),
+    spreadsheetId:
+      spreadsheet.getId(),
+    numberOfWorksheets:
+      sheets.length,
+    worksheets:
+      worksheetResults
   };
+
+  console.log(
+    JSON.stringify(result, null, 2)
+  );
+
+  return result;
 }
+
+
+/**
+ * Run this manually to test the medication list.
+ *
+ * @return {Object}
+ */
+function testMedicationList() {
+  clearMedicationCache();
+
+  const result = getMedicationList();
+
+  console.log(
+    JSON.stringify(result, null, 2)
+  );
+
+  return result;
+}
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+    <!DOCTYPE html>
+<html lang="en">
+<head>
+  <base target="_top">
+
+  <meta charset="UTF-8">
+
+  <meta
+    name="viewport"
+    content="width=device-width, initial-scale=1.0"
+  >
+
+  <title>Renal Dose Adjustment</title>
+
+  <style>
+    :root {
+      --primary: #176b70;
+      --primary-dark: #10555a;
+      --primary-soft: #e2f3f2;
+      --secondary: #2f8f83;
+
+      --background: #eef5f5;
+      --surface: #ffffff;
+      --surface-soft: #f4f8f8;
+
+      --text: #1a3038;
+      --muted: #6a7d83;
+
+      --border: #d9e6e7;
+
+      --success-background: #e7f7f2;
+      --success-border: #97d4c4;
+      --success-text: #155c50;
+
+      --error-background: #fff0f0;
+      --error-border: #efb1b1;
+      --error-text: #9b3030;
+
+      --warning-background: #fff8e5;
+      --warning-border: #ead082;
+      --warning-text: #72560a;
+
+      --shadow:
+        0 20px 60px rgba(29, 71, 76, 0.12);
+
+      --small-shadow:
+        0 12px 30px rgba(29, 71, 76, 0.10);
+    }
+
+    * {
+      box-sizing: border-box;
+    }
+
+    html {
+      min-height: 100%;
+      background: var(--background);
+    }
+
+    body {
+      min-height: 100vh;
+      margin: 0;
+
+      color: var(--text);
+
+      background:
+        radial-gradient(
+          circle at 12% 8%,
+          rgba(52, 151, 141, 0.14),
+          transparent 34%
+        ),
+        radial-gradient(
+          circle at 88% 8%,
+          rgba(75, 121, 171, 0.10),
+          transparent 30%
+        ),
+        linear-gradient(
+          145deg,
+          #edf5f5,
+          #f8fafb
+        );
+
+      font-family:
+        Inter,
+        -apple-system,
+        BlinkMacSystemFont,
+        "Segoe UI",
+        Roboto,
+        Arial,
+        sans-serif;
+
+      line-height: 1.5;
+      -webkit-font-smoothing: antialiased;
+    }
+
+    button,
+    input,
+    select {
+      font: inherit;
+    }
+
+    .page {
+      width: min(1120px, 100%);
+      margin: 0 auto;
+      padding: 28px 18px 40px;
+    }
+
+    .hero {
+      position: relative;
+      overflow: hidden;
+
+      margin-bottom: 22px;
+      padding: 34px;
+
+      color: #ffffff;
+
+      background:
+        linear-gradient(
+          135deg,
+          #135d63,
+          #319082
+        );
+
+      border-radius: 26px;
+      box-shadow: var(--shadow);
+    }
+
+    .hero::before {
+      position: absolute;
+
+      width: 250px;
+      height: 250px;
+
+      top: -130px;
+      right: -60px;
+
+      content: "";
+
+      background:
+        rgba(255, 255, 255, 0.10);
+
+      border-radius: 999px;
+    }
+
+    .hero-content {
+      position: relative;
+      z-index: 1;
+    }
+
+    .hero-icon {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+
+      width: 54px;
+      height: 54px;
+
+      margin-bottom: 15px;
+
+      background:
+        rgba(255, 255, 255, 0.15);
+
+      border:
+        1px solid rgba(255, 255, 255, 0.22);
+
+      border-radius: 16px;
+
+      font-size: 24px;
+      font-weight: 800;
+    }
+
+    .hero h1 {
+      margin: 0;
+
+      font-size:
+        clamp(2rem, 4vw, 3rem);
+
+      line-height: 1.1;
+      letter-spacing: -0.04em;
+    }
+
+    .hero p {
+      max-width: 760px;
+
+      margin: 12px 0 0;
+
+      color:
+        rgba(255, 255, 255, 0.84);
+
+      font-size: 1rem;
+    }
+
+    .form-card {
+      padding: 28px;
+
+      background:
+        rgba(255, 255, 255, 0.95);
+
+      border:
+        1px solid rgba(255, 255, 255, 0.80);
+
+      border-radius: 26px;
+
+      box-shadow: var(--shadow);
+    }
+
+    .section-header {
+      margin-bottom: 24px;
+    }
+
+    .section-header h2 {
+      margin: 0;
+
+      font-size: 1.4rem;
+      letter-spacing: -0.025em;
+    }
+
+    .section-header p {
+      margin: 6px 0 0;
+
+      color: var(--muted);
+      font-size: 0.93rem;
+    }
+
+    .form-grid {
+      display: grid;
+
+      grid-template-columns:
+        minmax(0, 1.4fr)
+        minmax(250px, 0.7fr);
+
+      gap: 20px;
+    }
+
+    .full-width {
+      grid-column: 1 / -1;
+    }
+
+    .field-group {
+      min-width: 0;
+    }
+
+    .field-label {
+      display: inline-block;
+
+      margin-bottom: 8px;
+
+      color: var(--text);
+
+      font-size: 0.92rem;
+      font-weight: 750;
+    }
+
+    .required {
+      color: #b94343;
+    }
+
+    .input-wrapper,
+    .autocomplete-wrapper {
+      position: relative;
+    }
+
+    .field-input,
+    .field-select {
+      width: 100%;
+      height: 53px;
+
+      padding: 0 15px;
+
+      color: var(--text);
+
+      background: var(--surface);
+
+      border: 1px solid var(--border);
+      border-radius: 13px;
+
+      outline: none;
+
+      transition:
+        border-color 150ms ease,
+        box-shadow 150ms ease,
+        background-color 150ms ease;
+    }
+
+    .field-input {
+      padding-right: 48px;
+    }
+
+    .field-input::placeholder {
+      color: #96a8ad;
+    }
+
+    .field-input:hover,
+    .field-select:hover {
+      border-color: #b7cacc;
+    }
+
+    .field-input:focus,
+    .field-select:focus {
+      border-color: var(--primary);
+
+      box-shadow:
+        0 0 0 4px
+        rgba(23, 107, 112, 0.14);
+    }
+
+    .field-input:disabled {
+      color: #87989d;
+
+      background: #eef3f3;
+
+      cursor: not-allowed;
+    }
+
+    .field-select {
+      cursor: pointer;
+    }
+
+    .input-icon {
+      position: absolute;
+
+      top: 50%;
+      right: 15px;
+
+      color: #7b9298;
+      font-size: 0.84rem;
+
+      transform: translateY(-50%);
+
+      pointer-events: none;
+    }
+
+    .helper {
+      min-height: 20px;
+
+      margin-top: 7px;
+
+      color: var(--muted);
+      font-size: 0.81rem;
+    }
+
+    .helper.error {
+      color: var(--error-text);
+    }
+
+    .autocomplete-dropdown {
+      position: absolute;
+      z-index: 100;
+
+      top: calc(100% + 8px);
+      right: 0;
+      left: 0;
+
+      display: none;
+
+      max-height: 330px;
+      overflow-y: auto;
+
+      padding: 7px;
+
+      background: var(--surface);
+
+      border: 1px solid var(--border);
+      border-radius: 15px;
+
+      box-shadow:
+        0 20px 50px
+        rgba(25, 61, 67, 0.20);
+    }
+
+    .autocomplete-dropdown.open {
+      display: block;
+    }
+
+    .suggestion {
+      display: flex;
+      align-items: center;
+
+      width: 100%;
+
+      gap: 11px;
+
+      padding: 11px 12px;
+
+      color: var(--text);
+      text-align: left;
+
+      background: transparent;
+
+      border: 0;
+      border-radius: 10px;
+
+      cursor: pointer;
+    }
+
+    .suggestion:hover,
+    .suggestion.active {
+      background: var(--primary-soft);
+    }
+
+    .suggestion-icon {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+
+      flex: 0 0 auto;
+
+      width: 31px;
+      height: 31px;
+
+      color: var(--primary);
+
+      background: #edf8f7;
+
+      border-radius: 9px;
+
+      font-size: 13px;
+      font-weight: 800;
+    }
+
+    .suggestion-name {
+      min-width: 0;
+
+      overflow: hidden;
+
+      font-size: 0.94rem;
+      font-weight: 650;
+
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+
+    .empty-suggestion {
+      padding: 17px 13px;
+
+      color: var(--muted);
+      text-align: center;
+
+      font-size: 0.88rem;
+    }
+
+    .actions {
+      display: flex;
+      flex-wrap: wrap;
+
+      gap: 12px;
+
+      margin-top: 25px;
+    }
+
+    .button {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+
+      min-height: 49px;
+
+      gap: 9px;
+
+      padding: 0 21px;
+
+      border: 0;
+      border-radius: 13px;
+
+      font-weight: 750;
+
+      cursor: pointer;
+
+      transition:
+        transform 130ms ease,
+        background-color 130ms ease,
+        box-shadow 130ms ease;
+    }
+
+    .button:hover:not(:disabled) {
+      transform: translateY(-1px);
+    }
+
+    .button:disabled {
+      opacity: 0.62;
+      cursor: not-allowed;
+    }
+
+    .button-primary {
+      min-width: 155px;
+
+      color: #ffffff;
+
+      background: var(--primary);
+
+      box-shadow:
+        0 10px 24px
+        rgba(23, 107, 112, 0.23);
+    }
+
+    .button-primary:hover:not(:disabled) {
+      background: var(--primary-dark);
+    }
+
+    .button-secondary {
+      color: var(--text);
+      background: #edf3f3;
+    }
+
+    .spinner {
+      display: none;
+
+      width: 18px;
+      height: 18px;
+
+      border:
+        2px solid rgba(255, 255, 255, 0.40);
+
+      border-top-color: #ffffff;
+      border-radius: 50%;
+
+      animation:
+        spin 700ms linear infinite;
+    }
+
+    .button.loading .spinner {
+      display: inline-block;
+    }
+
+    .button.loading .search-icon {
+      display: none;
+    }
+
+    @keyframes spin {
+      to {
+        transform: rotate(360deg);
+      }
+    }
+
+    .status {
+      display: none;
+
+      margin-top: 20px;
+      padding: 14px 15px;
+
+      border: 1px solid transparent;
+      border-radius: 13px;
+
+      font-size: 0.9rem;
+      font-weight: 600;
+    }
+
+    .status.show {
+      display: block;
+    }
+
+    .status.error {
+      color: var(--error-text);
+      background: var(--error-background);
+      border-color: var(--error-border);
+    }
+
+    .status.warning {
+      color: var(--warning-text);
+      background: var(--warning-background);
+      border-color: var(--warning-border);
+    }
+
+    .status.success {
+      color: var(--success-text);
+      background: var(--success-background);
+      border-color: var(--success-border);
+    }
+
+    .result-card {
+      display: none;
+
+      margin-top: 22px;
+
+      overflow: hidden;
+
+      background: var(--surface);
+
+      border: 1px solid var(--border);
+      border-radius: 25px;
+
+      box-shadow: var(--small-shadow);
+    }
+
+    .result-card.show {
+      display: block;
+    }
+
+    .result-header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+
+      gap: 15px;
+
+      padding: 22px 24px;
+
+      background:
+        linear-gradient(
+          135deg,
+          #e2f3f2,
+          #f1f8f8
+        );
+
+      border-bottom: 1px solid var(--border);
+    }
+
+    .result-eyebrow {
+      margin: 0 0 4px;
+
+      color: var(--primary);
+
+      font-size: 0.74rem;
+      font-weight: 800;
+      letter-spacing: 0.08em;
+      text-transform: uppercase;
+    }
+
+    .result-title {
+      margin: 0;
+
+      font-size:
+        clamp(1.3rem, 3vw, 1.7rem);
+
+      letter-spacing: -0.03em;
+      overflow-wrap: anywhere;
+    }
+
+    .result-badge {
+      flex: 0 0 auto;
+
+      padding: 7px 11px;
+
+      color: var(--success-text);
+
+      background:
+        rgba(255, 255, 255, 0.78);
+
+      border:
+        1px solid var(--success-border);
+
+      border-radius: 999px;
+
+      font-size: 0.76rem;
+      font-weight: 800;
+    }
+
+    .result-body {
+      padding: 24px;
+    }
+
+    .dose-box {
+      margin-bottom: 21px;
+      padding: 19px;
+
+      background:
+        linear-gradient(
+          135deg,
+          #e7f7f2,
+          #effaf7
+        );
+
+      border:
+        1px solid var(--success-border);
+
+      border-left:
+        5px solid var(--secondary);
+
+      border-radius: 15px;
+    }
+
+    .dose-label {
+      margin-bottom: 7px;
+
+      color: var(--success-text);
+
+      font-size: 0.76rem;
+      font-weight: 850;
+      letter-spacing: 0.07em;
+      text-transform: uppercase;
+    }
+
+    .dose-value {
+      margin: 0;
+
+      color: #123f39;
+
+      font-size:
+        clamp(1.05rem, 2.6vw, 1.28rem);
+
+      font-weight: 780;
+      line-height: 1.55;
+
+      overflow-wrap: anywhere;
+      white-space: pre-wrap;
+    }
+
+    .result-grid {
+      display: grid;
+
+      grid-template-columns:
+        repeat(2, minmax(0, 1fr));
+
+      gap: 13px;
+    }
+
+    .result-item {
+      min-width: 0;
+
+      padding: 15px;
+
+      background: var(--surface-soft);
+
+      border: 1px solid #e4eded;
+      border-radius: 13px;
+    }
+
+    .result-item.full {
+      grid-column: 1 / -1;
+    }
+
+    .result-item-label {
+      margin-bottom: 5px;
+
+      color: var(--muted);
+
+      font-size: 0.75rem;
+      font-weight: 760;
+      letter-spacing: 0.04em;
+      text-transform: uppercase;
+    }
+
+    .result-item-value {
+      color: var(--text);
+
+      font-size: 0.94rem;
+      font-weight: 650;
+      line-height: 1.5;
+
+      overflow-wrap: anywhere;
+      white-space: pre-wrap;
+    }
+
+    .disclaimer {
+      margin-top: 22px;
+      padding: 17px 19px;
+
+      color: #576c72;
+
+      background:
+        rgba(255, 255, 255, 0.75);
+
+      border: 1px solid var(--border);
+      border-radius: 16px;
+
+      font-size: 0.84rem;
+      line-height: 1.6;
+    }
+
+    .disclaimer strong {
+      color: var(--text);
+    }
+
+    .footer {
+      padding-top: 18px;
+
+      color: #829397;
+      text-align: center;
+
+      font-size: 0.77rem;
+    }
+
+    @media (max-width: 760px) {
+      .page {
+        padding-right: 14px;
+        padding-left: 14px;
+      }
+
+      .hero {
+        padding: 27px 22px;
+        border-radius: 22px;
+      }
+
+      .form-card {
+        padding: 21px 17px;
+        border-radius: 22px;
+      }
+
+      .form-grid {
+        grid-template-columns: 1fr;
+        gap: 17px;
+      }
+
+      .full-width {
+        grid-column: auto;
+      }
+
+      .actions {
+        display: grid;
+        grid-template-columns: 1fr 1fr;
+      }
+
+      .button {
+        width: 100%;
+      }
+
+      .result-header {
+        align-items: flex-start;
+        padding: 19px;
+      }
+
+      .result-body {
+        padding: 19px;
+      }
+
+      .result-grid {
+        grid-template-columns: 1fr;
+      }
+
+      .result-item.full {
+        grid-column: auto;
+      }
+    }
+
+    @media (max-width: 430px) {
+      .actions {
+        grid-template-columns: 1fr;
+      }
+
+      .result-badge {
+        display: none;
+      }
+    }
+  </style>
+</head>
+
+<body>
+  <main class="page">
+    <section class="hero">
+      <div class="hero-content">
+        <div class="hero-icon">Rx</div>
+
+        <h1>Renal Dose Adjustment</h1>
+
+        <p>
+          Search for a medication and retrieve its renal or
+          dialysis dosing recommendation from the clinical
+          reference spreadsheet.
+        </p>
+      </div>
+    </section>
+
+    <section class="form-card">
+      <div class="section-header">
+        <h2>
+          Patient and medication information
+        </h2>
+
+        <p>
+          Type at least three letters to view medication
+          recommendations.
+        </p>
+      </div>
+
+      <form id="doseForm" novalidate>
+        <div class="form-grid">
+          <div class="field-group full-width">
+            <label
+              class="field-label"
+              for="medicationInput"
+            >
+              Medication
+              <span class="required">*</span>
+            </label>
+
+            <div
+              id="autocompleteWrapper"
+              class="autocomplete-wrapper"
+            >
+              <input
+                id="medicationInput"
+                class="field-input"
+                type="text"
+                autocomplete="off"
+                spellcheck="false"
+                placeholder="Start typing a medication name"
+                aria-autocomplete="list"
+                aria-controls="suggestionDropdown"
+                aria-expanded="false"
+              >
+
+              <span class="input-icon">
+                Search
+              </span>
+
+              <div
+                id="suggestionDropdown"
+                class="autocomplete-dropdown"
+                role="listbox"
+              ></div>
+            </div>
+
+            <div
+              id="medicationHelper"
+              class="helper"
+            >
+              Loading medication names...
+            </div>
+          </div>
+
+          <div class="field-group">
+            <label
+              class="field-label"
+              for="crclInput"
+            >
+              Creatinine Clearance
+              <span class="required">*</span>
+            </label>
+
+            <div class="input-wrapper">
+              <input
+                id="crclInput"
+                class="field-input"
+                type="number"
+                min="0"
+                step="any"
+                inputmode="decimal"
+                placeholder="Example: 37.8"
+              >
+
+              <span class="input-icon">
+                mL/min
+              </span>
+            </div>
+
+            <div
+              id="crclHelper"
+              class="helper"
+            >
+              Decimal values are rounded to the nearest
+              whole number.
+            </div>
+          </div>
+
+          <div class="field-group">
+            <label
+              class="field-label"
+              for="dialysisSelect"
+            >
+              Dialysis Method
+            </label>
+
+            <select
+              id="dialysisSelect"
+              class="field-select"
+            >
+              <option value="not_on_dialysis">
+                Not on Dialysis
+              </option>
+
+              <option value="peritoneal_dialysis">
+                Peritoneal Dialysis
+              </option>
+
+              <option value="hemodialysis">
+                Hemodialysis
+              </option>
+
+              <option value="capd">
+                CAPD
+              </option>
+
+              <option value="crrt">
+                CRRT
+              </option>
+            </select>
+
+            <div class="helper">
+              Selecting dialysis disables and ignores
+              creatinine clearance.
+            </div>
+          </div>
+        </div>
+
+        <div class="actions">
+          <button
+            id="findDoseButton"
+            class="button button-primary"
+            type="submit"
+          >
+            <span class="search-icon">
+              Search
+            </span>
+
+            <span class="spinner"></span>
+
+            <span id="findDoseButtonText">
+              Find Dose
+            </span>
+          </button>
+
+          <button
+            id="clearButton"
+            class="button button-secondary"
+            type="button"
+          >
+            Clear
+          </button>
+        </div>
+      </form>
+
+      <div
+        id="statusMessage"
+        class="status"
+        role="alert"
+      ></div>
+    </section>
+
+    <section
+      id="resultCard"
+      class="result-card"
+    >
+      <div class="result-header">
+        <div>
+          <p class="result-eyebrow">
+            Dose recommendation
+          </p>
+
+          <h2
+            id="resultMedication"
+            class="result-title"
+          ></h2>
+        </div>
+
+        <span class="result-badge">
+          Reference Result
+        </span>
+      </div>
+
+      <div class="result-body">
+        <div class="dose-box">
+          <div class="dose-label">
+            Recommended Dose
+          </div>
+
+          <p
+            id="resultDose"
+            class="dose-value"
+          ></p>
+        </div>
+
+        <div class="result-grid">
+          <div class="result-item">
+            <div class="result-item-label">
+              Creatinine Clearance
+            </div>
+
+            <div
+              id="resultCrCl"
+              class="result-item-value"
+            ></div>
+          </div>
+
+          <div class="result-item">
+            <div class="result-item-label">
+              Dialysis Method
+            </div>
+
+            <div
+              id="resultDialysis"
+              class="result-item-value"
+            ></div>
+          </div>
+
+          <div class="result-item">
+            <div class="result-item-label">
+              Worksheet Name
+            </div>
+
+            <div
+              id="resultWorksheet"
+              class="result-item-value"
+            ></div>
+          </div>
+
+          <div class="result-item full">
+            <div class="result-item-label">
+              Medication Note
+            </div>
+
+            <div
+              id="resultNote"
+              class="result-item-value"
+            ></div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <aside class="disclaimer">
+      <strong>Clinical disclaimer:</strong>
+      This application is intended as a clinical reference
+      tool only and does not replace professional clinical
+      judgment, institutional protocols, or patient-specific
+      assessment.
+    </aside>
+
+    <footer class="footer">
+      Renal Dose Adjustment Clinical Reference
+    </footer>
+  </main>
+
+  <script>
+    "use strict";
+
+    const state = {
+      medications: [],
+      suggestions: [],
+      activeSuggestionIndex: -1,
+      medicationListLoaded: false,
+      searching: false
+    };
+
+    const elements = {};
+
+    document.addEventListener(
+      "DOMContentLoaded",
+      initializeApplication
+    );
+
+
+    function initializeApplication() {
+      cacheElements();
+      attachEvents();
+      updateDialysisState();
+      loadMedicationList();
+    }
+
+
+    function cacheElements() {
+      elements.doseForm =
+        document.getElementById("doseForm");
+
+      elements.medicationInput =
+        document.getElementById(
+          "medicationInput"
+        );
+
+      elements.medicationHelper =
+        document.getElementById(
+          "medicationHelper"
+        );
+
+      elements.autocompleteWrapper =
+        document.getElementById(
+          "autocompleteWrapper"
+        );
+
+      elements.suggestionDropdown =
+        document.getElementById(
+          "suggestionDropdown"
+        );
+
+      elements.crclInput =
+        document.getElementById(
+          "crclInput"
+        );
+
+      elements.crclHelper =
+        document.getElementById(
+          "crclHelper"
+        );
+
+      elements.dialysisSelect =
+        document.getElementById(
+          "dialysisSelect"
+        );
+
+      elements.findDoseButton =
+        document.getElementById(
+          "findDoseButton"
+        );
+
+      elements.findDoseButtonText =
+        document.getElementById(
+          "findDoseButtonText"
+        );
+
+      elements.clearButton =
+        document.getElementById(
+          "clearButton"
+        );
+
+      elements.statusMessage =
+        document.getElementById(
+          "statusMessage"
+        );
+
+      elements.resultCard =
+        document.getElementById(
+          "resultCard"
+        );
+
+      elements.resultMedication =
+        document.getElementById(
+          "resultMedication"
+        );
+
+      elements.resultDose =
+        document.getElementById(
+          "resultDose"
+        );
+
+      elements.resultCrCl =
+        document.getElementById(
+          "resultCrCl"
+        );
+
+      elements.resultDialysis =
+        document.getElementById(
+          "resultDialysis"
+        );
+
+      elements.resultWorksheet =
+        document.getElementById(
+          "resultWorksheet"
+        );
+
+      elements.resultNote =
+        document.getElementById(
+          "resultNote"
+        );
+    }
+
+
+    function attachEvents() {
+      elements.medicationInput.addEventListener(
+        "input",
+        handleMedicationInput
+      );
+
+      elements.medicationInput.addEventListener(
+        "keydown",
+        handleMedicationKeyboard
+      );
+
+      elements.medicationInput.addEventListener(
+        "focus",
+        function () {
+          const query = normalizeText(
+            elements.medicationInput.value
+          );
+
+          if (query.length >= 3) {
+            updateSuggestions();
+          }
+        }
+      );
+
+      elements.dialysisSelect.addEventListener(
+        "change",
+        updateDialysisState
+      );
+
+      elements.doseForm.addEventListener(
+        "submit",
+        function (event) {
+          event.preventDefault();
+          submitDoseSearch();
+        }
+      );
+
+      elements.clearButton.addEventListener(
+        "click",
+        clearForm
+      );
+
+      document.addEventListener(
+        "click",
+        handleOutsideClick
+      );
+    }
+
+
+    function loadMedicationList() {
+      setMedicationHelper(
+        "Loading medication names...",
+        false
+      );
+
+      google.script.run
+        .withSuccessHandler(
+          handleMedicationListSuccess
+        )
+        .withFailureHandler(
+          handleMedicationListFailure
+        )
+        .getMedicationList();
+    }
+
+
+    function handleMedicationListSuccess(
+      response
+    ) {
+      if (
+        !response ||
+        response.success !== true
+      ) {
+        handleMedicationListFailure(
+          response &&
+          response.message
+            ? response.message
+            : "Unable to load medication names."
+        );
+
+        return;
+      }
+
+      const records = Array.isArray(
+        response.medications
+      )
+        ? response.medications
+        : [];
+
+      state.medications = records
+        .map(function (record) {
+          if (
+            typeof record === "string"
+          ) {
+            return {
+              name: cleanText(record),
+              worksheetName: ""
+            };
+          }
+
+          return {
+            name: cleanText(
+              record && record.name
+            ),
+
+            worksheetName: cleanText(
+              record &&
+              record.worksheetName
+            )
+          };
+        })
+        .filter(function (record) {
+          return record.name.length > 0;
+        })
+        .sort(function (first, second) {
+          return first.name.localeCompare(
+            second.name,
+            undefined,
+            {
+              sensitivity: "base"
+            }
+          );
+        });
+
+      state.medicationListLoaded = true;
+
+      if (
+        state.medications.length === 0
+      ) {
+        setMedicationHelper(
+          "No medication worksheets were found.",
+          true
+        );
+
+        showStatus(
+          "No medication worksheets were found. " +
+          "Confirm that each tab has a medication name " +
+          "or that the worksheet tab itself is named " +
+          "after the medication.",
+          "warning"
+        );
+
+        return;
+      }
+
+      setMedicationHelper(
+        state.medications.length +
+        " medications loaded. Type at least " +
+        "three letters to search.",
+        false
+      );
+    }
+
+
+    function handleMedicationListFailure(
+      error
+    ) {
+      state.medicationListLoaded = false;
+      state.medications = [];
+
+      const message =
+        extractErrorMessage(
+          error,
+          "Unable to load medication names."
+        );
+
+      setMedicationHelper(
+        message,
+        true
+      );
+
+      showStatus(
+        message,
+        "error"
+      );
+    }
+
+
+    function handleMedicationInput() {
+      hideStatus();
+      hideResult();
+
+      elements.medicationInput.removeAttribute(
+        "aria-invalid"
+      );
+
+      updateSuggestions();
+    }
+
+
+    function updateSuggestions() {
+      const query = normalizeText(
+        elements.medicationInput.value
+      );
+
+      state.activeSuggestionIndex = -1;
+
+      if (query.length < 3) {
+        state.suggestions = [];
+
+        closeSuggestions();
+
+        if (
+          state.medicationListLoaded
+        ) {
+          setMedicationHelper(
+            "Type at least three letters.",
+            false
+          );
+        }
+
+        return;
+      }
+
+      if (
+        !state.medicationListLoaded
+      ) {
+        closeSuggestions();
+
+        setMedicationHelper(
+          "Medication names are still loading.",
+          true
+        );
+
+        return;
+      }
+
+      const startingMatches = [];
+      const containingMatches = [];
+
+      state.medications.forEach(
+        function (record) {
+          const normalizedName =
+            normalizeText(record.name);
+
+          if (
+            normalizedName.startsWith(
+              query
+            )
+          ) {
+            startingMatches.push(record);
+          } else if (
+            normalizedName.includes(query)
+          ) {
+            containingMatches.push(record);
+          }
+        }
+      );
+
+      startingMatches.sort(
+        compareMedications
+      );
+
+      containingMatches.sort(
+        compareMedications
+      );
+
+      state.suggestions =
+        startingMatches
+          .concat(containingMatches)
+          .slice(0, 10);
+
+      renderSuggestions();
+
+      if (
+        state.suggestions.length > 0
+      ) {
+        setMedicationHelper(
+          state.suggestions.length +
+          " matching medication" +
+          (
+            state.suggestions.length === 1
+              ? ""
+              : "s"
+          ) +
+          " found.",
+          false
+        );
+      } else {
+        setMedicationHelper(
+          "No matching medications found.",
+          true
+        );
+      }
+    }
+
+
+    function compareMedications(
+      first,
+      second
+    ) {
+      return first.name.localeCompare(
+        second.name,
+        undefined,
+        {
+          sensitivity: "base"
+        }
+      );
+    }
+
+
+    function renderSuggestions() {
+      elements.suggestionDropdown.innerHTML =
+        "";
+
+      if (
+        state.suggestions.length === 0
+      ) {
+        const emptyMessage =
+          document.createElement("div");
+
+        emptyMessage.className =
+          "empty-suggestion";
+
+        emptyMessage.textContent =
+          "No matching medications";
+
+        elements.suggestionDropdown
+          .appendChild(emptyMessage);
+
+        openSuggestions();
+
+        return;
+      }
+
+      state.suggestions.forEach(
+        function (record, index) {
+          const button =
+            document.createElement(
+              "button"
+            );
+
+          button.type = "button";
+
+          button.className =
+            "suggestion";
+
+          button.setAttribute(
+            "role",
+            "option"
+          );
+
+          button.dataset.index =
+            String(index);
+
+          const icon =
+            document.createElement(
+              "span"
+            );
+
+          icon.className =
+            "suggestion-icon";
+
+          icon.textContent = "Rx";
+
+          const name =
+            document.createElement(
+              "span"
+            );
+
+          name.className =
+            "suggestion-name";
+
+          name.textContent =
+            record.name;
+
+          button.appendChild(icon);
+          button.appendChild(name);
+
+          button.addEventListener(
+            "mousedown",
+            function (event) {
+              event.preventDefault();
+            }
+          );
+
+          button.addEventListener(
+            "click",
+            function () {
+              selectSuggestion(index);
+            }
+          );
+
+          button.addEventListener(
+            "mouseenter",
+            function () {
+              setActiveSuggestion(index);
+            }
+          );
+
+          elements.suggestionDropdown
+            .appendChild(button);
+        }
+      );
+
+      openSuggestions();
+    }
+
+
+    function handleMedicationKeyboard(
+      event
+    ) {
+      const dropdownOpen =
+        elements.suggestionDropdown
+          .classList
+          .contains("open");
+
+      if (
+        event.key === "ArrowDown"
+      ) {
+        if (
+          state.suggestions.length === 0
+        ) {
+          return;
+        }
+
+        event.preventDefault();
+
+        if (!dropdownOpen) {
+          openSuggestions();
+        }
+
+        const nextIndex =
+          (
+            state.activeSuggestionIndex + 1
+          ) %
+          state.suggestions.length;
+
+        setActiveSuggestion(nextIndex);
+
+        return;
+      }
+
+      if (
+        event.key === "ArrowUp"
+      ) {
+        if (
+          state.suggestions.length === 0
+        ) {
+          return;
+        }
+
+        event.preventDefault();
+
+        if (!dropdownOpen) {
+          openSuggestions();
+        }
+
+        const previousIndex =
+          state.activeSuggestionIndex <= 0
+            ? state.suggestions.length - 1
+            : state.activeSuggestionIndex - 1;
+
+        setActiveSuggestion(
+          previousIndex
+        );
+
+        return;
+      }
+
+      if (event.key === "Enter") {
+        if (
+          dropdownOpen &&
+          state.activeSuggestionIndex >= 0
+        ) {
+          event.preventDefault();
+
+          selectSuggestion(
+            state.activeSuggestionIndex
+          );
+
+          return;
+        }
+
+        closeSuggestions();
+
+        return;
+      }
+
+      if (
+        event.key === "Escape"
+      ) {
+        closeSuggestions();
+      }
+    }
+
+
+    function setActiveSuggestion(index) {
+      const suggestionButtons =
+        elements.suggestionDropdown
+          .querySelectorAll(
+            ".suggestion"
+          );
+
+      suggestionButtons.forEach(
+        function (button, buttonIndex) {
+          button.classList.toggle(
+            "active",
+            buttonIndex === index
+          );
+        }
+      );
+
+      state.activeSuggestionIndex =
+        index;
+
+      if (
+        suggestionButtons[index]
+      ) {
+        suggestionButtons[index]
+          .scrollIntoView({
+            block: "nearest"
+          });
+      }
+    }
+
+
+    function selectSuggestion(index) {
+      const selected =
+        state.suggestions[index];
+
+      if (!selected) {
+        return;
+      }
+
+      elements.medicationInput.value =
+        selected.name;
+
+      closeSuggestions();
+
+      setMedicationHelper(
+        "Medication selected. Click Find Dose.",
+        false
+      );
+    }
+
+
+    function openSuggestions() {
+      elements.suggestionDropdown
+        .classList
+        .add("open");
+
+      elements.medicationInput
+        .setAttribute(
+          "aria-expanded",
+          "true"
+        );
+    }
+
+
+    function closeSuggestions() {
+      elements.suggestionDropdown
+        .classList
+        .remove("open");
+
+      elements.medicationInput
+        .setAttribute(
+          "aria-expanded",
+          "false"
+        );
+
+      state.activeSuggestionIndex = -1;
+    }
+
+
+    function handleOutsideClick(event) {
+      if (
+        !elements.autocompleteWrapper
+          .contains(event.target)
+      ) {
+        closeSuggestions();
+      }
+    }
+
+
+    function updateDialysisState() {
+      const onDialysis =
+        elements.dialysisSelect.value !==
+        "not_on_dialysis";
+
+      elements.crclInput.disabled =
+        onDialysis;
+
+      elements.crclInput.removeAttribute(
+        "aria-invalid"
+      );
+
+      if (onDialysis) {
+        elements.crclInput.value = "";
+
+        elements.crclInput.placeholder =
+          "Not required for dialysis";
+
+        elements.crclHelper.textContent =
+          "Creatinine clearance is disabled " +
+          "and will be ignored.";
+      } else {
+        elements.crclInput.placeholder =
+          "Example: 37.8";
+
+        elements.crclHelper.textContent =
+          "Decimal values are rounded to the " +
+          "nearest whole number.";
+      }
+
+      elements.crclHelper.classList
+        .remove("error");
+
+      hideStatus();
+      hideResult();
+    }
+
+
+    function submitDoseSearch() {
+      if (state.searching) {
+        return;
+      }
+
+      closeSuggestions();
+      hideStatus();
+      hideResult();
+      clearValidationErrors();
+
+      const medicationName =
+        cleanText(
+          elements.medicationInput.value
+        );
+
+      const dialysisMethod =
+        elements.dialysisSelect.value;
+
+      const onDialysis =
+        dialysisMethod !==
+        "not_on_dialysis";
+
+      let crClValue = null;
+      let valid = true;
+
+      if (!medicationName) {
+        markInputError(
+          elements.medicationInput,
+          elements.medicationHelper,
+          "Enter a medication name."
+        );
+
+        valid = false;
+      }
+
+      if (!onDialysis) {
+        const rawCrCl =
+          cleanText(
+            elements.crclInput.value
+          );
+
+        if (!rawCrCl) {
+          markInputError(
+            elements.crclInput,
+            elements.crclHelper,
+            "Enter the patient's creatinine clearance."
+          );
+
+          valid = false;
+        } else {
+          crClValue =
+            Number(rawCrCl);
+
+          if (
+            !Number.isFinite(crClValue)
+          ) {
+            markInputError(
+              elements.crclInput,
+              elements.crclHelper,
+              "Creatinine clearance must be a valid number."
+            );
+
+            valid = false;
+          } else if (
+            crClValue < 0
+          ) {
+            markInputError(
+              elements.crclInput,
+              elements.crclHelper,
+              "Creatinine clearance cannot be less than 0."
+            );
+
+            valid = false;
+          }
+        }
+      }
+
+      if (!valid) {
+        showStatus(
+          "Correct the highlighted information.",
+          "error"
+        );
+
+        return;
+      }
+
+      setSearchingState(true);
+
+      google.script.run
+        .withSuccessHandler(
+          handleDoseSuccess
+        )
+        .withFailureHandler(
+          handleDoseFailure
+        )
+        .findDose(
+          medicationName,
+          crClValue,
+          dialysisMethod
+        );
+    }
+
+
+    function handleDoseSuccess(response) {
+      setSearchingState(false);
+
+      if (!response) {
+        showStatus(
+          "No response was received.",
+          "error"
+        );
+
+        return;
+      }
+
+      if (
+        response.success !== true
+      ) {
+        showStatus(
+          response.message ||
+          "Unable to retrieve the dose.",
+          "error"
+        );
+
+        return;
+      }
+
+      if (
+        response.found !== true ||
+        !response.result
+      ) {
+        showStatus(
+          response.message ||
+          "Medication not found.",
+          "warning"
+        );
+
+        return;
+      }
+
+      displayResult(
+        response.result
+      );
+
+      showStatus(
+        "Dose recommendation retrieved.",
+        "success"
+      );
+    }
+
+
+    function handleDoseFailure(error) {
+      setSearchingState(false);
+
+      showStatus(
+        extractErrorMessage(
+          error,
+          "Unable to retrieve the dose recommendation."
+        ),
+        "error"
+      );
+    }
+
+
+    function displayResult(result) {
+      elements.resultMedication.textContent =
+        cleanText(result.medication) ||
+        "Medication";
+
+      elements.resultDose.textContent =
+        cleanText(
+          result.recommendedDose
+        ) ||
+        "No recommendation available.";
+
+      elements.resultDialysis.textContent =
+        cleanText(
+          result.dialysisMethod
+        ) ||
+        "Not on Dialysis";
+
+      elements.resultWorksheet.textContent =
+        cleanText(
+          result.worksheetName
+        ) ||
+        "Not available";
+
+      elements.resultNote.textContent =
+        cleanText(
+          result.medicationNote
+        ) ||
+        "No medication note available.";
+
+      if (
+        normalizeText(
+          result.dialysisMethod
+        ) !== "not on dialysis"
+      ) {
+        elements.resultCrCl.textContent =
+          "Not applicable";
+      } else {
+        elements.resultCrCl.textContent =
+          formatCrCl(result);
+      }
+
+      elements.resultCard.classList
+        .add("show");
+
+      elements.resultCard.scrollIntoView({
+        behavior: "smooth",
+        block: "nearest"
+      });
+    }
+
+
+    function formatCrCl(result) {
+      const entered =
+        Number(
+          result.creatinineClearanceEntered
+        );
+
+      const used =
+        Number(
+          result.creatinineClearanceUsed
+        );
+
+      if (
+        Number.isFinite(entered) &&
+        Number.isFinite(used)
+      ) {
+        if (entered !== used) {
+          return (
+            formatNumber(entered) +
+            " mL/min entered; " +
+            formatNumber(used) +
+            " mL/min used"
+          );
+        }
+
+        return (
+          formatNumber(used) +
+          " mL/min"
+        );
+      }
+
+      if (
+        Number.isFinite(used)
+      ) {
+        return (
+          formatNumber(used) +
+          " mL/min"
+        );
+      }
+
+      return "Not available";
+    }
+
+
+    function formatNumber(value) {
+      return Number(value)
+        .toLocaleString(
+          undefined,
+          {
+            maximumFractionDigits: 2
+          }
+        );
+    }
+
+
+    function setSearchingState(searching) {
+      state.searching = searching;
+
+      elements.findDoseButton.disabled =
+        searching;
+
+      elements.clearButton.disabled =
+        searching;
+
+      elements.medicationInput.disabled =
+        searching;
+
+      elements.dialysisSelect.disabled =
+        searching;
+
+      const dialysisSelected =
+        elements.dialysisSelect.value !==
+        "not_on_dialysis";
+
+      elements.crclInput.disabled =
+        searching ||
+        dialysisSelected;
+
+      elements.findDoseButton
+        .classList
+        .toggle(
+          "loading",
+          searching
+        );
+
+      elements.findDoseButtonText.textContent =
+        searching
+          ? "Finding Dose..."
+          : "Find Dose";
+    }
+
+
+    function clearForm() {
+      if (state.searching) {
+        return;
+      }
+
+      elements.doseForm.reset();
+
+      state.suggestions = [];
+      state.activeSuggestionIndex = -1;
+
+      clearValidationErrors();
+      closeSuggestions();
+      hideStatus();
+      hideResult();
+      updateDialysisState();
+
+      if (
+        state.medicationListLoaded
+      ) {
+        setMedicationHelper(
+          "Type at least three letters.",
+          false
+        );
+      } else {
+        setMedicationHelper(
+          "Medication names are still loading.",
+          true
+        );
+      }
+
+      elements.medicationInput.focus();
+    }
+
+
+    function showStatus(
+      message,
+      type
+    ) {
+      elements.statusMessage.textContent =
+        message;
+
+      elements.statusMessage.className =
+        "status show " + type;
+    }
+
+
+    function hideStatus() {
+      elements.statusMessage.textContent =
+        "";
+
+      elements.statusMessage.className =
+        "status";
+    }
+
+
+    function hideResult() {
+      elements.resultCard
+        .classList
+        .remove("show");
+    }
+
+
+    function setMedicationHelper(
+      message,
+      error
+    ) {
+      elements.medicationHelper.textContent =
+        message;
+
+      elements.medicationHelper
+        .classList
+        .toggle(
+          "error",
+          Boolean(error)
+        );
+    }
+
+
+    function markInputError(
+      input,
+      helper,
+      message
+    ) {
+      input.setAttribute(
+        "aria-invalid",
+        "true"
+      );
+
+      helper.textContent =
+        message;
+
+      helper.classList.add(
+        "error"
+      );
+    }
+
+
+    function clearValidationErrors() {
+      elements.medicationInput
+        .removeAttribute(
+          "aria-invalid"
+        );
+
+      elements.crclInput
+        .removeAttribute(
+          "aria-invalid"
+        );
+
+      elements.medicationHelper
+        .classList
+        .remove("error");
+
+      elements.crclHelper
+        .classList
+        .remove("error");
+    }
+
+
+    function normalizeText(value) {
+      return cleanText(value)
+        .toLocaleLowerCase()
+        .replace(/\s+/g, " ");
+    }
+
+
+    function cleanText(value) {
+      if (
+        value === null ||
+        value === undefined
+      ) {
+        return "";
+      }
+
+      return String(value)
+        .replace(/\s+/g, " ")
+        .trim();
+    }
+
+
+    function extractErrorMessage(
+      error,
+      fallback
+    ) {
+      if (
+        typeof error === "string" &&
+        error.trim()
+      ) {
+        return error.trim();
+      }
+
+      if (
+        error &&
+        error.message
+      ) {
+        return String(error.message);
+      }
+
+      return fallback;
+    }
+  </script>
+</body>
+</html>
