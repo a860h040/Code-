@@ -1,55 +1,42 @@
 /**
  * RENAL DOSE ADJUSTMENT WEB APPLICATION
- * Google Apps Script Backend
  *
- * Spreadsheet setup:
- * - One worksheet/tab for each medication
- * - Column A contains labels
- * - Column B contains values and recommendations
+ * Spreadsheet structure supported by this version:
  *
- * Example:
+ * Column A contains the row labels:
  *
- * A                         B
- * Drug Name                 Acyclovir IV
- * Note                      Use adjusted body weight when appropriate
- * Peritoneal Dialysis       Recommendation
- * Hemodialysis              Recommendation
- * CAPD                      Recommendation
- * CRRT                      Recommendation
- * 0                         Recommendation
- * 1                         Recommendation
+ * A1  Drug Name
+ * A2  Note
+ * A3  Peritoneal Dialysis
+ * A4  Hemodialysis
+ * A5  CAPD
+ * A6  CRRT
+ * A7  0
+ * A8  1
  * ...
- * 60                        Usual dose
- */
-
-
-/**
- * Google Spreadsheet ID.
+ *      60
  *
- * Do not paste the full spreadsheet URL.
- * Do not enter a sheet/tab number.
+ * Each medication is stored in its own column:
+ *
+ * Column B = first medication
+ * Column C = second medication
+ * Column D = third medication
+ * etc.
+ *
+ * The application searches every medication column on every worksheet.
  */
+
 const SPREADSHEET_ID =
   "1eLZAx2V1bo7Lm2JDFcMsPgqWzgc669THvIVD4uXdnu4";
 
+const MEDICATION_CACHE_KEY =
+  "RENAL_DOSE_COLUMN_MEDICATION_LIST_V1";
 
-/**
- * Medication-list cache duration.
- *
- * 300 seconds = 5 minutes.
- */
 const MEDICATION_CACHE_SECONDS = 300;
 
 
 /**
- * Cache key used by CacheService.
- */
-const MEDICATION_CACHE_KEY =
-  "RENAL_DOSE_MEDICATION_LIST_V3";
-
-
-/**
- * Serves Index.html as the web application.
+ * Serves the web application.
  *
  * @return {GoogleAppsScript.HTML.HtmlOutput}
  */
@@ -68,20 +55,25 @@ function doGet() {
 
 
 /**
- * Opens the Google Spreadsheet.
+ * Opens the spreadsheet.
  *
  * @return {GoogleAppsScript.Spreadsheet.Spreadsheet}
  */
 function getSpreadsheet_() {
   try {
-    if (!SPREADSHEET_ID) {
+    if (
+      !SPREADSHEET_ID ||
+      SPREADSHEET_ID.trim() === ""
+    ) {
       throw new Error(
-        "The Spreadsheet ID is missing in Code.gs."
+        "The spreadsheet ID is missing."
       );
     }
 
     const spreadsheet =
-      SpreadsheetApp.openById(SPREADSHEET_ID);
+      SpreadsheetApp.openById(
+        SPREADSHEET_ID.trim()
+      );
 
     if (!spreadsheet) {
       throw new Error(
@@ -91,87 +83,96 @@ function getSpreadsheet_() {
 
     return spreadsheet;
   } catch (error) {
-    console.error("getSpreadsheet_ error:", error);
+    console.error(
+      "getSpreadsheet_ error:",
+      error
+    );
 
     throw new Error(
       "Unable to open the medication spreadsheet. " +
-      "Verify the Spreadsheet ID and confirm that the " +
-      "Google account running the web app has access."
+      "Verify the Spreadsheet ID and confirm that " +
+      "the Google account running the web app has access."
     );
   }
 }
 
 
 /**
- * Returns a list of all medications.
- *
- * The medication name is found using:
- * 1. The value beside Drug Name in columns A and B
- * 2. The worksheet/tab name as a fallback
+ * Returns every medication found in columns B onward
+ * on every worksheet.
  *
  * @return {Object}
  */
 function getMedicationList() {
   try {
-    const cache = CacheService.getScriptCache();
-    const cachedValue = cache.get(
-      MEDICATION_CACHE_KEY
-    );
+    const cache =
+      CacheService.getScriptCache();
+
+    const cachedValue =
+      cache.get(MEDICATION_CACHE_KEY);
 
     if (cachedValue) {
       return {
         success: true,
-        medications: JSON.parse(cachedValue),
+        medications:
+          JSON.parse(cachedValue),
         cached: true
       };
     }
 
-    const spreadsheet = getSpreadsheet_();
-    const sheets = spreadsheet.getSheets();
+    const spreadsheet =
+      getSpreadsheet_();
+
+    const sheets =
+      spreadsheet.getSheets();
+
     const medicationMap = {};
 
     sheets.forEach(function (sheet) {
-      const medicationData =
-        readMedicationSheet_(sheet);
+      const sheetMedications =
+        readMedicationColumns_(sheet);
 
-      if (!medicationData) {
-        return;
-      }
+      sheetMedications.forEach(
+        function (medication) {
+          const normalizedName =
+            normalizeText_(
+              medication.name
+            );
 
-      const medicationName = cleanText_(
-        medicationData.medicationName
+          if (
+            normalizedName &&
+            !medicationMap[
+              normalizedName
+            ]
+          ) {
+            medicationMap[
+              normalizedName
+            ] = {
+              name: medication.name,
+              worksheetName:
+                medication.worksheetName,
+              columnNumber:
+                medication.columnNumber
+            };
+          }
+        }
       );
-
-      if (!medicationName) {
-        return;
-      }
-
-      const normalizedMedicationName =
-        normalizeText_(medicationName);
-
-      if (!medicationMap[normalizedMedicationName]) {
-        medicationMap[normalizedMedicationName] = {
-          name: medicationName,
-          worksheetName: sheet.getName()
-        };
-      }
     });
 
-    const medications = Object.keys(
-      medicationMap
-    )
-      .map(function (key) {
-        return medicationMap[key];
-      })
-      .sort(function (first, second) {
-        return first.name.localeCompare(
-          second.name,
-          undefined,
-          {
-            sensitivity: "base"
-          }
-        );
-      });
+    const medications =
+      Object.keys(medicationMap)
+        .map(function (key) {
+          return medicationMap[key];
+        })
+        .sort(function (first, second) {
+          return first.name.localeCompare(
+            second.name,
+            undefined,
+            {
+              sensitivity: "base"
+            }
+          );
+        });
 
     try {
       cache.put(
@@ -181,7 +182,7 @@ function getMedicationList() {
       );
     } catch (cacheError) {
       console.warn(
-        "Medication list cache error:",
+        "Medication cache error:",
         cacheError
       );
     }
@@ -192,44 +193,54 @@ function getMedicationList() {
       cached: false
     };
   } catch (error) {
-    console.error("getMedicationList error:", error);
+    console.error(
+      "getMedicationList error:",
+      error
+    );
 
     return {
       success: false,
       medications: [],
-      message: getErrorMessage_(error)
+      message:
+        getErrorMessage_(error)
     };
   }
 }
 
 
 /**
- * Searches for a medication.
+ * Searches for one medication.
  *
  * @param {string} medicationName
  * @return {Object}
  */
-function searchMedication(medicationName) {
+function searchMedication(
+  medicationName
+) {
   try {
-    const cleanedMedicationName =
+    const cleanedName =
       cleanText_(medicationName);
 
-    if (!cleanedMedicationName) {
+    if (!cleanedName) {
       return {
         success: false,
         found: false,
-        message: "Enter a medication name."
+        message:
+          "Enter a medication name."
       };
     }
 
-    const medicationData =
-      locateMedication_(cleanedMedicationName);
+    const medication =
+      locateMedicationColumn_(
+        cleanedName
+      );
 
-    if (!medicationData) {
+    if (!medication) {
       return {
         success: true,
         found: false,
-        message: "Medication not found."
+        message:
+          "Medication not found."
       };
     }
 
@@ -237,28 +248,35 @@ function searchMedication(medicationName) {
       success: true,
       found: true,
       medication: {
-        name: medicationData.medicationName,
-        note:
-          cleanText_(medicationData.note) ||
-          "No medication note available.",
+        name:
+          medication.medicationName,
         worksheetName:
-          medicationData.sheet.getName()
+          medication.sheet.getName(),
+        columnNumber:
+          medication.columnNumber,
+        note:
+          medication.note ||
+          "No medication note available."
       }
     };
   } catch (error) {
-    console.error("searchMedication error:", error);
+    console.error(
+      "searchMedication error:",
+      error
+    );
 
     return {
       success: false,
       found: false,
-      message: getErrorMessage_(error)
+      message:
+        getErrorMessage_(error)
     };
   }
 }
 
 
 /**
- * Finds the dose recommendation.
+ * Finds a renal or dialysis recommendation.
  *
  * @param {string} medicationName
  * @param {number|string|null} creatinineClearance
@@ -278,29 +296,38 @@ function findDose(
       return {
         success: false,
         found: false,
-        message: "Enter a medication name."
+        message:
+          "Enter a medication name."
       };
     }
 
     const normalizedDialysisMethod =
-      normalizeDialysisMethod_(dialysisMethod);
+      normalizeDialysisMethod_(
+        dialysisMethod
+      );
 
-    if (!normalizedDialysisMethod) {
+    if (
+      !normalizedDialysisMethod
+    ) {
       return {
         success: false,
         found: false,
-        message: "Select a valid dialysis method."
+        message:
+          "Select a valid dialysis method."
       };
     }
 
-    const medicationData =
-      locateMedication_(cleanedMedicationName);
+    const medication =
+      locateMedicationColumn_(
+        cleanedMedicationName
+      );
 
-    if (!medicationData) {
+    if (!medication) {
       return {
         success: true,
         found: false,
-        message: "Medication not found."
+        message:
+          "Medication not found."
       };
     }
 
@@ -314,39 +341,42 @@ function findDose(
     ) {
       recommendation =
         findDialysisRecommendation_(
-          medicationData.rows,
+          medication.rows,
           normalizedDialysisMethod
         );
     } else {
-      const crClValidation =
+      const validation =
         validateCreatinineClearance_(
           creatinineClearance
         );
 
-      if (!crClValidation.valid) {
+      if (!validation.valid) {
         return {
           success: false,
           found: true,
-          message: crClValidation.message
+          message:
+            validation.message
         };
       }
 
       enteredCrCl =
-        crClValidation.originalValue;
+        validation.originalValue;
 
-      usedCrCl = determineCrClLookupValue_(
-        crClValidation.roundedValue,
-        medicationData.rows
-      );
+      usedCrCl =
+        determineCrClLookupValue_(
+          validation.roundedValue,
+          medication.rows
+        );
 
       recommendation =
         findCrClRecommendation_(
-          medicationData.rows,
+          medication.rows,
           usedCrCl
         );
     }
 
-    recommendation = cleanText_(recommendation);
+    recommendation =
+      cleanText_(recommendation);
 
     if (!recommendation) {
       recommendation =
@@ -358,7 +388,7 @@ function findDose(
       found: true,
       result: {
         medication:
-          medicationData.medicationName,
+          medication.medicationName,
 
         creatinineClearanceEntered:
           enteredCrCl,
@@ -375,41 +405,130 @@ function findDose(
           recommendation,
 
         medicationNote:
-          cleanText_(medicationData.note) ||
+          cleanText_(medication.note) ||
           "No medication note available.",
 
         worksheetName:
-          medicationData.sheet.getName()
+          medication.sheet.getName(),
+
+        spreadsheetColumn:
+          columnNumberToLetter_(
+            medication.columnNumber
+          )
       }
     };
   } catch (error) {
-    console.error("findDose error:", error);
+    console.error(
+      "findDose error:",
+      error
+    );
 
     return {
       success: false,
       found: false,
-      message: getErrorMessage_(error)
+      message:
+        getErrorMessage_(error)
     };
   }
 }
 
 
 /**
- * Locates the worksheet for a medication.
+ * Reads medication names from columns B onward.
  *
- * Matching ignores:
- * - Uppercase/lowercase
- * - Leading or trailing spaces
- * - Repeated spaces
+ * The medication name is taken from the row labeled
+ * Drug Name in column A.
  *
- * It matches against both:
- * - Drug Name value
- * - Worksheet/tab name
+ * @param {GoogleAppsScript.Spreadsheet.Sheet} sheet
+ * @return {Array<Object>}
+ */
+function readMedicationColumns_(
+  sheet
+) {
+  const lastRow =
+    sheet.getLastRow();
+
+  const lastColumn =
+    sheet.getLastColumn();
+
+  if (
+    lastRow < 1 ||
+    lastColumn < 2
+  ) {
+    return [];
+  }
+
+  const values =
+    sheet
+      .getRange(
+        1,
+        1,
+        lastRow,
+        lastColumn
+      )
+      .getDisplayValues();
+
+  const drugNameRowIndex =
+    findLabelRowIndex_(
+      values,
+      [
+        "drug name",
+        "medication name",
+        "drug",
+        "medication"
+      ]
+    );
+
+  if (
+    drugNameRowIndex === -1
+  ) {
+    return [];
+  }
+
+  const medications = [];
+
+  for (
+    let columnIndex = 1;
+    columnIndex < lastColumn;
+    columnIndex += 1
+  ) {
+    const medicationName =
+      cleanText_(
+        values[
+          drugNameRowIndex
+        ][columnIndex]
+      );
+
+    if (!medicationName) {
+      continue;
+    }
+
+    medications.push({
+      name:
+        medicationName,
+
+      worksheetName:
+        sheet.getName(),
+
+      columnNumber:
+        columnIndex + 1
+    });
+  }
+
+  return medications;
+}
+
+
+/**
+ * Locates a medication by searching every medication column
+ * on every worksheet.
  *
  * @param {string} medicationName
  * @return {Object|null}
  */
-function locateMedication_(medicationName) {
+function locateMedicationColumn_(
+  medicationName
+) {
   const normalizedSearchName =
     normalizeText_(medicationName);
 
@@ -417,158 +536,195 @@ function locateMedication_(medicationName) {
     return null;
   }
 
-  const spreadsheet = getSpreadsheet_();
-  const sheets = spreadsheet.getSheets();
+  const spreadsheet =
+    getSpreadsheet_();
 
-  let tabNameFallback = null;
+  const sheets =
+    spreadsheet.getSheets();
 
   for (
-    let index = 0;
-    index < sheets.length;
-    index += 1
+    let sheetIndex = 0;
+    sheetIndex < sheets.length;
+    sheetIndex += 1
   ) {
-    const sheet = sheets[index];
+    const sheet =
+      sheets[sheetIndex];
 
-    const medicationData =
-      readMedicationSheet_(sheet);
+    const lastRow =
+      sheet.getLastRow();
 
-    if (!medicationData) {
+    const lastColumn =
+      sheet.getLastColumn();
+
+    if (
+      lastRow < 1 ||
+      lastColumn < 2
+    ) {
       continue;
     }
 
-    const normalizedDrugName =
-      normalizeText_(
-        medicationData.medicationName
+    const values =
+      sheet
+        .getRange(
+          1,
+          1,
+          lastRow,
+          lastColumn
+        )
+        .getDisplayValues();
+
+    const drugNameRowIndex =
+      findLabelRowIndex_(
+        values,
+        [
+          "drug name",
+          "medication name",
+          "drug",
+          "medication"
+        ]
       );
 
-    const normalizedTabName =
-      normalizeText_(sheet.getName());
-
     if (
-      normalizedDrugName ===
-      normalizedSearchName
+      drugNameRowIndex === -1
     ) {
-      return medicationData;
+      continue;
     }
 
-    if (
-      !tabNameFallback &&
-      normalizedTabName ===
-      normalizedSearchName
+    for (
+      let columnIndex = 1;
+      columnIndex < lastColumn;
+      columnIndex += 1
     ) {
-      tabNameFallback = medicationData;
+      const candidateName =
+        cleanText_(
+          values[
+            drugNameRowIndex
+          ][columnIndex]
+        );
+
+      if (!candidateName) {
+        continue;
+      }
+
+      if (
+        normalizeText_(candidateName) ===
+        normalizedSearchName
+      ) {
+        return buildMedicationRecord_(
+          sheet,
+          values,
+          columnIndex,
+          candidateName
+        );
+      }
     }
   }
 
-  return tabNameFallback;
+  return null;
 }
 
 
 /**
- * Reads a medication worksheet.
- *
- * The code searches columns A and B for the medication name.
- * It is not required to be on row 1.
+ * Builds a medication record using column A labels
+ * and one medication column.
  *
  * @param {GoogleAppsScript.Spreadsheet.Sheet} sheet
- * @return {Object|null}
+ * @param {Array<Array<string>>} values
+ * @param {number} columnIndex Zero-based array index
+ * @param {string} medicationName
+ * @return {Object}
  */
-function readMedicationSheet_(sheet) {
-  const lastRow = sheet.getLastRow();
+function buildMedicationRecord_(
+  sheet,
+  values,
+  columnIndex,
+  medicationName
+) {
+  const rows =
+    values.map(function (row) {
+      return {
+        key:
+          cleanText_(row[0]),
 
-  if (lastRow < 1) {
-    return null;
-  }
+        value:
+          cleanText_(
+            row[columnIndex]
+          )
+      };
+    });
 
-  const values = sheet
-    .getRange(1, 1, lastRow, 2)
-    .getDisplayValues();
-
-  const rows = values.map(function (row) {
-    return {
-      key: cleanText_(row[0]),
-      value: cleanText_(row[1])
-    };
-  });
-
-  const drugNameRow = rows.find(
-    function (row) {
-      const label =
-        normalizeLabel_(row.key);
-
-      return (
-        label === "drug name" ||
-        label === "medication name" ||
-        label === "drug" ||
-        label === "medication"
-      );
-    }
-  );
-
-  const normalizedTabName =
-    normalizeText_(sheet.getName());
-
-  const excludedTabs = [
-    "instructions",
-    "instruction",
-    "settings",
-    "template",
-    "data",
-    "configuration",
-    "config",
-    "read me",
-    "readme"
-  ];
-
-  if (
-    !drugNameRow &&
-    excludedTabs.includes(normalizedTabName)
-  ) {
-    return null;
-  }
-
-  let medicationName = "";
-
-  if (
-    drugNameRow &&
-    cleanText_(drugNameRow.value)
-  ) {
-    medicationName =
-      cleanText_(drugNameRow.value);
-  } else {
-    medicationName =
-      cleanText_(sheet.getName());
-  }
-
-  if (!medicationName) {
-    return null;
-  }
-
-  const noteRow = rows.find(
-    function (row) {
+  const noteRow =
+    rows.find(function (row) {
       const label =
         normalizeLabel_(row.key);
 
       return (
         label === "note" ||
         label === "notes" ||
-        label === "medication note" ||
-        label === "drug note"
+        label ===
+          "medication note" ||
+        label ===
+          "drug note"
       );
-    }
-  );
+    });
 
   return {
-    sheet: sheet,
-    rows: rows,
-    medicationName: medicationName,
-    note: noteRow ? noteRow.value : ""
+    sheet:
+      sheet,
+
+    columnNumber:
+      columnIndex + 1,
+
+    medicationName:
+      medicationName,
+
+    note:
+      noteRow
+        ? noteRow.value
+        : "",
+
+    rows:
+      rows
   };
 }
 
 
 /**
- * Finds a dialysis recommendation.
+ * Finds the row index for one of several accepted labels.
+ *
+ * @param {Array<Array<string>>} values
+ * @param {Array<string>} acceptedLabels
+ * @return {number}
+ */
+function findLabelRowIndex_(
+  values,
+  acceptedLabels
+) {
+  for (
+    let rowIndex = 0;
+    rowIndex < values.length;
+    rowIndex += 1
+  ) {
+    const label =
+      normalizeLabel_(
+        values[rowIndex][0]
+      );
+
+    if (
+      acceptedLabels.indexOf(
+        label
+      ) !== -1
+    ) {
+      return rowIndex;
+    }
+  }
+
+  return -1;
+}
+
+
+/**
+ * Finds the dialysis recommendation.
  *
  * @param {Array<Object>} rows
  * @param {string} dialysisMethod
@@ -588,7 +744,6 @@ function findDialysisRecommendation_(
     hemodialysis: [
       "hemodialysis",
       "haemodialysis",
-      "hemodialysis hd",
       "hd"
     ],
 
@@ -603,23 +758,24 @@ function findDialysisRecommendation_(
   };
 
   const targetLabels =
-    acceptedLabels[dialysisMethod] || [];
+    acceptedLabels[
+      dialysisMethod
+    ] || [];
 
-  const matchingRow = rows.find(
-    function (row) {
-      const normalizedRowLabel =
+  const matchingRow =
+    rows.find(function (row) {
+      const normalizedLabel =
         normalizeLabel_(row.key);
 
       return targetLabels.some(
         function (acceptedLabel) {
           return (
-            normalizedRowLabel ===
+            normalizedLabel ===
             acceptedLabel
           );
         }
       );
-    }
-  );
+    });
 
   return matchingRow
     ? matchingRow.value
@@ -634,9 +790,12 @@ function findDialysisRecommendation_(
  * @param {number} crCl
  * @return {string}
  */
-function findCrClRecommendation_(rows, crCl) {
-  const matchingRow = rows.find(
-    function (row) {
+function findCrClRecommendation_(
+  rows,
+  crCl
+) {
+  const matchingRow =
+    rows.find(function (row) {
       const numericKey =
         parseNumericKey_(row.key);
 
@@ -644,8 +803,7 @@ function findCrClRecommendation_(rows, crCl) {
         numericKey !== null &&
         numericKey === crCl
       );
-    }
-  );
+    });
 
   return matchingRow
     ? matchingRow.value
@@ -654,13 +812,7 @@ function findCrClRecommendation_(rows, crCl) {
 
 
 /**
- * Determines the CrCl value to search.
- *
- * Rules:
- * - Decimal values are rounded
- * - Values 0 through 60 use the rounded value
- * - Values greater than 60 use an exact row if present
- * - Otherwise values greater than 60 use row 60
+ * Determines the CrCl row to use.
  *
  * @param {number} roundedCrCl
  * @param {Array<Object>} rows
@@ -677,7 +829,9 @@ function determineCrClLookupValue_(
   const exactHigherRowExists =
     rows.some(function (row) {
       const numericKey =
-        parseNumericKey_(row.key);
+        parseNumericKey_(
+          row.key
+        );
 
       return (
         numericKey !== null &&
@@ -697,7 +851,9 @@ function determineCrClLookupValue_(
  * @param {number|string|null} value
  * @return {Object}
  */
-function validateCreatinineClearance_(value) {
+function validateCreatinineClearance_(
+  value
+) {
   if (
     value === null ||
     value === undefined ||
@@ -711,9 +867,15 @@ function validateCreatinineClearance_(value) {
   }
 
   const numericValue =
-    Number(String(value).trim());
+    Number(
+      String(value).trim()
+    );
 
-  if (!Number.isFinite(numericValue)) {
+  if (
+    !Number.isFinite(
+      numericValue
+    )
+  ) {
     return {
       valid: false,
       message:
@@ -731,22 +893,29 @@ function validateCreatinineClearance_(value) {
 
   return {
     valid: true,
-    originalValue: numericValue,
-    roundedValue: Math.round(numericValue)
+    originalValue:
+      numericValue,
+    roundedValue:
+      Math.round(numericValue)
   };
 }
 
 
 /**
- * Normalizes dialysis values sent from Index.html.
+ * Normalizes a dialysis value.
  *
  * @param {string} value
  * @return {string}
  */
-function normalizeDialysisMethod_(value) {
+function normalizeDialysisMethod_(
+  value
+) {
   const normalized =
     normalizeText_(value)
-      .replace(/[\s-]+/g, "_");
+      .replace(
+        /[\s-]+/g,
+        "_"
+      );
 
   const acceptedValues = {
     not_on_dialysis:
@@ -783,12 +952,16 @@ function normalizeDialysisMethod_(value) {
       "crrt"
   };
 
-  return acceptedValues[normalized] || "";
+  return (
+    acceptedValues[
+      normalized
+    ] || ""
+  );
 }
 
 
 /**
- * Returns the dialysis name shown in the result.
+ * Returns the display name for dialysis.
  *
  * @param {string} dialysisMethod
  * @return {string}
@@ -796,7 +969,7 @@ function normalizeDialysisMethod_(value) {
 function getDialysisDisplayName_(
   dialysisMethod
 ) {
-  const displayNames = {
+  const names = {
     not_on_dialysis:
       "Not on Dialysis",
 
@@ -813,17 +986,23 @@ function getDialysisDisplayName_(
       "CRRT"
   };
 
-  return displayNames[dialysisMethod] || "";
+  return (
+    names[
+      dialysisMethod
+    ] || ""
+  );
 }
 
 
 /**
- * Converts a worksheet key to a number.
+ * Parses a numeric row label.
  *
  * @param {*} value
  * @return {number|null}
  */
-function parseNumericKey_(value) {
+function parseNumericKey_(
+  value
+) {
   const cleanedValue =
     cleanText_(value);
 
@@ -838,14 +1017,54 @@ function parseNumericKey_(value) {
   const numericValue =
     Number(cleanedValue);
 
-  return Number.isFinite(numericValue)
+  return Number.isFinite(
+    numericValue
+  )
     ? numericValue
     : null;
 }
 
 
 /**
- * Cleans searchable text.
+ * Converts a spreadsheet column number to a letter.
+ *
+ * Example:
+ * 2 = B
+ * 3 = C
+ * 27 = AA
+ *
+ * @param {number} columnNumber
+ * @return {string}
+ */
+function columnNumberToLetter_(
+  columnNumber
+) {
+  let number =
+    columnNumber;
+
+  let letter = "";
+
+  while (number > 0) {
+    const remainder =
+      (number - 1) % 26;
+
+    letter =
+      String.fromCharCode(
+        65 + remainder
+      ) + letter;
+
+    number =
+      Math.floor(
+        (number - 1) / 26
+      );
+  }
+
+  return letter;
+}
+
+
+/**
+ * Normalizes searchable text.
  *
  * @param {*} value
  * @return {string}
@@ -858,21 +1077,24 @@ function normalizeText_(value) {
 
 
 /**
- * Cleans labels in column A.
+ * Normalizes labels in column A.
  *
  * @param {*} value
  * @return {string}
  */
 function normalizeLabel_(value) {
   return normalizeText_(value)
-    .replace(/[_:.-]+/g, " ")
+    .replace(
+      /[_:.-]+/g,
+      " "
+    )
     .replace(/\s+/g, " ")
     .trim();
 }
 
 
 /**
- * Trims text and removes repeated spaces.
+ * Cleans text.
  *
  * @param {*} value
  * @return {string}
@@ -898,8 +1120,13 @@ function cleanText_(value) {
  * @return {string}
  */
 function getErrorMessage_(error) {
-  if (error && error.message) {
-    return String(error.message);
+  if (
+    error &&
+    error.message
+  ) {
+    return String(
+      error.message
+    );
   }
 
   return (
@@ -910,84 +1137,72 @@ function getErrorMessage_(error) {
 
 
 /**
- * Run this manually when medication tabs are added,
- * renamed, or deleted.
+ * Clears the medication list cache.
  *
- * It removes the medication list cache.
+ * Run manually after adding, removing, or renaming
+ * medication columns.
  *
  * @return {Object}
  */
 function clearMedicationCache() {
   CacheService
     .getScriptCache()
-    .remove(MEDICATION_CACHE_KEY);
+    .remove(
+      MEDICATION_CACHE_KEY
+    );
 
   return {
     success: true,
-    message: "Medication cache cleared."
+    message:
+      "Medication cache cleared."
   };
 }
 
 
 /**
- * Run this manually to test the spreadsheet connection.
+ * Tests the spreadsheet and medication columns.
  *
- * View the result in the execution log.
+ * Run this function manually from Apps Script.
  *
  * @return {Object}
  */
-function testSpreadsheetConnection() {
-  const spreadsheet = getSpreadsheet_();
-  const sheets = spreadsheet.getSheets();
+function testMedicationColumns() {
+  clearMedicationCache();
 
-  const worksheetResults =
+  const spreadsheet =
+    getSpreadsheet_();
+
+  const sheets =
+    spreadsheet.getSheets();
+
+  const results =
     sheets.map(function (sheet) {
-      const medicationData =
-        readMedicationSheet_(sheet);
-
       return {
-        worksheetName: sheet.getName(),
-        medicationName: medicationData
-          ? medicationData.medicationName
-          : "Not recognized as a medication worksheet"
+        worksheetName:
+          sheet.getName(),
+
+        medications:
+          readMedicationColumns_(sheet)
       };
     });
 
-  const result = {
+  const response = {
     success: true,
     spreadsheetName:
       spreadsheet.getName(),
-    spreadsheetId:
-      spreadsheet.getId(),
-    numberOfWorksheets:
-      sheets.length,
     worksheets:
-      worksheetResults
+      results
   };
 
   console.log(
-    JSON.stringify(result, null, 2)
+    JSON.stringify(
+      response,
+      null,
+      2
+    )
   );
 
-  return result;
-}
-
-
-/**
- * Run this manually to test the medication list.
- *
- * @return {Object}
- */
-function testMedicationList() {
-  clearMedicationCache();
-
-  const result = getMedicationList();
-
-  console.log(
-    JSON.stringify(result, null, 2)
-  );
-
-  return result;
+  return response;
 }
 
 
@@ -1005,7 +1220,10 @@ function testMedicationList() {
 
 
 
-    <!DOCTYPE html>
+
+
+
+<!DOCTYPE html>
 <html lang="en">
 <head>
   <base target="_top">
@@ -1022,45 +1240,39 @@ function testMedicationList() {
   <style>
     :root {
       --primary: #176b70;
-      --primary-dark: #10555a;
+      --primary-dark: #10565a;
       --primary-soft: #e2f3f2;
-      --secondary: #2f8f83;
+      --accent: #2f8f83;
 
-      --background: #eef5f5;
+      --background: #edf5f5;
       --surface: #ffffff;
-      --surface-soft: #f4f8f8;
+      --surface-soft: #f3f8f8;
 
-      --text: #1a3038;
-      --muted: #6a7d83;
-
+      --text: #183139;
+      --muted: #687d83;
       --border: #d9e6e7;
 
-      --success-background: #e7f7f2;
-      --success-border: #97d4c4;
-      --success-text: #155c50;
+      --success-bg: #e7f7f2;
+      --success-border: #98d4c5;
+      --success-text: #155d51;
 
-      --error-background: #fff0f0;
-      --error-border: #efb1b1;
+      --error-bg: #fff0f0;
+      --error-border: #efb3b3;
       --error-text: #9b3030;
 
-      --warning-background: #fff8e5;
-      --warning-border: #ead082;
+      --warning-bg: #fff8e5;
+      --warning-border: #ead083;
       --warning-text: #72560a;
 
       --shadow:
-        0 20px 60px rgba(29, 71, 76, 0.12);
+        0 20px 60px rgba(25, 70, 76, 0.12);
 
       --small-shadow:
-        0 12px 30px rgba(29, 71, 76, 0.10);
+        0 12px 30px rgba(25, 70, 76, 0.10);
     }
 
     * {
       box-sizing: border-box;
-    }
-
-    html {
-      min-height: 100%;
-      background: var(--background);
     }
 
     body {
@@ -1072,13 +1284,8 @@ function testMedicationList() {
       background:
         radial-gradient(
           circle at 12% 8%,
-          rgba(52, 151, 141, 0.14),
+          rgba(49, 144, 130, 0.14),
           transparent 34%
-        ),
-        radial-gradient(
-          circle at 88% 8%,
-          rgba(75, 121, 171, 0.10),
-          transparent 30%
         ),
         linear-gradient(
           145deg,
@@ -1096,7 +1303,6 @@ function testMedicationList() {
         sans-serif;
 
       line-height: 1.5;
-      -webkit-font-smoothing: antialiased;
     }
 
     button,
@@ -1134,11 +1340,11 @@ function testMedicationList() {
     .hero::before {
       position: absolute;
 
-      width: 250px;
-      height: 250px;
-
       top: -130px;
       right: -60px;
+
+      width: 250px;
+      height: 250px;
 
       content: "";
 
@@ -1191,22 +1397,19 @@ function testMedicationList() {
       margin: 12px 0 0;
 
       color:
-        rgba(255, 255, 255, 0.84);
-
-      font-size: 1rem;
+        rgba(255, 255, 255, 0.85);
     }
 
     .form-card {
       padding: 28px;
 
       background:
-        rgba(255, 255, 255, 0.95);
+        rgba(255, 255, 255, 0.96);
 
       border:
         1px solid rgba(255, 255, 255, 0.80);
 
       border-radius: 26px;
-
       box-shadow: var(--shadow);
     }
 
@@ -1216,9 +1419,7 @@ function testMedicationList() {
 
     .section-header h2 {
       margin: 0;
-
       font-size: 1.4rem;
-      letter-spacing: -0.025em;
     }
 
     .section-header p {
@@ -1242,16 +1443,10 @@ function testMedicationList() {
       grid-column: 1 / -1;
     }
 
-    .field-group {
-      min-width: 0;
-    }
-
     .field-label {
       display: inline-block;
 
       margin-bottom: 8px;
-
-      color: var(--text);
 
       font-size: 0.92rem;
       font-weight: 750;
@@ -1274,36 +1469,23 @@ function testMedicationList() {
       padding: 0 15px;
 
       color: var(--text);
-
       background: var(--surface);
 
-      border: 1px solid var(--border);
+      border:
+        1px solid var(--border);
+
       border-radius: 13px;
-
       outline: none;
-
-      transition:
-        border-color 150ms ease,
-        box-shadow 150ms ease,
-        background-color 150ms ease;
     }
 
     .field-input {
-      padding-right: 48px;
-    }
-
-    .field-input::placeholder {
-      color: #96a8ad;
-    }
-
-    .field-input:hover,
-    .field-select:hover {
-      border-color: #b7cacc;
+      padding-right: 75px;
     }
 
     .field-input:focus,
     .field-select:focus {
-      border-color: var(--primary);
+      border-color:
+        var(--primary);
 
       box-shadow:
         0 0 0 4px
@@ -1312,14 +1494,8 @@ function testMedicationList() {
 
     .field-input:disabled {
       color: #87989d;
-
       background: #eef3f3;
-
       cursor: not-allowed;
-    }
-
-    .field-select {
-      cursor: pointer;
     }
 
     .input-icon {
@@ -1329,16 +1505,16 @@ function testMedicationList() {
       right: 15px;
 
       color: #7b9298;
-      font-size: 0.84rem;
+      font-size: 0.82rem;
 
-      transform: translateY(-50%);
+      transform:
+        translateY(-50%);
 
       pointer-events: none;
     }
 
     .helper {
       min-height: 20px;
-
       margin-top: 7px;
 
       color: var(--muted);
@@ -1359,14 +1535,16 @@ function testMedicationList() {
 
       display: none;
 
-      max-height: 330px;
+      max-height: 340px;
       overflow-y: auto;
 
       padding: 7px;
 
       background: var(--surface);
 
-      border: 1px solid var(--border);
+      border:
+        1px solid var(--border);
+
       border-radius: 15px;
 
       box-shadow:
@@ -1383,14 +1561,12 @@ function testMedicationList() {
       align-items: center;
 
       width: 100%;
-
       gap: 11px;
 
       padding: 11px 12px;
 
       color: var(--text);
       text-align: left;
-
       background: transparent;
 
       border: 0;
@@ -1401,7 +1577,8 @@ function testMedicationList() {
 
     .suggestion:hover,
     .suggestion.active {
-      background: var(--primary-soft);
+      background:
+        var(--primary-soft);
     }
 
     .suggestion-icon {
@@ -1415,7 +1592,6 @@ function testMedicationList() {
       height: 31px;
 
       color: var(--primary);
-
       background: #edf8f7;
 
       border-radius: 9px;
@@ -1425,19 +1601,16 @@ function testMedicationList() {
     }
 
     .suggestion-name {
-      min-width: 0;
-
       overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
 
       font-size: 0.94rem;
       font-weight: 650;
-
-      text-overflow: ellipsis;
-      white-space: nowrap;
     }
 
     .empty-suggestion {
-      padding: 17px 13px;
+      padding: 18px 13px;
 
       color: var(--muted);
       text-align: center;
@@ -1450,7 +1623,6 @@ function testMedicationList() {
       flex-wrap: wrap;
 
       gap: 12px;
-
       margin-top: 25px;
     }
 
@@ -1460,7 +1632,6 @@ function testMedicationList() {
       justify-content: center;
 
       min-height: 49px;
-
       gap: 9px;
 
       padding: 0 21px;
@@ -1469,17 +1640,7 @@ function testMedicationList() {
       border-radius: 13px;
 
       font-weight: 750;
-
       cursor: pointer;
-
-      transition:
-        transform 130ms ease,
-        background-color 130ms ease,
-        box-shadow 130ms ease;
-    }
-
-    .button:hover:not(:disabled) {
-      transform: translateY(-1px);
     }
 
     .button:disabled {
@@ -1488,10 +1649,9 @@ function testMedicationList() {
     }
 
     .button-primary {
-      min-width: 155px;
+      min-width: 150px;
 
       color: #ffffff;
-
       background: var(--primary);
 
       box-shadow:
@@ -1500,7 +1660,8 @@ function testMedicationList() {
     }
 
     .button-primary:hover:not(:disabled) {
-      background: var(--primary-dark);
+      background:
+        var(--primary-dark);
     }
 
     .button-secondary {
@@ -1528,10 +1689,6 @@ function testMedicationList() {
       display: inline-block;
     }
 
-    .button.loading .search-icon {
-      display: none;
-    }
-
     @keyframes spin {
       to {
         transform: rotate(360deg);
@@ -1544,7 +1701,9 @@ function testMedicationList() {
       margin-top: 20px;
       padding: 14px 15px;
 
-      border: 1px solid transparent;
+      border:
+        1px solid transparent;
+
       border-radius: 13px;
 
       font-size: 0.9rem;
@@ -1557,19 +1716,19 @@ function testMedicationList() {
 
     .status.error {
       color: var(--error-text);
-      background: var(--error-background);
+      background: var(--error-bg);
       border-color: var(--error-border);
     }
 
     .status.warning {
       color: var(--warning-text);
-      background: var(--warning-background);
+      background: var(--warning-bg);
       border-color: var(--warning-border);
     }
 
     .status.success {
       color: var(--success-text);
-      background: var(--success-background);
+      background: var(--success-bg);
       border-color: var(--success-border);
     }
 
@@ -1577,14 +1736,14 @@ function testMedicationList() {
       display: none;
 
       margin-top: 22px;
-
       overflow: hidden;
 
       background: var(--surface);
 
-      border: 1px solid var(--border);
-      border-radius: 25px;
+      border:
+        1px solid var(--border);
 
+      border-radius: 25px;
       box-shadow: var(--small-shadow);
     }
 
@@ -1598,7 +1757,6 @@ function testMedicationList() {
       justify-content: space-between;
 
       gap: 15px;
-
       padding: 22px 24px;
 
       background:
@@ -1608,7 +1766,8 @@ function testMedicationList() {
           #f1f8f8
         );
 
-      border-bottom: 1px solid var(--border);
+      border-bottom:
+        1px solid var(--border);
     }
 
     .result-eyebrow {
@@ -1628,17 +1787,13 @@ function testMedicationList() {
       font-size:
         clamp(1.3rem, 3vw, 1.7rem);
 
-      letter-spacing: -0.03em;
       overflow-wrap: anywhere;
     }
 
     .result-badge {
-      flex: 0 0 auto;
-
       padding: 7px 11px;
 
       color: var(--success-text);
-
       background:
         rgba(255, 255, 255, 0.78);
 
@@ -1670,7 +1825,7 @@ function testMedicationList() {
         1px solid var(--success-border);
 
       border-left:
-        5px solid var(--secondary);
+        5px solid var(--accent);
 
       border-radius: 15px;
     }
@@ -1712,12 +1867,14 @@ function testMedicationList() {
 
     .result-item {
       min-width: 0;
-
       padding: 15px;
 
-      background: var(--surface-soft);
+      background:
+        var(--surface-soft);
 
-      border: 1px solid #e4eded;
+      border:
+        1px solid #e4eded;
+
       border-radius: 13px;
     }
 
@@ -1737,8 +1894,6 @@ function testMedicationList() {
     }
 
     .result-item-value {
-      color: var(--text);
-
       font-size: 0.94rem;
       font-weight: 650;
       line-height: 1.5;
@@ -1752,19 +1907,16 @@ function testMedicationList() {
       padding: 17px 19px;
 
       color: #576c72;
-
       background:
         rgba(255, 255, 255, 0.75);
 
-      border: 1px solid var(--border);
+      border:
+        1px solid var(--border);
+
       border-radius: 16px;
 
       font-size: 0.84rem;
       line-height: 1.6;
-    }
-
-    .disclaimer strong {
-      color: var(--text);
     }
 
     .footer {
@@ -1784,17 +1936,14 @@ function testMedicationList() {
 
       .hero {
         padding: 27px 22px;
-        border-radius: 22px;
       }
 
       .form-card {
         padding: 21px 17px;
-        border-radius: 22px;
       }
 
       .form-grid {
         grid-template-columns: 1fr;
-        gap: 17px;
       }
 
       .full-width {
@@ -1808,15 +1957,6 @@ function testMedicationList() {
 
       .button {
         width: 100%;
-      }
-
-      .result-header {
-        align-items: flex-start;
-        padding: 19px;
-      }
-
-      .result-body {
-        padding: 19px;
       }
 
       .result-grid {
@@ -1844,9 +1984,13 @@ function testMedicationList() {
   <main class="page">
     <section class="hero">
       <div class="hero-content">
-        <div class="hero-icon">Rx</div>
+        <div class="hero-icon">
+          Rx
+        </div>
 
-        <h1>Renal Dose Adjustment</h1>
+        <h1>
+          Renal Dose Adjustment
+        </h1>
 
         <p>
           Search for a medication and retrieve its renal or
@@ -1870,7 +2014,7 @@ function testMedicationList() {
 
       <form id="doseForm" novalidate>
         <div class="form-grid">
-          <div class="field-group full-width">
+          <div class="full-width">
             <label
               class="field-label"
               for="medicationInput"
@@ -1910,11 +2054,11 @@ function testMedicationList() {
               id="medicationHelper"
               class="helper"
             >
-              Loading medication names...
+              Loading medications...
             </div>
           </div>
 
-          <div class="field-group">
+          <div>
             <label
               class="field-label"
               for="crclInput"
@@ -1948,7 +2092,7 @@ function testMedicationList() {
             </div>
           </div>
 
-          <div class="field-group">
+          <div>
             <label
               class="field-label"
               for="dialysisSelect"
@@ -1994,15 +2138,13 @@ function testMedicationList() {
             class="button button-primary"
             type="submit"
           >
-            <span class="search-icon">
-              Search
+            <span
+              id="findDoseButtonText"
+            >
+              Find Dose
             </span>
 
             <span class="spinner"></span>
-
-            <span id="findDoseButtonText">
-              Find Dose
-            </span>
           </button>
 
           <button
@@ -2080,11 +2222,22 @@ function testMedicationList() {
 
           <div class="result-item">
             <div class="result-item-label">
-              Worksheet Name
+              Worksheet
             </div>
 
             <div
               id="resultWorksheet"
+              class="result-item-value"
+            ></div>
+          </div>
+
+          <div class="result-item">
+            <div class="result-item-label">
+              Spreadsheet Column
+            </div>
+
+            <div
+              id="resultColumn"
               class="result-item-value"
             ></div>
           </div>
@@ -2122,8 +2275,8 @@ function testMedicationList() {
     const state = {
       medications: [],
       suggestions: [],
-      activeSuggestionIndex: -1,
-      medicationListLoaded: false,
+      activeIndex: -1,
+      loaded: false,
       searching: false
     };
 
@@ -2131,21 +2284,23 @@ function testMedicationList() {
 
     document.addEventListener(
       "DOMContentLoaded",
-      initializeApplication
+      initialize
     );
 
 
-    function initializeApplication() {
+    function initialize() {
       cacheElements();
       attachEvents();
       updateDialysisState();
-      loadMedicationList();
+      loadMedications();
     }
 
 
     function cacheElements() {
-      elements.doseForm =
-        document.getElementById("doseForm");
+      elements.form =
+        document.getElementById(
+          "doseForm"
+        );
 
       elements.medicationInput =
         document.getElementById(
@@ -2162,7 +2317,7 @@ function testMedicationList() {
           "autocompleteWrapper"
         );
 
-      elements.suggestionDropdown =
+      elements.dropdown =
         document.getElementById(
           "suggestionDropdown"
         );
@@ -2177,17 +2332,17 @@ function testMedicationList() {
           "crclHelper"
         );
 
-      elements.dialysisSelect =
+      elements.dialysis =
         document.getElementById(
           "dialysisSelect"
         );
 
-      elements.findDoseButton =
+      elements.findButton =
         document.getElementById(
           "findDoseButton"
         );
 
-      elements.findDoseButtonText =
+      elements.findButtonText =
         document.getElementById(
           "findDoseButtonText"
         );
@@ -2197,7 +2352,7 @@ function testMedicationList() {
           "clearButton"
         );
 
-      elements.statusMessage =
+      elements.status =
         document.getElementById(
           "statusMessage"
         );
@@ -2232,6 +2387,11 @@ function testMedicationList() {
           "resultWorksheet"
         );
 
+      elements.resultColumn =
+        document.getElementById(
+          "resultColumn"
+        );
+
       elements.resultNote =
         document.getElementById(
           "resultNote"
@@ -2240,144 +2400,146 @@ function testMedicationList() {
 
 
     function attachEvents() {
-      elements.medicationInput.addEventListener(
-        "input",
-        handleMedicationInput
-      );
+      elements.medicationInput
+        .addEventListener(
+          "input",
+          updateSuggestions
+        );
 
-      elements.medicationInput.addEventListener(
-        "keydown",
-        handleMedicationKeyboard
-      );
+      elements.medicationInput
+        .addEventListener(
+          "keydown",
+          handleKeyboard
+        );
 
-      elements.medicationInput.addEventListener(
-        "focus",
-        function () {
-          const query = normalizeText(
-            elements.medicationInput.value
-          );
-
-          if (query.length >= 3) {
-            updateSuggestions();
+      elements.medicationInput
+        .addEventListener(
+          "focus",
+          function () {
+            if (
+              normalizeText(
+                elements.medicationInput.value
+              ).length >= 3
+            ) {
+              updateSuggestions();
+            }
           }
-        }
-      );
+        );
 
-      elements.dialysisSelect.addEventListener(
-        "change",
-        updateDialysisState
-      );
+      elements.dialysis
+        .addEventListener(
+          "change",
+          updateDialysisState
+        );
 
-      elements.doseForm.addEventListener(
-        "submit",
-        function (event) {
-          event.preventDefault();
-          submitDoseSearch();
-        }
-      );
+      elements.form
+        .addEventListener(
+          "submit",
+          function (event) {
+            event.preventDefault();
+            submitSearch();
+          }
+        );
 
-      elements.clearButton.addEventListener(
-        "click",
-        clearForm
-      );
+      elements.clearButton
+        .addEventListener(
+          "click",
+          clearForm
+        );
 
       document.addEventListener(
         "click",
-        handleOutsideClick
+        function (event) {
+          if (
+            !elements
+              .autocompleteWrapper
+              .contains(event.target)
+          ) {
+            closeDropdown();
+          }
+        }
       );
     }
 
 
-    function loadMedicationList() {
+    function loadMedications() {
       setMedicationHelper(
-        "Loading medication names...",
+        "Loading medications...",
         false
       );
 
       google.script.run
         .withSuccessHandler(
-          handleMedicationListSuccess
+          handleMedicationLoadSuccess
         )
         .withFailureHandler(
-          handleMedicationListFailure
+          handleMedicationLoadFailure
         )
         .getMedicationList();
     }
 
 
-    function handleMedicationListSuccess(
+    function handleMedicationLoadSuccess(
       response
     ) {
       if (
         !response ||
         response.success !== true
       ) {
-        handleMedicationListFailure(
+        handleMedicationLoadFailure(
           response &&
           response.message
             ? response.message
-            : "Unable to load medication names."
+            : "Unable to load medications."
         );
 
         return;
       }
 
-      const records = Array.isArray(
-        response.medications
-      )
-        ? response.medications
-        : [];
+      const records =
+        Array.isArray(
+          response.medications
+        )
+          ? response.medications
+          : [];
 
-      state.medications = records
-        .map(function (record) {
-          if (
-            typeof record === "string"
-          ) {
+      state.medications =
+        records
+          .map(function (record) {
             return {
-              name: cleanText(record),
-              worksheetName: ""
+              name:
+                cleanText(
+                  record &&
+                  record.name
+                ),
+
+              worksheetName:
+                cleanText(
+                  record &&
+                  record.worksheetName
+                ),
+
+              columnNumber:
+                record &&
+                record.columnNumber
             };
-          }
+          })
+          .filter(function (record) {
+            return record.name !== "";
+          });
 
-          return {
-            name: cleanText(
-              record && record.name
-            ),
-
-            worksheetName: cleanText(
-              record &&
-              record.worksheetName
-            )
-          };
-        })
-        .filter(function (record) {
-          return record.name.length > 0;
-        })
-        .sort(function (first, second) {
-          return first.name.localeCompare(
-            second.name,
-            undefined,
-            {
-              sensitivity: "base"
-            }
-          );
-        });
-
-      state.medicationListLoaded = true;
+      state.loaded = true;
 
       if (
         state.medications.length === 0
       ) {
         setMedicationHelper(
-          "No medication worksheets were found.",
+          "No medication columns were found.",
           true
         );
 
         showStatus(
-          "No medication worksheets were found. " +
-          "Confirm that each tab has a medication name " +
-          "or that the worksheet tab itself is named " +
-          "after the medication.",
+          "No medications were found. Make sure column A contains a Drug Name row and medication names begin in column B.",
           "warning"
         );
 
@@ -2386,23 +2548,22 @@ function testMedicationList() {
 
       setMedicationHelper(
         state.medications.length +
-        " medications loaded. Type at least " +
-        "three letters to search.",
+        " medications loaded. Type at least three letters.",
         false
       );
     }
 
 
-    function handleMedicationListFailure(
+    function handleMedicationLoadFailure(
       error
     ) {
-      state.medicationListLoaded = false;
+      state.loaded = false;
       state.medications = [];
 
       const message =
-        extractErrorMessage(
+        extractError(
           error,
-          "Unable to load medication names."
+          "Unable to load medications."
         );
 
       setMedicationHelper(
@@ -2417,33 +2578,22 @@ function testMedicationList() {
     }
 
 
-    function handleMedicationInput() {
+    function updateSuggestions() {
       hideStatus();
       hideResult();
 
-      elements.medicationInput.removeAttribute(
-        "aria-invalid"
-      );
+      const query =
+        normalizeText(
+          elements.medicationInput.value
+        );
 
-      updateSuggestions();
-    }
-
-
-    function updateSuggestions() {
-      const query = normalizeText(
-        elements.medicationInput.value
-      );
-
-      state.activeSuggestionIndex = -1;
+      state.activeIndex = -1;
 
       if (query.length < 3) {
         state.suggestions = [];
+        closeDropdown();
 
-        closeSuggestions();
-
-        if (
-          state.medicationListLoaded
-        ) {
+        if (state.loaded) {
           setMedicationHelper(
             "Type at least three letters.",
             false
@@ -2453,80 +2603,50 @@ function testMedicationList() {
         return;
       }
 
-      if (
-        !state.medicationListLoaded
-      ) {
-        closeSuggestions();
-
+      if (!state.loaded) {
         setMedicationHelper(
-          "Medication names are still loading.",
+          "Medications are still loading.",
           true
         );
 
         return;
       }
 
-      const startingMatches = [];
-      const containingMatches = [];
+      const starts = [];
+      const contains = [];
 
       state.medications.forEach(
-        function (record) {
-          const normalizedName =
-            normalizeText(record.name);
+        function (medication) {
+          const name =
+            normalizeText(
+              medication.name
+            );
 
           if (
-            normalizedName.startsWith(
-              query
-            )
+            name.startsWith(query)
           ) {
-            startingMatches.push(record);
+            starts.push(medication);
           } else if (
-            normalizedName.includes(query)
+            name.includes(query)
           ) {
-            containingMatches.push(record);
+            contains.push(medication);
           }
         }
       );
 
-      startingMatches.sort(
-        compareMedications
-      );
-
-      containingMatches.sort(
-        compareMedications
-      );
+      starts.sort(compareNames);
+      contains.sort(compareNames);
 
       state.suggestions =
-        startingMatches
-          .concat(containingMatches)
+        starts
+          .concat(contains)
           .slice(0, 10);
 
       renderSuggestions();
-
-      if (
-        state.suggestions.length > 0
-      ) {
-        setMedicationHelper(
-          state.suggestions.length +
-          " matching medication" +
-          (
-            state.suggestions.length === 1
-              ? ""
-              : "s"
-          ) +
-          " found.",
-          false
-        );
-      } else {
-        setMedicationHelper(
-          "No matching medications found.",
-          true
-        );
-      }
     }
 
 
-    function compareMedications(
+    function compareNames(
       first,
       second
     ) {
@@ -2541,48 +2661,45 @@ function testMedicationList() {
 
 
     function renderSuggestions() {
-      elements.suggestionDropdown.innerHTML =
-        "";
+      elements.dropdown.innerHTML = "";
 
       if (
         state.suggestions.length === 0
       ) {
-        const emptyMessage =
-          document.createElement("div");
+        const empty =
+          document.createElement(
+            "div"
+          );
 
-        emptyMessage.className =
+        empty.className =
           "empty-suggestion";
 
-        emptyMessage.textContent =
+        empty.textContent =
           "No matching medications";
 
-        elements.suggestionDropdown
-          .appendChild(emptyMessage);
+        elements.dropdown
+          .appendChild(empty);
 
-        openSuggestions();
+        openDropdown();
+
+        setMedicationHelper(
+          "No matching medications found.",
+          true
+        );
 
         return;
       }
 
       state.suggestions.forEach(
-        function (record, index) {
+        function (medication, index) {
           const button =
             document.createElement(
               "button"
             );
 
           button.type = "button";
-
           button.className =
             "suggestion";
-
-          button.setAttribute(
-            "role",
-            "option"
-          );
-
-          button.dataset.index =
-            String(index);
 
           const icon =
             document.createElement(
@@ -2603,7 +2720,7 @@ function testMedicationList() {
             "suggestion-name";
 
           name.textContent =
-            record.name;
+            medication.name;
 
           button.appendChild(icon);
           button.appendChild(name);
@@ -2629,23 +2746,28 @@ function testMedicationList() {
             }
           );
 
-          elements.suggestionDropdown
+          elements.dropdown
             .appendChild(button);
         }
       );
 
-      openSuggestions();
+      openDropdown();
+
+      setMedicationHelper(
+        state.suggestions.length +
+        " matching medication" +
+        (
+          state.suggestions.length === 1
+            ? ""
+            : "s"
+        ) +
+        " found.",
+        false
+      );
     }
 
 
-    function handleMedicationKeyboard(
-      event
-    ) {
-      const dropdownOpen =
-        elements.suggestionDropdown
-          .classList
-          .contains("open");
-
+    function handleKeyboard(event) {
       if (
         event.key === "ArrowDown"
       ) {
@@ -2657,17 +2779,15 @@ function testMedicationList() {
 
         event.preventDefault();
 
-        if (!dropdownOpen) {
-          openSuggestions();
-        }
-
-        const nextIndex =
+        state.activeIndex =
           (
-            state.activeSuggestionIndex + 1
+            state.activeIndex + 1
           ) %
           state.suggestions.length;
 
-        setActiveSuggestion(nextIndex);
+        setActiveSuggestion(
+          state.activeIndex
+        );
 
         return;
       }
@@ -2683,37 +2803,30 @@ function testMedicationList() {
 
         event.preventDefault();
 
-        if (!dropdownOpen) {
-          openSuggestions();
-        }
-
-        const previousIndex =
-          state.activeSuggestionIndex <= 0
+        state.activeIndex =
+          state.activeIndex <= 0
             ? state.suggestions.length - 1
-            : state.activeSuggestionIndex - 1;
+            : state.activeIndex - 1;
 
         setActiveSuggestion(
-          previousIndex
+          state.activeIndex
         );
 
         return;
       }
 
-      if (event.key === "Enter") {
-        if (
-          dropdownOpen &&
-          state.activeSuggestionIndex >= 0
-        ) {
-          event.preventDefault();
+      if (
+        event.key === "Enter" &&
+        elements.dropdown
+          .classList
+          .contains("open") &&
+        state.activeIndex >= 0
+      ) {
+        event.preventDefault();
 
-          selectSuggestion(
-            state.activeSuggestionIndex
-          );
-
-          return;
-        }
-
-        closeSuggestions();
+        selectSuggestion(
+          state.activeIndex
+        );
 
         return;
       }
@@ -2721,19 +2834,21 @@ function testMedicationList() {
       if (
         event.key === "Escape"
       ) {
-        closeSuggestions();
+        closeDropdown();
       }
     }
 
 
-    function setActiveSuggestion(index) {
-      const suggestionButtons =
-        elements.suggestionDropdown
+    function setActiveSuggestion(
+      index
+    ) {
+      const buttons =
+        elements.dropdown
           .querySelectorAll(
             ".suggestion"
           );
 
-      suggestionButtons.forEach(
+      buttons.forEach(
         function (button, buttonIndex) {
           button.classList.toggle(
             "active",
@@ -2742,13 +2857,10 @@ function testMedicationList() {
         }
       );
 
-      state.activeSuggestionIndex =
-        index;
+      state.activeIndex = index;
 
-      if (
-        suggestionButtons[index]
-      ) {
-        suggestionButtons[index]
+      if (buttons[index]) {
+        buttons[index]
           .scrollIntoView({
             block: "nearest"
           });
@@ -2757,17 +2869,17 @@ function testMedicationList() {
 
 
     function selectSuggestion(index) {
-      const selected =
+      const medication =
         state.suggestions[index];
 
-      if (!selected) {
+      if (!medication) {
         return;
       }
 
       elements.medicationInput.value =
-        selected.name;
+        medication.name;
 
-      closeSuggestions();
+      closeDropdown();
 
       setMedicationHelper(
         "Medication selected. Click Find Dose.",
@@ -2776,8 +2888,8 @@ function testMedicationList() {
     }
 
 
-    function openSuggestions() {
-      elements.suggestionDropdown
+    function openDropdown() {
+      elements.dropdown
         .classList
         .add("open");
 
@@ -2789,8 +2901,8 @@ function testMedicationList() {
     }
 
 
-    function closeSuggestions() {
-      elements.suggestionDropdown
+    function closeDropdown() {
+      elements.dropdown
         .classList
         .remove("open");
 
@@ -2800,67 +2912,47 @@ function testMedicationList() {
           "false"
         );
 
-      state.activeSuggestionIndex = -1;
-    }
-
-
-    function handleOutsideClick(event) {
-      if (
-        !elements.autocompleteWrapper
-          .contains(event.target)
-      ) {
-        closeSuggestions();
-      }
+      state.activeIndex = -1;
     }
 
 
     function updateDialysisState() {
       const onDialysis =
-        elements.dialysisSelect.value !==
+        elements.dialysis.value !==
         "not_on_dialysis";
 
       elements.crclInput.disabled =
         onDialysis;
 
-      elements.crclInput.removeAttribute(
-        "aria-invalid"
-      );
-
       if (onDialysis) {
         elements.crclInput.value = "";
 
         elements.crclInput.placeholder =
-          "Not required for dialysis";
+          "Not required";
 
         elements.crclHelper.textContent =
-          "Creatinine clearance is disabled " +
-          "and will be ignored.";
+          "Creatinine clearance is ignored for dialysis.";
       } else {
         elements.crclInput.placeholder =
           "Example: 37.8";
 
         elements.crclHelper.textContent =
-          "Decimal values are rounded to the " +
-          "nearest whole number.";
+          "Decimal values are rounded to the nearest whole number.";
       }
-
-      elements.crclHelper.classList
-        .remove("error");
 
       hideStatus();
       hideResult();
     }
 
 
-    function submitDoseSearch() {
+    function submitSearch() {
       if (state.searching) {
         return;
       }
 
-      closeSuggestions();
+      closeDropdown();
       hideStatus();
       hideResult();
-      clearValidationErrors();
 
       const medicationName =
         cleanText(
@@ -2868,23 +2960,22 @@ function testMedicationList() {
         );
 
       const dialysisMethod =
-        elements.dialysisSelect.value;
+        elements.dialysis.value;
 
       const onDialysis =
         dialysisMethod !==
         "not_on_dialysis";
 
-      let crClValue = null;
-      let valid = true;
+      let crCl = null;
 
       if (!medicationName) {
-        markInputError(
-          elements.medicationInput,
-          elements.medicationHelper,
-          "Enter a medication name."
+        showStatus(
+          "Enter a medication name.",
+          "error"
         );
 
-        valid = false;
+        elements.medicationInput.focus();
+        return;
       }
 
       if (!onDialysis) {
@@ -2894,51 +2985,32 @@ function testMedicationList() {
           );
 
         if (!rawCrCl) {
-          markInputError(
-            elements.crclInput,
-            elements.crclHelper,
-            "Enter the patient's creatinine clearance."
+          showStatus(
+            "Enter the patient's creatinine clearance.",
+            "error"
           );
 
-          valid = false;
-        } else {
-          crClValue =
-            Number(rawCrCl);
+          elements.crclInput.focus();
+          return;
+        }
 
-          if (
-            !Number.isFinite(crClValue)
-          ) {
-            markInputError(
-              elements.crclInput,
-              elements.crclHelper,
-              "Creatinine clearance must be a valid number."
-            );
+        crCl = Number(rawCrCl);
 
-            valid = false;
-          } else if (
-            crClValue < 0
-          ) {
-            markInputError(
-              elements.crclInput,
-              elements.crclHelper,
-              "Creatinine clearance cannot be less than 0."
-            );
+        if (
+          !Number.isFinite(crCl) ||
+          crCl < 0
+        ) {
+          showStatus(
+            "Creatinine clearance must be a valid number of 0 or greater.",
+            "error"
+          );
 
-            valid = false;
-          }
+          elements.crclInput.focus();
+          return;
         }
       }
 
-      if (!valid) {
-        showStatus(
-          "Correct the highlighted information.",
-          "error"
-        );
-
-        return;
-      }
-
-      setSearchingState(true);
+      setSearching(true);
 
       google.script.run
         .withSuccessHandler(
@@ -2949,30 +3021,26 @@ function testMedicationList() {
         )
         .findDose(
           medicationName,
-          crClValue,
+          crCl,
           dialysisMethod
         );
     }
 
 
-    function handleDoseSuccess(response) {
-      setSearchingState(false);
-
-      if (!response) {
-        showStatus(
-          "No response was received.",
-          "error"
-        );
-
-        return;
-      }
+    function handleDoseSuccess(
+      response
+    ) {
+      setSearching(false);
 
       if (
+        !response ||
         response.success !== true
       ) {
         showStatus(
-          response.message ||
-          "Unable to retrieve the dose.",
+          response &&
+          response.message
+            ? response.message
+            : "Unable to retrieve the recommendation.",
           "error"
         );
 
@@ -3004,12 +3072,12 @@ function testMedicationList() {
 
 
     function handleDoseFailure(error) {
-      setSearchingState(false);
+      setSearching(false);
 
       showStatus(
-        extractErrorMessage(
+        extractError(
           error,
-          "Unable to retrieve the dose recommendation."
+          "Unable to retrieve the recommendation."
         ),
         "error"
       );
@@ -3018,8 +3086,9 @@ function testMedicationList() {
 
     function displayResult(result) {
       elements.resultMedication.textContent =
-        cleanText(result.medication) ||
-        "Medication";
+        cleanText(
+          result.medication
+        );
 
       elements.resultDose.textContent =
         cleanText(
@@ -3030,14 +3099,17 @@ function testMedicationList() {
       elements.resultDialysis.textContent =
         cleanText(
           result.dialysisMethod
-        ) ||
-        "Not on Dialysis";
+        );
 
       elements.resultWorksheet.textContent =
         cleanText(
           result.worksheetName
-        ) ||
-        "Not available";
+        );
+
+      elements.resultColumn.textContent =
+        cleanText(
+          result.spreadsheetColumn
+        );
 
       elements.resultNote.textContent =
         cleanText(
@@ -3057,25 +3129,29 @@ function testMedicationList() {
           formatCrCl(result);
       }
 
-      elements.resultCard.classList
+      elements.resultCard
+        .classList
         .add("show");
 
-      elements.resultCard.scrollIntoView({
-        behavior: "smooth",
-        block: "nearest"
-      });
+      elements.resultCard
+        .scrollIntoView({
+          behavior: "smooth",
+          block: "nearest"
+        });
     }
 
 
     function formatCrCl(result) {
       const entered =
         Number(
-          result.creatinineClearanceEntered
+          result
+            .creatinineClearanceEntered
         );
 
       const used =
         Number(
-          result.creatinineClearanceUsed
+          result
+            .creatinineClearanceUsed
         );
 
       if (
@@ -3084,47 +3160,24 @@ function testMedicationList() {
       ) {
         if (entered !== used) {
           return (
-            formatNumber(entered) +
+            entered +
             " mL/min entered; " +
-            formatNumber(used) +
+            used +
             " mL/min used"
           );
         }
 
-        return (
-          formatNumber(used) +
-          " mL/min"
-        );
-      }
-
-      if (
-        Number.isFinite(used)
-      ) {
-        return (
-          formatNumber(used) +
-          " mL/min"
-        );
+        return used + " mL/min";
       }
 
       return "Not available";
     }
 
 
-    function formatNumber(value) {
-      return Number(value)
-        .toLocaleString(
-          undefined,
-          {
-            maximumFractionDigits: 2
-          }
-        );
-    }
-
-
-    function setSearchingState(searching) {
+    function setSearching(searching) {
       state.searching = searching;
 
-      elements.findDoseButton.disabled =
+      elements.findButton.disabled =
         searching;
 
       elements.clearButton.disabled =
@@ -3133,25 +3186,22 @@ function testMedicationList() {
       elements.medicationInput.disabled =
         searching;
 
-      elements.dialysisSelect.disabled =
+      elements.dialysis.disabled =
         searching;
-
-      const dialysisSelected =
-        elements.dialysisSelect.value !==
-        "not_on_dialysis";
 
       elements.crclInput.disabled =
         searching ||
-        dialysisSelected;
+        elements.dialysis.value !==
+          "not_on_dialysis";
 
-      elements.findDoseButton
+      elements.findButton
         .classList
         .toggle(
           "loading",
           searching
         );
 
-      elements.findDoseButtonText.textContent =
+      elements.findButtonText.textContent =
         searching
           ? "Finding Dose..."
           : "Find Dose";
@@ -3163,30 +3213,23 @@ function testMedicationList() {
         return;
       }
 
-      elements.doseForm.reset();
+      elements.form.reset();
 
       state.suggestions = [];
-      state.activeSuggestionIndex = -1;
+      state.activeIndex = -1;
 
-      clearValidationErrors();
-      closeSuggestions();
+      closeDropdown();
       hideStatus();
       hideResult();
       updateDialysisState();
 
-      if (
-        state.medicationListLoaded
-      ) {
-        setMedicationHelper(
-          "Type at least three letters.",
-          false
-        );
-      } else {
-        setMedicationHelper(
-          "Medication names are still loading.",
-          true
-        );
-      }
+      setMedicationHelper(
+        state.loaded
+          ? state.medications.length +
+            " medications loaded. Type at least three letters."
+          : "Loading medications...",
+        false
+      );
 
       elements.medicationInput.focus();
     }
@@ -3196,19 +3239,17 @@ function testMedicationList() {
       message,
       type
     ) {
-      elements.statusMessage.textContent =
+      elements.status.textContent =
         message;
 
-      elements.statusMessage.className =
+      elements.status.className =
         "status show " + type;
     }
 
 
     function hideStatus() {
-      elements.statusMessage.textContent =
-        "";
-
-      elements.statusMessage.className =
+      elements.status.textContent = "";
+      elements.status.className =
         "status";
     }
 
@@ -3236,53 +3277,6 @@ function testMedicationList() {
     }
 
 
-    function markInputError(
-      input,
-      helper,
-      message
-    ) {
-      input.setAttribute(
-        "aria-invalid",
-        "true"
-      );
-
-      helper.textContent =
-        message;
-
-      helper.classList.add(
-        "error"
-      );
-    }
-
-
-    function clearValidationErrors() {
-      elements.medicationInput
-        .removeAttribute(
-          "aria-invalid"
-        );
-
-      elements.crclInput
-        .removeAttribute(
-          "aria-invalid"
-        );
-
-      elements.medicationHelper
-        .classList
-        .remove("error");
-
-      elements.crclHelper
-        .classList
-        .remove("error");
-    }
-
-
-    function normalizeText(value) {
-      return cleanText(value)
-        .toLocaleLowerCase()
-        .replace(/\s+/g, " ");
-    }
-
-
     function cleanText(value) {
       if (
         value === null ||
@@ -3297,7 +3291,13 @@ function testMedicationList() {
     }
 
 
-    function extractErrorMessage(
+    function normalizeText(value) {
+      return cleanText(value)
+        .toLocaleLowerCase();
+    }
+
+
+    function extractError(
       error,
       fallback
     ) {
@@ -3312,7 +3312,9 @@ function testMedicationList() {
         error &&
         error.message
       ) {
-        return String(error.message);
+        return String(
+          error.message
+        );
       }
 
       return fallback;
@@ -3320,3 +3322,6 @@ function testMedicationList() {
   </script>
 </body>
 </html>
+
+
+    
