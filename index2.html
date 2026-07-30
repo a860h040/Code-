@@ -1,8 +1,10 @@
 <!DOCTYPE html>
-<html>
+<html lang="en">
 <head>
-  <base target="_top">
   <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Pharmacist Schedule Dashboard</title>
+  <script src="https://www.gstatic.com/charts/loader.js"></script>
   <style>
     :root {
       --navy: #12365a;
@@ -16,6 +18,7 @@
       --working: #087f5b;
       --off: #7c8794;
       --warning: #b45309;
+      --danger: #9f1239;
       --shadow: 0 12px 35px rgba(18, 54, 90, 0.10);
       --radius: 18px;
     }
@@ -38,419 +41,121 @@
       padding: 28px clamp(18px, 5vw, 64px) 76px;
     }
 
-    .topbar-inner {
-      width: min(1280px, 100%);
-      margin: 0 auto;
-    }
+    .topbar-inner { width: min(1280px, 100%); margin: 0 auto; }
+    .eyebrow { margin: 0 0 8px; font-size: .78rem; font-weight: 800; letter-spacing: .14em; text-transform: uppercase; opacity: .76; }
+    h1 { margin: 0; font-size: clamp(1.8rem, 4vw, 3rem); line-height: 1.08; letter-spacing: -.035em; }
+    .subtitle { margin: 12px 0 0; max-width: 820px; color: rgba(255,255,255,.82); font-size: 1rem; }
 
-    .eyebrow {
-      margin: 0 0 8px;
-      font-size: 0.78rem;
-      font-weight: 800;
-      letter-spacing: 0.14em;
-      text-transform: uppercase;
-      opacity: 0.76;
-    }
+    .page { width: min(1280px, calc(100% - 28px)); margin: -48px auto 40px; }
+    .panel { background: var(--surface); border: 1px solid rgba(219,228,236,.95); border-radius: var(--radius); box-shadow: var(--shadow); }
 
-    h1 {
-      margin: 0;
-      font-size: clamp(1.8rem, 4vw, 3rem);
-      line-height: 1.08;
-      letter-spacing: -0.035em;
-    }
+    .source-panel { padding: 20px; margin-bottom: 18px; }
+    .source-grid { display: grid; grid-template-columns: minmax(280px, 1fr) 150px auto; gap: 14px; align-items: end; }
+    .field-label { display: block; margin-bottom: 7px; color: var(--muted); font-size: .78rem; font-weight: 800; letter-spacing: .06em; text-transform: uppercase; }
+    .text-input { width: 100%; height: 50px; padding: 0 14px; border: 1px solid var(--line); border-radius: 14px; background: #fff; color: var(--ink); outline: none; }
+    .text-input:focus { border-color: var(--blue); box-shadow: 0 0 0 4px rgba(31,110,169,.12); }
+    .primary-button { height: 50px; padding: 0 20px; border: 0; border-radius: 14px; background: var(--blue); color: #fff; font-weight: 900; cursor: pointer; }
+    .primary-button:hover { background: #185d90; }
+    .source-help { margin: 12px 2px 0; color: var(--muted); font-size: .84rem; line-height: 1.45; }
 
-    .subtitle {
-      margin: 12px 0 0;
-      max-width: 760px;
-      color: rgba(255,255,255,0.82);
-      font-size: 1rem;
-    }
-
-    .page {
-      width: min(1280px, calc(100% - 28px));
-      margin: -48px auto 40px;
-    }
-
-    .panel {
-      background: var(--surface);
-      border: 1px solid rgba(219, 228, 236, 0.95);
-      border-radius: var(--radius);
-      box-shadow: var(--shadow);
-    }
-
-    .controls {
-      padding: 20px;
-      display: grid;
-      grid-template-columns: minmax(260px, 1fr) auto;
-      gap: 16px;
-      align-items: end;
-    }
-
-    .field-label {
-      display: block;
-      margin-bottom: 7px;
-      color: var(--muted);
-      font-size: 0.78rem;
-      font-weight: 800;
-      letter-spacing: 0.06em;
-      text-transform: uppercase;
-    }
-
+    .controls { padding: 20px; display: grid; grid-template-columns: minmax(260px, 1fr) auto; gap: 16px; align-items: end; }
     .search-wrap { position: relative; }
-
-    .search-input {
-      width: 100%;
-      height: 50px;
-      padding: 0 46px 0 44px;
-      border: 1px solid var(--line);
-      border-radius: 14px;
-      background: #fff;
-      color: var(--ink);
-      outline: none;
-      transition: border-color .18s ease, box-shadow .18s ease;
-    }
-
-    .search-input:focus {
-      border-color: var(--blue);
-      box-shadow: 0 0 0 4px rgba(31, 110, 169, 0.12);
-    }
-
-    .search-icon {
-      position: absolute;
-      left: 15px;
-      bottom: 15px;
-      width: 19px;
-      height: 19px;
-      color: var(--muted);
-      pointer-events: none;
-    }
-
-    .clear-search {
-      position: absolute;
-      right: 10px;
-      bottom: 9px;
-      width: 32px;
-      height: 32px;
-      border: 0;
-      border-radius: 50%;
-      background: transparent;
-      color: var(--muted);
-      cursor: pointer;
-      display: none;
-    }
-
+    .search-input { width: 100%; height: 50px; padding: 0 46px 0 44px; border: 1px solid var(--line); border-radius: 14px; background: #fff; color: var(--ink); outline: none; }
+    .search-input:focus { border-color: var(--blue); box-shadow: 0 0 0 4px rgba(31,110,169,.12); }
+    .search-icon { position: absolute; left: 15px; bottom: 15px; width: 19px; height: 19px; color: var(--muted); pointer-events: none; }
+    .clear-search { position: absolute; right: 10px; bottom: 9px; width: 32px; height: 32px; border: 0; border-radius: 50%; background: transparent; color: var(--muted); cursor: pointer; display: none; }
     .clear-search:hover { background: #eef3f7; color: var(--ink); }
 
-    .suggestions {
-      position: absolute;
-      z-index: 30;
-      top: calc(100% + 8px);
-      left: 0;
-      right: 0;
-      max-height: 330px;
-      overflow-y: auto;
-      padding: 7px;
-      border: 1px solid var(--line);
-      border-radius: 14px;
-      background: #fff;
-      box-shadow: 0 20px 45px rgba(18,54,90,.18);
-      display: none;
-    }
-
-    .suggestion {
-      width: 100%;
-      padding: 11px 12px;
-      border: 0;
-      border-radius: 10px;
-      background: transparent;
-      text-align: left;
-      cursor: pointer;
-    }
-
+    .suggestions { position: absolute; z-index: 30; top: calc(100% + 8px); left: 0; right: 0; max-height: 330px; overflow-y: auto; padding: 7px; border: 1px solid var(--line); border-radius: 14px; background: #fff; box-shadow: 0 20px 45px rgba(18,54,90,.18); display: none; }
+    .suggestion { width: 100%; padding: 11px 12px; border: 0; border-radius: 10px; background: transparent; text-align: left; cursor: pointer; }
     .suggestion:hover, .suggestion.active { background: var(--blue-light); }
     .suggestion-name { display: block; font-weight: 800; }
     .suggestion-original { display: block; margin-top: 2px; color: var(--muted); font-size: .82rem; }
 
-    .date-nav {
-      display: flex;
-      gap: 9px;
-      align-items: center;
-    }
-
-    .nav-button {
-      height: 50px;
-      min-width: 50px;
-      padding: 0 14px;
-      border: 1px solid var(--line);
-      border-radius: 14px;
-      background: #fff;
-      color: var(--navy);
-      font-weight: 800;
-      cursor: pointer;
-    }
-
+    .date-nav { display: flex; gap: 9px; align-items: center; }
+    .nav-button { height: 50px; min-width: 50px; padding: 0 14px; border: 1px solid var(--line); border-radius: 14px; background: #fff; color: var(--navy); font-weight: 800; cursor: pointer; }
     .nav-button:hover:not(:disabled) { background: var(--blue-light); border-color: #b8d7eb; }
     .nav-button:disabled { opacity: .35; cursor: not-allowed; }
+    .selected-date { min-width: 220px; text-align: center; line-height: 1.18; }
 
-    .selected-date {
-      min-width: 220px;
-      text-align: center;
-      line-height: 1.18;
-    }
-
-    .date-strip-wrap {
-      border-top: 1px solid var(--line);
-      padding: 14px 20px 18px;
-    }
-
-    .date-strip {
-      display: flex;
-      gap: 8px;
-      overflow-x: auto;
-      scrollbar-width: thin;
-      padding-bottom: 3px;
-    }
-
-    .date-chip {
-      flex: 0 0 auto;
-      min-width: 66px;
-      padding: 8px 10px;
-      border: 1px solid var(--line);
-      border-radius: 12px;
-      background: #fff;
-      color: var(--ink);
-      cursor: pointer;
-      text-align: center;
-    }
-
+    .date-strip-wrap { border-top: 1px solid var(--line); padding: 14px 20px 18px; }
+    .date-strip { display: flex; gap: 8px; overflow-x: auto; scrollbar-width: thin; padding-bottom: 3px; }
+    .date-chip { flex: 0 0 auto; min-width: 72px; padding: 8px 10px; border: 1px solid var(--line); border-radius: 12px; background: #fff; color: var(--ink); cursor: pointer; text-align: center; }
     .date-chip:hover { border-color: #9fc9e4; background: var(--blue-light); }
     .date-chip.selected { border-color: var(--blue); background: var(--blue); color: #fff; }
     .chip-weekday { display: block; font-size: .7rem; font-weight: 900; letter-spacing: .06em; }
     .chip-date { display: block; margin-top: 2px; font-size: .93rem; font-weight: 800; }
 
-    .summary-grid {
-      display: grid;
-      grid-template-columns: repeat(4, minmax(0, 1fr));
-      gap: 14px;
-      margin: 18px 0;
-    }
-
-    .summary-card {
-      padding: 18px;
-      border: 1px solid var(--line);
-      border-radius: 16px;
-      background: #fff;
-    }
-
+    .summary-grid { display: grid; grid-template-columns: repeat(4, minmax(0,1fr)); gap: 14px; margin: 18px 0; }
+    .summary-card { padding: 18px; border: 1px solid var(--line); border-radius: 16px; background: #fff; }
     .summary-label { color: var(--muted); font-size: .78rem; font-weight: 800; text-transform: uppercase; letter-spacing: .06em; }
     .summary-value { margin-top: 4px; color: var(--navy); font-size: 2rem; font-weight: 900; line-height: 1; }
 
-    .section {
-      padding: 22px;
-      margin-top: 18px;
-    }
-
-    .section-heading {
-      display: flex;
-      gap: 16px;
-      align-items: flex-start;
-      justify-content: space-between;
-      margin-bottom: 18px;
-    }
-
-    h2 { margin: 0; font-size: 1.35rem; letter-spacing: -0.02em; }
+    .section { padding: 22px; margin-top: 18px; }
+    .section-heading { display: flex; gap: 16px; align-items: flex-start; justify-content: space-between; margin-bottom: 18px; }
+    h2 { margin: 0; font-size: 1.35rem; letter-spacing: -.02em; }
     .section-note { margin: 5px 0 0; color: var(--muted); font-size: .9rem; }
     .count-badge { flex: 0 0 auto; padding: 7px 11px; border-radius: 999px; background: var(--blue-light); color: var(--blue); font-size: .82rem; font-weight: 900; }
 
-    .groups {
-      display: grid;
-      grid-template-columns: repeat(2, minmax(0, 1fr));
-      gap: 16px;
-    }
-
-    .shift-group {
-      border: 1px solid var(--line);
-      border-radius: 16px;
-      overflow: hidden;
-    }
-
-    .shift-header {
-      display: flex;
-      align-items: center;
-      justify-content: space-between;
-      padding: 12px 14px;
-      background: #f8fafc;
-      border-bottom: 1px solid var(--line);
-      font-weight: 900;
-    }
-
+    .groups { display: grid; grid-template-columns: repeat(2, minmax(0,1fr)); gap: 16px; }
+    .shift-group { border: 1px solid var(--line); border-radius: 16px; overflow: hidden; }
+    .shift-header { display: flex; align-items: center; justify-content: space-between; padding: 12px 14px; background: #f8fafc; border-bottom: 1px solid var(--line); font-weight: 900; }
     .person-list { display: grid; }
-
-    .person-card {
-      display: grid;
-      grid-template-columns: minmax(0, 1fr) auto;
-      gap: 12px;
-      padding: 13px 14px;
-      border-bottom: 1px solid #edf2f6;
-      cursor: pointer;
-      transition: background .16s ease;
-    }
-
+    .person-card { display: grid; grid-template-columns: minmax(0,1fr) auto; gap: 12px; padding: 13px 14px; border-bottom: 1px solid #edf2f6; cursor: pointer; transition: background .16s ease; }
     .person-card:last-child { border-bottom: 0; }
     .person-card:hover { background: var(--blue-light); }
     .person-name { font-weight: 850; }
     .person-detail { margin-top: 3px; color: var(--muted); font-size: .82rem; }
     .assignment-code { align-self: center; padding: 6px 9px; border-radius: 9px; background: #edf7f4; color: var(--working); font-size: .82rem; font-weight: 900; }
 
-    .has-shift-tooltip {
-      cursor: help;
-      text-decoration-line: underline;
-      text-decoration-style: dotted;
-      text-decoration-thickness: 1px;
-      text-underline-offset: 3px;
-    }
-
-    .has-shift-tooltip:focus {
-      outline: 3px solid rgba(31, 110, 169, 0.22);
-      outline-offset: 3px;
-    }
-
-    .shift-tooltip-popup {
-      position: fixed;
-      z-index: 200;
-      width: max-content;
-      max-width: min(360px, calc(100vw - 24px));
-      padding: 10px 12px;
-      border: 1px solid rgba(255,255,255,.18);
-      border-radius: 10px;
-      background: #102a43;
-      color: #fff;
-      box-shadow: 0 12px 30px rgba(15, 42, 67, .28);
-      font-size: .82rem;
-      font-weight: 700;
-      line-height: 1.4;
-      pointer-events: none;
-      opacity: 0;
-      transform: translateY(4px);
-      transition: opacity .12s ease, transform .12s ease;
-    }
-
-    .shift-tooltip-popup.visible {
-      opacity: 1;
-      transform: translateY(0);
-    }
+    .has-shift-tooltip { cursor: help; text-decoration-line: underline; text-decoration-style: dotted; text-underline-offset: 3px; }
+    .shift-tooltip-popup { position: fixed; z-index: 200; width: max-content; max-width: min(360px, calc(100vw - 24px)); padding: 10px 12px; border: 1px solid rgba(255,255,255,.18); border-radius: 10px; background: #102a43; color: #fff; box-shadow: 0 12px 30px rgba(15,42,67,.28); font-size: .82rem; font-weight: 700; line-height: 1.4; pointer-events: none; opacity: 0; transform: translateY(4px); transition: opacity .12s ease, transform .12s ease; }
+    .shift-tooltip-popup.visible { opacity: 1; transform: translateY(0); }
 
     .person-panel { display: none; }
-
-    .person-header {
-      display: flex;
-      align-items: center;
-      justify-content: space-between;
-      gap: 18px;
-      padding-bottom: 16px;
-      border-bottom: 1px solid var(--line);
-    }
-
+    .person-header { display: flex; align-items: center; justify-content: space-between; gap: 18px; padding-bottom: 16px; border-bottom: 1px solid var(--line); }
     .person-name-large { margin: 0; font-size: 1.45rem; }
     .person-meta { margin: 5px 0 0; color: var(--muted); }
+    .close-person { border: 1px solid var(--line); border-radius: 11px; background: #fff; padding: 9px 12px; color: var(--navy); font-weight: 800; cursor: pointer; }
 
-    .close-person {
-      border: 1px solid var(--line);
-      border-radius: 11px;
-      background: #fff;
-      padding: 9px 12px;
-      color: var(--navy);
-      font-weight: 800;
-      cursor: pointer;
-    }
-
-    .table-wrap { margin-top: 16px; overflow-x: auto; border: 1px solid var(--line); border-radius: 14px; }
+    .table-wrap { margin-top: 16px; overflow: auto; border: 1px solid var(--line); border-radius: 14px; max-height: 70vh; }
     table { width: 100%; border-collapse: collapse; min-width: 760px; }
     th, td { padding: 12px 13px; border-bottom: 1px solid #edf2f6; text-align: left; vertical-align: middle; }
-    th { background: #f8fafc; color: var(--muted); font-size: .75rem; letter-spacing: .06em; text-transform: uppercase; }
+    th { position: sticky; top: 0; z-index: 2; background: #f8fafc; color: var(--muted); font-size: .75rem; letter-spacing: .06em; text-transform: uppercase; }
     tr:last-child td { border-bottom: 0; }
     tr.working-row { background: #fbfefd; }
 
-    .status-pill {
-      display: inline-flex;
-      align-items: center;
-      padding: 5px 9px;
-      border-radius: 999px;
-      font-size: .77rem;
-      font-weight: 900;
-      white-space: nowrap;
-    }
-
+    .status-pill { display: inline-flex; align-items: center; padding: 5px 9px; border-radius: 999px; font-size: .77rem; font-weight: 900; white-space: nowrap; }
     .status-working { background: #e3f6ef; color: var(--working); }
     .status-off, .status-not-scheduled { background: #edf1f4; color: var(--off); }
     .status-pto, .status-holiday { background: #fff3df; color: var(--warning); }
 
-    .empty-state {
-      padding: 34px 20px;
-      border: 1px dashed #bdcad5;
-      border-radius: 14px;
-      color: var(--muted);
-      text-align: center;
-    }
+    .empty-state { padding: 34px 20px; border: 1px dashed #bdcad5; border-radius: 14px; color: var(--muted); text-align: center; }
+    .raw-panel summary { cursor: pointer; color: var(--navy); font-weight: 900; }
+    .raw-panel details[open] summary { margin-bottom: 14px; }
+    .raw-table td { white-space: pre-wrap; min-width: 110px; }
 
-    .loading {
-      position: fixed;
-      inset: 0;
-      z-index: 100;
-      display: grid;
-      place-items: center;
-      background: rgba(244,247,250,.88);
-      backdrop-filter: blur(4px);
-    }
-
-    .loading-card {
-      display: flex;
-      align-items: center;
-      gap: 12px;
-      padding: 18px 22px;
-      border: 1px solid var(--line);
-      border-radius: 15px;
-      background: #fff;
-      box-shadow: var(--shadow);
-      font-weight: 800;
-    }
-
-    .spinner {
-      width: 22px;
-      height: 22px;
-      border: 3px solid #d9e8f2;
-      border-top-color: var(--blue);
-      border-radius: 50%;
-      animation: spin .75s linear infinite;
-    }
-
-    .error-banner {
-      display: none;
-      margin: 18px 0;
-      padding: 14px 16px;
-      border: 1px solid #fecaca;
-      border-radius: 13px;
-      background: #fff1f2;
-      color: #9f1239;
-      font-weight: 700;
-    }
-
+    .loading { position: fixed; inset: 0; z-index: 100; display: none; place-items: center; background: rgba(244,247,250,.88); backdrop-filter: blur(4px); }
+    .loading.visible { display: grid; }
+    .loading-card { display: flex; align-items: center; gap: 12px; padding: 18px 22px; border: 1px solid var(--line); border-radius: 15px; background: #fff; box-shadow: var(--shadow); font-weight: 800; }
+    .spinner { width: 22px; height: 22px; border: 3px solid #d9e8f2; border-top-color: var(--blue); border-radius: 50%; animation: spin .75s linear infinite; }
+    .error-banner { display: none; margin: 18px 0; padding: 14px 16px; border: 1px solid #fecaca; border-radius: 13px; background: #fff1f2; color: var(--danger); font-weight: 700; }
     .footer-note { margin: 18px 4px 0; color: var(--muted); font-size: .8rem; text-align: right; }
-
+    .hidden { display: none !important; }
     @keyframes spin { to { transform: rotate(360deg); } }
 
-    @media (max-width: 860px) {
-      .controls { grid-template-columns: 1fr; }
+    @media (max-width: 900px) {
+      .source-grid, .controls { grid-template-columns: 1fr; }
       .date-nav { justify-content: stretch; }
       .selected-date { flex: 1; min-width: 0; }
-      .summary-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+      .summary-grid { grid-template-columns: repeat(2, minmax(0,1fr)); }
       .groups { grid-template-columns: 1fr; }
     }
 
     @media (max-width: 540px) {
       .topbar { padding-left: 18px; padding-right: 18px; }
       .page { width: min(100% - 18px, 1280px); }
-      .controls, .section { padding: 16px; }
+      .source-panel, .controls, .section { padding: 16px; }
       .summary-grid { gap: 9px; }
       .summary-card { padding: 14px; }
       .summary-value { font-size: 1.65rem; }
@@ -461,25 +166,36 @@
 <body>
   <header class="topbar">
     <div class="topbar-inner">
-      <p class="eyebrow">Daily staffing view</p>
+      <p class="eyebrow">Direct Google Sheet connection</p>
       <h1>Pharmacist Schedule Dashboard</h1>
-      <p class="subtitle">Choose a date to see who is working, or type one letter of a first name to find a pharmacist’s complete schedule.</p>
+      <p class="subtitle">Paste a Google Sheet URL or Sheet ID. This page reads the sheet directly and does not use Google Apps Script.</p>
     </div>
   </header>
 
   <main class="page">
+    <section class="panel source-panel">
+      <div class="source-grid">
+        <div>
+          <label class="field-label" for="sheetInput">Google Sheet URL or Sheet ID</label>
+          <input id="sheetInput" class="text-input" type="text" autocomplete="off" placeholder="Paste the full Sheet URL or the ID between /d/ and /edit">
+        </div>
+        <div>
+          <label class="field-label" for="gidInput">Tab GID</label>
+          <input id="gidInput" class="text-input" type="text" inputmode="numeric" value="0" placeholder="0">
+        </div>
+        <button id="loadSheet" class="primary-button" type="button">Load sheet</button>
+      </div>
+      <p class="source-help">The spreadsheet must be shared as <strong>Anyone with the link — Viewer</strong> or published to the web. The GID is the number after <strong>gid=</strong> in the tab URL.</p>
+    </section>
+
     <div id="errorBanner" class="error-banner" role="alert"></div>
 
-    <section class="panel">
+    <section id="dashboardControls" class="panel hidden">
       <div class="controls">
         <div class="search-wrap">
           <label class="field-label" for="personSearch">Find a person</label>
-          <svg class="search-icon" viewBox="0 0 24 24" aria-hidden="true">
-            <path fill="currentColor" d="m21 20.3-5.2-5.2a7.5 7.5 0 1 0-.7.7l5.2 5.2.7-.7ZM4.5 10.5a6 6 0 1 1 12 0 6 6 0 0 1-12 0Z"/>
-          </svg>
-          <input id="personSearch" class="search-input" type="search" autocomplete="off"
-                 placeholder="Start with one letter, for example A…"
-                 aria-autocomplete="list" aria-controls="suggestions" aria-expanded="false">
+          <svg class="search-icon" viewBox="0 0 24 24" aria-hidden="true"><path fill="currentColor" d="m21 20.3-5.2-5.2a7.5 7.5 0 1 0-.7.7l5.2 5.2.7-.7ZM4.5 10.5a6 6 0 1 1 12 0 6 6 0 0 1-12 0Z"/></svg>
+          <input id="personSearch" class="search-input" type="search" autocomplete="off" placeholder="Start with one letter, for example A…" aria-autocomplete="list" aria-controls="suggestions" aria-expanded="false">
           <button id="clearSearch" class="clear-search" type="button" aria-label="Clear person search">✕</button>
           <div id="suggestions" class="suggestions" role="listbox"></div>
         </div>
@@ -488,19 +204,17 @@
           <span class="field-label">Selected date</span>
           <div class="date-nav">
             <button id="previousDate" class="nav-button" type="button" aria-label="Previous date">‹</button>
-            <button id="selectedDate" class="nav-button selected-date" type="button" title="Return to daily view">Loading…</button>
+            <button id="selectedDate" class="nav-button selected-date" type="button" title="Return to daily view">Choose a date</button>
             <button id="nextDate" class="nav-button" type="button" aria-label="Next date">›</button>
           </div>
         </div>
       </div>
-      <div class="date-strip-wrap">
-        <div id="dateStrip" class="date-strip" aria-label="Schedule dates"></div>
-      </div>
+      <div class="date-strip-wrap"><div id="dateStrip" class="date-strip" aria-label="Schedule dates"></div></div>
     </section>
 
-    <section id="summaryGrid" class="summary-grid" aria-label="Daily staffing totals"></section>
+    <section id="summaryGrid" class="summary-grid hidden" aria-label="Daily staffing totals"></section>
 
-    <section id="dailyPanel" class="panel section">
+    <section id="dailyPanel" class="panel section hidden">
       <div class="section-heading">
         <div>
           <h2 id="dailyTitle">Who is working</h2>
@@ -521,63 +235,85 @@
       </div>
       <div class="table-wrap">
         <table>
-          <thead>
-            <tr>
-              <th>Date</th>
-              <th>Day</th>
-              <th>Assignment</th>
-              <th>Meaning</th>
-              <th>Hours</th>
-              <th>Status</th>
-            </tr>
-          </thead>
+          <thead><tr><th>Date</th><th>Day</th><th>Assignment</th><th>Meaning</th><th>Hours</th><th>Status</th></tr></thead>
           <tbody id="personScheduleBody"></tbody>
         </table>
       </div>
+    </section>
+
+    <section id="rawPanel" class="panel section raw-panel hidden">
+      <details>
+        <summary>View the original sheet data</summary>
+        <p class="section-note">This table shows the values loaded directly from the selected Google Sheet tab.</p>
+        <div class="table-wrap"><table id="rawTable" class="raw-table"></table></div>
+      </details>
     </section>
 
     <p id="footerNote" class="footer-note"></p>
   </main>
 
   <div id="shiftTooltip" class="shift-tooltip-popup" role="tooltip" aria-hidden="true"></div>
-
-  <div id="loading" class="loading" aria-live="polite">
-    <div class="loading-card"><span class="spinner" aria-hidden="true"></span>Loading the schedule…</div>
-  </div>
+  <div id="loading" class="loading" aria-live="polite"><div class="loading-card"><span class="spinner" aria-hidden="true"></span><span id="loadingText">Loading the schedule…</span></div></div>
 
   <script>
     'use strict';
 
+    /*
+      Customize this object when your organization uses specific shift codes.
+      The page also tries to discover a code legend from the spreadsheet itself.
+    */
+    const SHIFT_DEFINITIONS = {
+      ONC: { meaning: 'On-call assignment', type: 'Other', hours: '' },
+      D:   { meaning: 'Day shift', type: 'Day', hours: '' },
+      DAY: { meaning: 'Day shift', type: 'Day', hours: '' },
+      E:   { meaning: 'Evening shift', type: 'Evening', hours: '' },
+      EVE: { meaning: 'Evening shift', type: 'Evening', hours: '' },
+      N:   { meaning: 'Night shift', type: 'Night', hours: '' },
+      NOC: { meaning: 'Night shift', type: 'Night', hours: '' },
+      PTO: { meaning: 'Paid time off', type: 'Other', hours: '' },
+      VAC: { meaning: 'Vacation', type: 'Other', hours: '' },
+      OFF: { meaning: 'Not scheduled', type: 'Other', hours: '' },
+      HOL: { meaning: 'Holiday', type: 'Other', hours: '' }
+    };
+
+    const OFF_CODES = new Set(['', '-', '—', 'OFF', 'PTO', 'VAC', 'VACATION', 'HOL', 'HOLIDAY', 'LEAVE', 'SICK']);
+
     let dashboardData = null;
+    let rawMatrix = [];
     let selectedDateKey = null;
     let highlightedSuggestion = -1;
     let currentSuggestions = [];
-
     const elements = {};
 
-    document.addEventListener('DOMContentLoaded', function () {
+    google.charts.load('current');
+    google.charts.setOnLoadCallback(initializePage);
+
+    function initializePage() {
       cacheElements();
       bindEvents();
 
-      google.script.run
-        .withSuccessHandler(initializeDashboard)
-        .withFailureHandler(showLoadError)
-        .getDashboardData();
-    });
+      const params = new URLSearchParams(location.search);
+      const savedSheet = params.get('sheet') || localStorage.getItem('scheduleSheetInput') || '';
+      const savedGid = params.get('gid') || localStorage.getItem('scheduleSheetGid') || '0';
+      elements.sheetInput.value = savedSheet;
+      elements.gidInput.value = savedGid;
+
+      if (savedSheet) loadSheet();
+    }
 
     function cacheElements() {
       [
-        'errorBanner', 'personSearch', 'clearSearch', 'suggestions', 'previousDate',
-        'selectedDate', 'nextDate', 'dateStrip', 'summaryGrid', 'dailyPanel',
-        'dailyTitle', 'dailySubtitle', 'workingCount', 'dailyGroups', 'personPanel',
-        'personName', 'personMeta', 'personScheduleBody', 'closePerson', 'footerNote',
-        'shiftTooltip', 'loading'
-      ].forEach(function (id) {
-        elements[id] = document.getElementById(id);
-      });
+        'sheetInput','gidInput','loadSheet','errorBanner','dashboardControls','personSearch','clearSearch','suggestions',
+        'previousDate','selectedDate','nextDate','dateStrip','summaryGrid','dailyPanel','dailyTitle','dailySubtitle',
+        'workingCount','dailyGroups','personPanel','personName','personMeta','personScheduleBody','closePerson',
+        'rawPanel','rawTable','footerNote','shiftTooltip','loading','loadingText'
+      ].forEach(function (id) { elements[id] = document.getElementById(id); });
     }
 
     function bindEvents() {
+      elements.loadSheet.addEventListener('click', loadSheet);
+      elements.sheetInput.addEventListener('keydown', function (event) { if (event.key === 'Enter') loadSheet(); });
+      elements.gidInput.addEventListener('keydown', function (event) { if (event.key === 'Enter') loadSheet(); });
       elements.personSearch.addEventListener('input', handleSearchInput);
       elements.personSearch.addEventListener('keydown', handleSearchKeyboard);
       elements.personSearch.addEventListener('focus', handleSearchInput);
@@ -588,11 +324,8 @@
       elements.closePerson.addEventListener('click', showDailyView);
 
       document.addEventListener('click', function (event) {
-        if (!event.target.closest('.search-wrap')) {
-          closeSuggestions();
-        }
+        if (!event.target.closest('.search-wrap')) closeSuggestions();
       });
-
       document.addEventListener('mouseover', handleShiftTooltipEnter);
       document.addEventListener('mousemove', handleShiftTooltipMove);
       document.addEventListener('mouseout', handleShiftTooltipLeave);
@@ -600,33 +333,402 @@
       document.addEventListener('focusout', handleShiftTooltipLeave);
     }
 
-    function initializeDashboard(data) {
-      dashboardData = data;
+    async function loadSheet() {
+      clearError();
+      const sheetId = extractSheetId(elements.sheetInput.value);
+      const gid = String(elements.gidInput.value || '0').match(/\d+/)?.[0] || '0';
 
-      if (!data || !Array.isArray(data.dates) || !data.dates.length) {
-        showLoadError(new Error('The dashboard did not receive any schedule dates.'));
+      if (!sheetId) {
+        showError('Paste a valid Google Sheet URL or Sheet ID.');
         return;
       }
 
-      selectedDateKey = chooseInitialDate(data.dates);
-      renderDateStrip();
-      renderDailyView();
-      elements.footerNote.textContent = 'Source: ' + data.scheduleSheet + ' • Updated ' + data.generatedAt;
-      elements.loading.style.display = 'none';
+      localStorage.setItem('scheduleSheetInput', elements.sheetInput.value.trim());
+      localStorage.setItem('scheduleSheetGid', gid);
+      elements.gidInput.value = gid;
+      showLoading('Loading the Google Sheet…');
+
+      try {
+        rawMatrix = await loadCsvMatrix(sheetId, gid);
+        if (!rawMatrix.length) throw new Error('The selected sheet tab is empty.');
+
+        renderRawTable(rawMatrix);
+        dashboardData = buildDashboardData(rawMatrix, sheetId, gid);
+
+        if (!dashboardData.dates.length || !dashboardData.people.length) {
+          hideDashboard();
+          elements.rawPanel.classList.remove('hidden');
+          showError('The sheet loaded, but the schedule layout could not be detected. Open “View the original sheet data” below. The dashboard expects names in a column and dates across a row.');
+        } else {
+          selectedDateKey = chooseInitialDate(dashboardData.dates);
+          renderDateStrip();
+          renderDailyView();
+          elements.dashboardControls.classList.remove('hidden');
+          elements.rawPanel.classList.remove('hidden');
+          elements.footerNote.textContent = 'Direct source: Google Sheet ' + sheetId + ' • tab GID ' + gid + ' • loaded ' + new Date().toLocaleString();
+        }
+
+        updatePageUrl(sheetId, gid);
+      } catch (error) {
+        hideDashboard();
+        showError(formatLoadError(error));
+      } finally {
+        hideLoading();
+      }
+    }
+
+    async function loadCsvMatrix(sheetId, gid) {
+      const urls = [
+        'https://docs.google.com/spreadsheets/d/' + encodeURIComponent(sheetId) + '/gviz/tq?tqx=out:csv&gid=' + encodeURIComponent(gid),
+        'https://docs.google.com/spreadsheets/d/' + encodeURIComponent(sheetId) + '/export?format=csv&gid=' + encodeURIComponent(gid)
+      ];
+
+      let lastError = null;
+      for (const url of urls) {
+        try {
+          const response = await fetch(url, { cache: 'no-store', credentials: 'omit' });
+          if (!response.ok) throw new Error('Google returned HTTP ' + response.status + '.');
+          const text = await response.text();
+          if (/<!doctype html|<html/i.test(text.slice(0, 300))) {
+            throw new Error('Google returned an access page instead of sheet data.');
+          }
+          return trimMatrix(parseCsv(text));
+        } catch (error) {
+          lastError = error;
+        }
+      }
+      try {
+        return await loadWithVisualizationQuery(sheetId, gid);
+      } catch (queryError) {
+        throw lastError || queryError || new Error('Unable to read the sheet.');
+      }
+    }
+
+    function loadWithVisualizationQuery(sheetId, gid) {
+      return new Promise(function (resolve, reject) {
+        const url = 'https://docs.google.com/spreadsheets/d/' + encodeURIComponent(sheetId) + '/gviz/tq?gid=' + encodeURIComponent(gid) + '&headers=1';
+        const query = new google.visualization.Query(url);
+        query.send(function (response) {
+          if (response.isError()) {
+            reject(new Error(response.getMessage() + ' ' + response.getDetailedMessage()));
+            return;
+          }
+
+          const table = response.getDataTable();
+          const matrix = [];
+          const header = [];
+          for (let column = 0; column < table.getNumberOfColumns(); column += 1) {
+            header.push(table.getColumnLabel(column) || 'Column ' + (column + 1));
+          }
+          matrix.push(header);
+
+          for (let row = 0; row < table.getNumberOfRows(); row += 1) {
+            const values = [];
+            for (let column = 0; column < table.getNumberOfColumns(); column += 1) {
+              const formatted = table.getFormattedValue(row, column);
+              const raw = table.getValue(row, column);
+              values.push(formatted || (raw == null ? '' : String(raw)));
+            }
+            matrix.push(values);
+          }
+          resolve(trimMatrix(matrix));
+        });
+      });
+    }
+
+    function parseCsv(text) {
+      const rows = [];
+      let row = [];
+      let field = '';
+      let quoted = false;
+
+      for (let i = 0; i < text.length; i += 1) {
+        const char = text[i];
+        const next = text[i + 1];
+
+        if (quoted) {
+          if (char === '"' && next === '"') {
+            field += '"';
+            i += 1;
+          } else if (char === '"') {
+            quoted = false;
+          } else {
+            field += char;
+          }
+        } else if (char === '"') {
+          quoted = true;
+        } else if (char === ',') {
+          row.push(field);
+          field = '';
+        } else if (char === '\n') {
+          row.push(field.replace(/\r$/, ''));
+          rows.push(row);
+          row = [];
+          field = '';
+        } else {
+          field += char;
+        }
+      }
+
+      row.push(field.replace(/\r$/, ''));
+      rows.push(row);
+      return rows;
+    }
+
+    function trimMatrix(matrix) {
+      const cleaned = matrix.map(function (row) { return row.map(function (cell) { return String(cell ?? '').trim(); }); });
+      while (cleaned.length && cleaned[cleaned.length - 1].every(function (cell) { return !cell; })) cleaned.pop();
+      let maxColumn = 0;
+      cleaned.forEach(function (row) {
+        row.forEach(function (cell, index) { if (cell) maxColumn = Math.max(maxColumn, index + 1); });
+      });
+      return cleaned.map(function (row) {
+        const output = row.slice(0, maxColumn);
+        while (output.length < maxColumn) output.push('');
+        return output;
+      });
+    }
+
+    function buildDashboardData(matrix, sheetId, gid) {
+      const detection = detectScheduleLayout(matrix);
+      if (!detection) return { dates: [], people: [], scheduleSheet: sheetId, gid: gid };
+
+      const legend = discoverLegend(matrix);
+      const dates = detection.dateColumns.map(function (columnIndex) {
+        return parseScheduleDate(matrix[detection.headerRow][columnIndex], columnIndex);
+      });
+
+      const people = [];
+      for (let rowIndex = detection.headerRow + 1; rowIndex < matrix.length; rowIndex += 1) {
+        const originalName = String(matrix[rowIndex][detection.nameColumn] || '').trim();
+        if (!originalName) continue;
+
+        const rawAssignments = detection.dateColumns.map(function (columnIndex) {
+          return String(matrix[rowIndex][columnIndex] || '').trim();
+        });
+        const nonEmptyCount = rawAssignments.filter(Boolean).length;
+        if (!nonEmptyCount) continue;
+        if (looksLikeSectionLabel(originalName, rawAssignments)) continue;
+
+        const nameParts = formatPersonName(originalName);
+        const schedule = rawAssignments.map(function (code) {
+          return createAssignment(code, legend);
+        });
+
+        people.push({
+          originalName: originalName,
+          displayName: nameParts.displayName,
+          firstName: nameParts.firstName,
+          lastName: nameParts.lastName,
+          searchText: normalizeText(originalName + ' ' + nameParts.displayName),
+          schedule: schedule
+        });
+      }
+
+      return { dates: dates, people: people, scheduleSheet: sheetId, gid: gid };
+    }
+
+    function detectScheduleLayout(matrix) {
+      const rowsToCheck = Math.min(matrix.length, 20);
+      let best = null;
+
+      for (let rowIndex = 0; rowIndex < rowsToCheck; rowIndex += 1) {
+        const dateColumns = [];
+        for (let columnIndex = 0; columnIndex < matrix[rowIndex].length; columnIndex += 1) {
+          if (isDateLike(matrix[rowIndex][columnIndex])) dateColumns.push(columnIndex);
+        }
+        if (!best || dateColumns.length > best.dateColumns.length) best = { headerRow: rowIndex, dateColumns: dateColumns };
+      }
+
+      if (!best || best.dateColumns.length < 2) return null;
+      const firstDateColumn = best.dateColumns[0];
+      let bestNameColumn = -1;
+      let bestNameScore = -1;
+
+      for (let columnIndex = 0; columnIndex < firstDateColumn; columnIndex += 1) {
+        let score = 0;
+        for (let rowIndex = best.headerRow + 1; rowIndex < matrix.length; rowIndex += 1) {
+          const value = String(matrix[rowIndex][columnIndex] || '').trim();
+          if (value && /[a-z]/i.test(value) && value.length >= 2) score += 1;
+        }
+        if (score >= bestNameScore) {
+          bestNameScore = score;
+          bestNameColumn = columnIndex;
+        }
+      }
+
+      if (bestNameColumn < 0) bestNameColumn = Math.max(0, firstDateColumn - 1);
+      return { headerRow: best.headerRow, dateColumns: best.dateColumns, nameColumn: bestNameColumn };
+    }
+
+    function isDateLike(value) {
+      const text = String(value || '').trim();
+      if (!text) return false;
+      if (/^(sun|mon|tue|wed|thu|fri|sat)(day)?\b/i.test(text)) return false;
+      if (/^\d{1,2}[\/-]\d{1,2}([\/-]\d{2,4})?$/.test(text)) return true;
+      if (/^(jan|feb|mar|apr|may|jun|jul|aug|sep|sept|oct|nov|dec)[a-z]*\s+\d{1,2}(,?\s+\d{2,4})?$/i.test(text)) return true;
+      const parsed = Date.parse(text);
+      return Number.isFinite(parsed) && /\d/.test(text) && /[\/-]|jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec/i.test(text);
+    }
+
+    function parseScheduleDate(value, fallbackIndex) {
+      const text = String(value || '').trim();
+      const date = parseFlexibleDate(text);
+      if (date) {
+        return {
+          key: getLocalDateKey(date),
+          weekday: date.toLocaleDateString(undefined, { weekday: 'short' }),
+          shortLabel: date.toLocaleDateString(undefined, { month: 'short', day: 'numeric' }),
+          fullLabel: date.toLocaleDateString(undefined, { weekday: 'long', month: 'long', day: 'numeric', year: 'numeric' })
+        };
+      }
+      return { key: 'column-' + fallbackIndex, weekday: 'Date', shortLabel: text || ('Column ' + (fallbackIndex + 1)), fullLabel: text || ('Column ' + (fallbackIndex + 1)) };
+    }
+
+    function parseFlexibleDate(text) {
+      const normalized = String(text || '').trim();
+      if (!normalized) return null;
+
+      const numeric = normalized.match(/^(\d{1,2})[\/-](\d{1,2})(?:[\/-](\d{2,4}))?$/);
+      if (numeric) {
+        let year = numeric[3] ? Number(numeric[3]) : new Date().getFullYear();
+        if (year < 100) year += 2000;
+        const date = new Date(year, Number(numeric[1]) - 1, Number(numeric[2]));
+        return Number.isNaN(date.getTime()) ? null : date;
+      }
+
+      const parsed = new Date(normalized);
+      return Number.isNaN(parsed.getTime()) ? null : parsed;
+    }
+
+    function discoverLegend(matrix) {
+      const discovered = {};
+      const maxRows = Math.min(matrix.length, 80);
+      const maxColumns = Math.min(matrix[0]?.length || 0, 20);
+
+      for (let rowIndex = 0; rowIndex < maxRows; rowIndex += 1) {
+        for (let columnIndex = 0; columnIndex < maxColumns - 1; columnIndex += 1) {
+          const code = String(matrix[rowIndex][columnIndex] || '').trim();
+          const description = String(matrix[rowIndex][columnIndex + 1] || '').trim();
+          if (/^[A-Z0-9\/-]{1,8}$/i.test(code) && description.length >= 5 && /[a-z]/i.test(description)) {
+            discovered[code.toUpperCase()] = {
+              meaning: description,
+              type: inferShiftType(code, description),
+              hours: inferHours(description)
+            };
+          }
+        }
+      }
+      return Object.assign({}, SHIFT_DEFINITIONS, discovered);
+    }
+
+    function createAssignment(rawCode, legend) {
+      const code = String(rawCode || '').trim();
+      const normalizedCode = code.toUpperCase();
+      const definition = legend[normalizedCode] || {};
+      const meaning = definition.meaning || (code ? 'Assignment code from the spreadsheet' : 'Not scheduled');
+      const type = definition.type || inferShiftType(code, meaning);
+      const hours = definition.hours || inferHours(meaning);
+      const status = inferStatus(normalizedCode, meaning);
+      const working = status === 'working';
+
+      return {
+        code: code,
+        meaning: meaning,
+        hours: hours,
+        type: type,
+        typeKey: normalizeTypeKey(type),
+        working: working,
+        status: status,
+        statusLabel: statusLabel(status),
+        tooltip: code ? code + ' — ' + [meaning, hours ? 'Hours: ' + hours : '', type !== 'Other' ? 'Shift type: ' + type : ''].filter(Boolean).join(' • ') : ''
+      };
+    }
+
+    function inferShiftType(code, description) {
+      const text = normalizeText(code + ' ' + description);
+      if (/\bnight\b|\bovernight\b|\bnoc\b|\b11p\b|\b10p\b|\b7p\b/.test(text)) return 'Night';
+      if (/\bevening\b|\beve\b|\bpm shift\b|\b3p\b|\b2p\b/.test(text)) return 'Evening';
+      if (/\bday\b|\bam shift\b|\b7a\b|\b8a\b|\b6a\b/.test(text)) return 'Day';
+      if (/^d\d*$/.test(text)) return 'Day';
+      if (/^e\d*$/.test(text)) return 'Evening';
+      if (/^n\d*$/.test(text)) return 'Night';
+      return 'Other';
+    }
+
+    function inferHours(description) {
+      const text = String(description || '');
+      const range = text.match(/\b\d{1,2}(?::\d{2})?\s*(?:am|pm|a|p)?\s*[-–]\s*\d{1,2}(?::\d{2})?\s*(?:am|pm|a|p)?\b/i);
+      return range ? range[0] : '';
+    }
+
+    function inferStatus(code, meaning) {
+      const text = normalizeText(code + ' ' + meaning);
+      if (!code || OFF_CODES.has(code)) {
+        if (/pto|vacation|leave|sick/.test(text)) return 'pto';
+        if (/holiday|\bhol\b/.test(text)) return 'holiday';
+        return 'off';
+      }
+      if (/\bpto\b|vacation|leave|sick/.test(text)) return 'pto';
+      if (/holiday|\bhol\b/.test(text)) return 'holiday';
+      if (/not scheduled|\boff\b/.test(text)) return 'off';
+      return 'working';
+    }
+
+    function statusLabel(status) {
+      return ({ working: 'Working', off: 'Off', pto: 'PTO / Leave', holiday: 'Holiday' })[status] || 'Not scheduled';
+    }
+
+    function normalizeTypeKey(type) {
+      const value = normalizeText(type);
+      if (value.includes('day')) return 'day';
+      if (value.includes('evening')) return 'evening';
+      if (value.includes('night')) return 'night';
+      return 'other';
+    }
+
+    function looksLikeSectionLabel(name, assignments) {
+      const filled = assignments.filter(Boolean).length;
+      return filled <= 1 && (/pharmacist|staff|schedule|legend|shift|coverage|department/i.test(name) || name === name.toUpperCase());
+    }
+
+    function formatPersonName(originalName) {
+      const cleaned = String(originalName || '').replace(/\s+/g, ' ').trim();
+      if (cleaned.includes(',')) {
+        const parts = cleaned.split(',').map(function (part) { return part.trim(); });
+        const lastName = parts[0] || '';
+        const firstName = (parts[1] || '').split(/\s+/)[0] || '';
+        return { displayName: [parts[1], lastName].filter(Boolean).join(' '), firstName: firstName, lastName: lastName };
+      }
+      const parts = cleaned.split(' ');
+      return { displayName: cleaned, firstName: parts[0] || cleaned, lastName: parts.length > 1 ? parts[parts.length - 1] : '' };
+    }
+
+    function renderRawTable(matrix) {
+      elements.rawTable.innerHTML = '';
+      const body = document.createElement('tbody');
+      matrix.forEach(function (row, rowIndex) {
+        const tr = document.createElement('tr');
+        row.forEach(function (value) {
+          const cell = document.createElement(rowIndex === 0 ? 'th' : 'td');
+          cell.textContent = value;
+          tr.appendChild(cell);
+        });
+        body.appendChild(tr);
+      });
+      elements.rawTable.appendChild(body);
     }
 
     function chooseInitialDate(dates) {
       const today = getLocalDateKey(new Date());
       const exactToday = dates.find(function (date) { return date.key === today; });
       if (exactToday) return exactToday.key;
-
-      const nextDate = dates.find(function (date) { return date.key > today; });
-      return nextDate ? nextDate.key : dates[dates.length - 1].key;
+      const nextDate = dates.find(function (date) { return date.key > today && /^\d{4}-\d{2}-\d{2}$/.test(date.key); });
+      return nextDate ? nextDate.key : dates[0].key;
     }
 
     function renderDateStrip() {
       elements.dateStrip.innerHTML = '';
-
       dashboardData.dates.forEach(function (date) {
         const button = document.createElement('button');
         button.type = 'button';
@@ -636,9 +738,7 @@
         button.innerHTML = '<span class="chip-weekday"></span><span class="chip-date"></span>';
         button.querySelector('.chip-weekday').textContent = date.weekday;
         button.querySelector('.chip-date').textContent = date.shortLabel;
-        button.addEventListener('click', function () {
-          selectDate(date.key);
-        });
+        button.addEventListener('click', function () { selectDate(date.key); });
         elements.dateStrip.appendChild(button);
       });
     }
@@ -647,55 +747,35 @@
       selectedDateKey = dateKey;
       renderDateStrip();
       renderDailyView();
-
       requestAnimationFrame(function () {
-        const selectedChip = elements.dateStrip.querySelector('.date-chip.selected');
-        if (selectedChip) {
-          selectedChip.scrollIntoView({ behavior: 'smooth', block: 'nearest', inline: 'center' });
-        }
+        const chip = elements.dateStrip.querySelector('.date-chip.selected');
+        if (chip) chip.scrollIntoView({ behavior: 'smooth', block: 'nearest', inline: 'center' });
       });
     }
 
     function changeDate(direction) {
-      const currentIndex = dashboardData.dates.findIndex(function (date) {
-        return date.key === selectedDateKey;
-      });
+      const currentIndex = dashboardData.dates.findIndex(function (date) { return date.key === selectedDateKey; });
       const nextIndex = currentIndex + direction;
-
-      if (nextIndex >= 0 && nextIndex < dashboardData.dates.length) {
-        selectDate(dashboardData.dates[nextIndex].key);
-      }
+      if (nextIndex >= 0 && nextIndex < dashboardData.dates.length) selectDate(dashboardData.dates[nextIndex].key);
     }
 
     function renderDailyView() {
       showDailyView();
-
-      const dateIndex = dashboardData.dates.findIndex(function (date) {
-        return date.key === selectedDateKey;
-      });
+      const dateIndex = dashboardData.dates.findIndex(function (date) { return date.key === selectedDateKey; });
       const date = dashboardData.dates[dateIndex];
+      if (!date) return;
 
       const working = dashboardData.people
-        .map(function (person) {
-          return { person: person, assignment: person.schedule[dateIndex] };
-        })
-        .filter(function (item) {
-          return item.assignment && item.assignment.working;
-        });
+        .map(function (person) { return { person: person, assignment: person.schedule[dateIndex] }; })
+        .filter(function (item) { return item.assignment && item.assignment.working; });
 
       const totals = { day: 0, evening: 0, night: 0, other: 0 };
-      working.forEach(function (item) {
-        const key = Object.prototype.hasOwnProperty.call(totals, item.assignment.typeKey)
-          ? item.assignment.typeKey
-          : 'other';
-        totals[key] += 1;
-      });
+      working.forEach(function (item) { totals[item.assignment.typeKey] += 1; });
 
       elements.selectedDate.textContent = date.fullLabel;
       elements.dailyTitle.textContent = 'Who is working — ' + date.weekday;
       elements.dailySubtitle.textContent = date.fullLabel + ' • Hover over a shift code to see its definition.';
-      elements.workingCount.textContent = working.length + (working.length === 1 ? ' working' : ' working');
-
+      elements.workingCount.textContent = working.length + ' working';
       elements.previousDate.disabled = dateIndex === 0;
       elements.nextDate.disabled = dateIndex === dashboardData.dates.length - 1;
 
@@ -710,57 +790,41 @@
         { label: 'Evening', value: totals.evening },
         { label: 'Night', value: totals.night }
       ];
-
       elements.summaryGrid.innerHTML = '';
       cards.forEach(function (card) {
-        const item = document.createElement('article');
-        item.className = 'summary-card';
-
-        const label = document.createElement('div');
-        label.className = 'summary-label';
-        label.textContent = card.label;
-
-        const value = document.createElement('div');
-        value.className = 'summary-value';
-        value.textContent = card.value;
-
-        item.appendChild(label);
-        item.appendChild(value);
-        elements.summaryGrid.appendChild(item);
+        const article = document.createElement('article');
+        article.className = 'summary-card';
+        article.innerHTML = '<div class="summary-label"></div><div class="summary-value"></div>';
+        article.children[0].textContent = card.label;
+        article.children[1].textContent = card.value;
+        elements.summaryGrid.appendChild(article);
       });
     }
 
-    function renderWorkingGroups(workingItems) {
+    function renderWorkingGroups(items) {
       elements.dailyGroups.innerHTML = '';
-
-      if (!workingItems.length) {
+      if (!items.length) {
         elements.dailyGroups.innerHTML = '<div class="empty-state">No working assignments were found for this date.</div>';
         return;
       }
 
-      const groupDefinitions = [
+      [
         { key: 'day', title: 'Day shifts' },
         { key: 'evening', title: 'Evening shifts' },
         { key: 'night', title: 'Night shifts' },
         { key: 'other', title: 'Other assignments' }
-      ];
-
-      groupDefinitions.forEach(function (groupDefinition) {
-        const groupItems = workingItems
-          .filter(function (item) { return item.assignment.typeKey === groupDefinition.key; })
+      ].forEach(function (definition) {
+        const groupItems = items.filter(function (item) { return item.assignment.typeKey === definition.key; })
           .sort(function (a, b) { return a.person.displayName.localeCompare(b.person.displayName); });
-
         if (!groupItems.length) return;
 
         const group = document.createElement('section');
         group.className = 'shift-group';
-
         const header = document.createElement('div');
         header.className = 'shift-header';
         header.innerHTML = '<span></span><span></span>';
-        header.children[0].textContent = groupDefinition.title;
+        header.children[0].textContent = definition.title;
         header.children[1].textContent = groupItems.length;
-
         const list = document.createElement('div');
         list.className = 'person-list';
 
@@ -775,11 +839,9 @@
           const name = document.createElement('div');
           name.className = 'person-name';
           name.textContent = item.person.displayName;
-
           const detail = document.createElement('div');
           detail.className = 'person-detail';
           detail.textContent = [item.assignment.meaning, item.assignment.hours].filter(Boolean).join(' • ') || 'Assignment details not listed';
-
           const code = document.createElement('span');
           code.className = 'assignment-code';
           code.textContent = item.assignment.code || 'Working';
@@ -789,7 +851,6 @@
           text.appendChild(detail);
           card.appendChild(text);
           card.appendChild(code);
-
           card.addEventListener('click', function () { openPersonSchedule(item.person); });
           card.addEventListener('keydown', function (event) {
             if (event.key === 'Enter' || event.key === ' ') {
@@ -797,7 +858,6 @@
               openPersonSchedule(item.person);
             }
           });
-
           list.appendChild(card);
         });
 
@@ -809,48 +869,35 @@
 
     function handleSearchInput() {
       if (!dashboardData) return;
-
       const query = normalizeText(elements.personSearch.value);
       elements.clearSearch.style.display = query ? 'block' : 'none';
       highlightedSuggestion = -1;
-
-      if (!query) {
-        currentSuggestions = [];
-        closeSuggestions();
-        return;
-      }
+      if (!query) { currentSuggestions = []; closeSuggestions(); return; }
 
       currentSuggestions = dashboardData.people
-        .map(function (person) {
-          return { person: person, score: getSearchScore(person, query) };
-        })
+        .map(function (person) { return { person: person, score: getSearchScore(person, query) }; })
         .filter(function (item) { return item.score < 99; })
-        .sort(function (a, b) {
-          return a.score - b.score || a.person.displayName.localeCompare(b.person.displayName);
-        })
+        .sort(function (a, b) { return a.score - b.score || a.person.displayName.localeCompare(b.person.displayName); })
         .slice(0, 10)
         .map(function (item) { return item.person; });
-
       renderSuggestions();
     }
 
     function getSearchScore(person, query) {
-      const firstName = normalizeText(person.firstName);
-      const lastName = normalizeText(person.lastName);
-      const displayName = normalizeText(person.displayName);
-      const originalName = normalizeText(person.originalName);
-
-      if (firstName.startsWith(query)) return 0;
-      if (displayName.startsWith(query)) return 1;
-      if (lastName.startsWith(query)) return 2;
-      if (firstName.includes(query)) return 3;
-      if (displayName.includes(query) || originalName.includes(query) || person.searchText.includes(query)) return 4;
+      const first = normalizeText(person.firstName);
+      const last = normalizeText(person.lastName);
+      const display = normalizeText(person.displayName);
+      const original = normalizeText(person.originalName);
+      if (first.startsWith(query)) return 0;
+      if (display.startsWith(query)) return 1;
+      if (last.startsWith(query)) return 2;
+      if (first.includes(query)) return 3;
+      if (display.includes(query) || original.includes(query) || person.searchText.includes(query)) return 4;
       return 99;
     }
 
     function renderSuggestions() {
       elements.suggestions.innerHTML = '';
-
       if (!currentSuggestions.length) {
         const empty = document.createElement('div');
         empty.className = 'empty-state';
@@ -863,36 +910,19 @@
           button.type = 'button';
           button.className = 'suggestion';
           button.setAttribute('role', 'option');
-          button.dataset.index = String(index);
-
-          const displayName = document.createElement('span');
-          displayName.className = 'suggestion-name';
-          displayName.textContent = person.displayName;
-
-          const original = document.createElement('span');
-          original.className = 'suggestion-original';
-          original.textContent = person.originalName;
-
-          button.appendChild(displayName);
-          button.appendChild(original);
+          button.innerHTML = '<span class="suggestion-name"></span><span class="suggestion-original"></span>';
+          button.children[0].textContent = person.displayName;
+          button.children[1].textContent = person.originalName;
           button.addEventListener('click', function () { chooseSuggestion(index); });
           elements.suggestions.appendChild(button);
         });
       }
-
       elements.suggestions.style.display = 'block';
       elements.personSearch.setAttribute('aria-expanded', 'true');
     }
 
     function handleSearchKeyboard(event) {
-      if (elements.suggestions.style.display !== 'block' || !currentSuggestions.length) {
-        if (event.key === 'Enter' && currentSuggestions.length === 1) {
-          event.preventDefault();
-          chooseSuggestion(0);
-        }
-        return;
-      }
-
+      if (elements.suggestions.style.display !== 'block' || !currentSuggestions.length) return;
       if (event.key === 'ArrowDown') {
         event.preventDefault();
         highlightedSuggestion = Math.min(highlightedSuggestion + 1, currentSuggestions.length - 1);
@@ -911,18 +941,13 @@
 
     function updateSuggestionHighlight() {
       const buttons = elements.suggestions.querySelectorAll('.suggestion');
-      buttons.forEach(function (button, index) {
-        button.classList.toggle('active', index === highlightedSuggestion);
-      });
-      if (buttons[highlightedSuggestion]) {
-        buttons[highlightedSuggestion].scrollIntoView({ block: 'nearest' });
-      }
+      buttons.forEach(function (button, index) { button.classList.toggle('active', index === highlightedSuggestion); });
+      if (buttons[highlightedSuggestion]) buttons[highlightedSuggestion].scrollIntoView({ block: 'nearest' });
     }
 
     function chooseSuggestion(index) {
       const person = currentSuggestions[index];
       if (!person) return;
-
       elements.personSearch.value = person.displayName;
       elements.clearSearch.style.display = 'block';
       closeSuggestions();
@@ -939,7 +964,6 @@
         const date = dashboardData.dates[index];
         const row = document.createElement('tr');
         if (assignment.working) row.className = 'working-row';
-
         appendCell(row, date.shortLabel);
         appendCell(row, date.weekday);
         appendAssignmentCell(row, assignment);
@@ -952,12 +976,11 @@
         pill.textContent = assignment.statusLabel;
         statusCell.appendChild(pill);
         row.appendChild(statusCell);
-
         elements.personScheduleBody.appendChild(row);
       });
 
-      elements.dailyPanel.style.display = 'none';
-      elements.summaryGrid.style.display = 'none';
+      elements.dailyPanel.classList.add('hidden');
+      elements.summaryGrid.classList.add('hidden');
       elements.personPanel.style.display = 'block';
       elements.personPanel.scrollIntoView({ behavior: 'smooth', block: 'start' });
     }
@@ -972,64 +995,42 @@
     }
 
     function applyShiftTooltip(element, assignment) {
-      const tooltipText = assignment && assignment.tooltip
-        ? assignment.tooltip
-        : buildClientTooltip(assignment);
-
-      if (!tooltipText || !assignment || !assignment.code) return;
-
+      if (!assignment || !assignment.code || !assignment.tooltip) return;
       element.classList.add('has-shift-tooltip');
       element.tabIndex = 0;
-      element.dataset.shiftTooltip = tooltipText;
-      element.setAttribute('aria-label', tooltipText);
-    }
-
-    function buildClientTooltip(assignment) {
-      if (!assignment) return '';
-      const code = assignment.code || '';
-      const details = [];
-      if (assignment.meaning) details.push(assignment.meaning);
-      if (assignment.hours) details.push('Hours: ' + assignment.hours);
-      if (assignment.type && assignment.type !== 'Other') details.push('Shift type: ' + assignment.type);
-      if (!details.length && assignment.statusLabel) details.push(assignment.statusLabel);
-      return code + (details.length ? ' — ' + details.join(' • ') : '');
+      element.dataset.shiftTooltip = assignment.tooltip;
+      element.setAttribute('aria-label', assignment.tooltip);
     }
 
     function getShiftTooltipTarget(event) {
-      return event.target && typeof event.target.closest === 'function'
-        ? event.target.closest('.has-shift-tooltip')
-        : null;
+      return event.target && typeof event.target.closest === 'function' ? event.target.closest('.has-shift-tooltip') : null;
     }
 
     function handleShiftTooltipEnter(event) {
       const target = getShiftTooltipTarget(event);
       if (!target || !target.dataset.shiftTooltip) return;
       showShiftTooltip(target.dataset.shiftTooltip);
-      positionShiftTooltipAtPointer(event.clientX, event.clientY);
+      positionShiftTooltip(event.clientX + 14, event.clientY + 16, false);
     }
 
     function handleShiftTooltipMove(event) {
-      if (!elements.shiftTooltip.classList.contains('visible')) return;
-      if (!getShiftTooltipTarget(event)) return;
-      positionShiftTooltipAtPointer(event.clientX, event.clientY);
+      if (!elements.shiftTooltip.classList.contains('visible') || !getShiftTooltipTarget(event)) return;
+      positionShiftTooltip(event.clientX + 14, event.clientY + 16, false);
     }
 
     function handleShiftTooltipFocus(event) {
       const target = getShiftTooltipTarget(event);
       if (!target || !target.dataset.shiftTooltip) return;
       showShiftTooltip(target.dataset.shiftTooltip);
-      positionShiftTooltipAtElement(target);
+      const rect = target.getBoundingClientRect();
+      positionShiftTooltip(rect.left + rect.width / 2, rect.bottom + 10, true);
     }
 
     function handleShiftTooltipLeave(event) {
       const leaving = getShiftTooltipTarget(event);
       if (!leaving) return;
-
-      const entering = event.relatedTarget && event.relatedTarget.closest
-        ? event.relatedTarget.closest('.has-shift-tooltip')
-        : null;
+      const entering = event.relatedTarget && event.relatedTarget.closest ? event.relatedTarget.closest('.has-shift-tooltip') : null;
       if (entering === leaving) return;
-
       hideShiftTooltip();
     }
 
@@ -1044,28 +1045,15 @@
       elements.shiftTooltip.setAttribute('aria-hidden', 'true');
     }
 
-    function positionShiftTooltipAtPointer(clientX, clientY) {
-      positionShiftTooltip(clientX + 14, clientY + 16);
-    }
-
-    function positionShiftTooltipAtElement(element) {
-      const rect = element.getBoundingClientRect();
-      positionShiftTooltip(rect.left + rect.width / 2, rect.bottom + 10, true);
-    }
-
-    function positionShiftTooltip(left, top, centerOnPoint) {
+    function positionShiftTooltip(left, top, centered) {
       const tooltip = elements.shiftTooltip;
       const margin = 12;
       const width = tooltip.offsetWidth;
       const height = tooltip.offsetHeight;
-      let adjustedLeft = centerOnPoint ? left - width / 2 : left;
+      let adjustedLeft = centered ? left - width / 2 : left;
       let adjustedTop = top;
-
       adjustedLeft = Math.max(margin, Math.min(adjustedLeft, window.innerWidth - width - margin));
-      if (adjustedTop + height > window.innerHeight - margin) {
-        adjustedTop = Math.max(margin, top - height - 28);
-      }
-
+      if (adjustedTop + height > window.innerHeight - margin) adjustedTop = Math.max(margin, top - height - 28);
       tooltip.style.left = adjustedLeft + 'px';
       tooltip.style.top = adjustedTop + 'px';
     }
@@ -1077,9 +1065,18 @@
     }
 
     function showDailyView() {
-      elements.dailyPanel.style.display = 'block';
-      elements.summaryGrid.style.display = 'grid';
+      if (!dashboardData || !dashboardData.dates.length) return;
+      elements.dailyPanel.classList.remove('hidden');
+      elements.summaryGrid.classList.remove('hidden');
       elements.personPanel.style.display = 'none';
+    }
+
+    function hideDashboard() {
+      elements.dashboardControls.classList.add('hidden');
+      elements.summaryGrid.classList.add('hidden');
+      elements.dailyPanel.classList.add('hidden');
+      elements.personPanel.style.display = 'none';
+      elements.footerNote.textContent = '';
     }
 
     function clearPersonSearch() {
@@ -1096,28 +1093,40 @@
       highlightedSuggestion = -1;
     }
 
+    function extractSheetId(input) {
+      const value = String(input || '').trim();
+      const urlMatch = value.match(/\/spreadsheets\/d\/([a-zA-Z0-9-_]+)/);
+      if (urlMatch) return urlMatch[1];
+      return /^[a-zA-Z0-9-_]{20,}$/.test(value) ? value : '';
+    }
+
+    function updatePageUrl(sheetId, gid) {
+      const url = new URL(location.href);
+      url.searchParams.set('sheet', sheetId);
+      url.searchParams.set('gid', gid);
+      history.replaceState(null, '', url.toString());
+    }
+
     function normalizeText(value) {
-      return String(value || '')
-        .toLowerCase()
-        .normalize('NFD')
-        .replace(/[\u0300-\u036f]/g, '')
-        .replace(/[^a-z0-9]+/g, ' ')
-        .trim();
+      return String(value || '').toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '').replace(/[^a-z0-9]+/g, ' ').trim();
     }
 
     function getLocalDateKey(date) {
-      const year = date.getFullYear();
-      const month = String(date.getMonth() + 1).padStart(2, '0');
-      const day = String(date.getDate()).padStart(2, '0');
-      return year + '-' + month + '-' + day;
+      return date.getFullYear() + '-' + String(date.getMonth() + 1).padStart(2, '0') + '-' + String(date.getDate()).padStart(2, '0');
     }
 
-    function showLoadError(error) {
-      elements.loading.style.display = 'none';
-      elements.errorBanner.style.display = 'block';
-      elements.errorBanner.textContent = error && error.message
-        ? error.message
-        : 'The schedule could not be loaded. Check the Apps Script execution log.';
+    function showLoading(message) {
+      elements.loadingText.textContent = message;
+      elements.loading.classList.add('visible');
+    }
+
+    function hideLoading() { elements.loading.classList.remove('visible'); }
+    function clearError() { elements.errorBanner.style.display = 'none'; elements.errorBanner.textContent = ''; }
+    function showError(message) { elements.errorBanner.style.display = 'block'; elements.errorBanner.textContent = message; }
+
+    function formatLoadError(error) {
+      const detail = error && error.message ? ' Details: ' + error.message : '';
+      return 'The sheet could not be loaded. Confirm that it is shared as “Anyone with the link — Viewer,” confirm the Sheet ID and GID, and try again.' + detail;
     }
   </script>
 </body>
