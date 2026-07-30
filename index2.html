@@ -1,1208 +1,359 @@
 /**
- * RENAL DOSE ADJUSTMENT WEB APPLICATION
- *
- * Spreadsheet structure supported by this version:
- *
- * Column A contains the row labels:
- *
- * A1  Drug Name
- * A2  Note
- * A3  Peritoneal Dialysis
- * A4  Hemodialysis
- * A5  CAPD
- * A6  CRRT
- * A7  0
- * A8  1
- * ...
- *      60
- *
- * Each medication is stored in its own column:
- *
- * Column B = first medication
- * Column C = second medication
- * Column D = third medication
- * etc.
- *
- * The application searches every medication column on every worksheet.
+ * Pharmacist Schedule Dashboard
+ * Bind this Apps Script project to the Google Sheet that contains:
+ *   1) Printable Schedule
+ *   2) Schedule Codes
  */
 
-const SPREADSHEET_ID =
-  "1eLZAx2V1bo7Lm2JDFcMsPgqWzgc669THvIVD4uXdnu4";
+const DASHBOARD_CONFIG = Object.freeze({
+  SCHEDULE_SHEET: 'Printable Schedule',
+  FALLBACK_SCHEDULE_SHEET: 'Schedule',
+  CODE_SHEET: 'Schedule Codes',
+  HEADER_SCAN_ROWS: 12,
+  NAME_COLUMN_INDEX: 0 // Column A, zero-based
+});
 
-const MEDICATION_CACHE_KEY =
-  "RENAL_DOSE_COLUMN_MEDICATION_LIST_V1";
-
-const MEDICATION_CACHE_SECONDS = 300;
-
-
-/**
- * Serves the web application.
- *
- * @return {GoogleAppsScript.HTML.HtmlOutput}
- */
 function doGet() {
-  return HtmlService
-    .createHtmlOutputFromFile("Index")
-    .setTitle("Renal Dose Adjustment")
-    .setXFrameOptionsMode(
-      HtmlService.XFrameOptionsMode.ALLOWALL
-    )
-    .addMetaTag(
-      "viewport",
-      "width=device-width, initial-scale=1"
-    );
+  return HtmlService.createHtmlOutputFromFile('Index')
+    .setTitle('Pharmacist Schedule Dashboard')
+    .addMetaTag('viewport', 'width=device-width, initial-scale=1');
 }
 
-
 /**
- * Opens the spreadsheet.
- *
- * @return {GoogleAppsScript.Spreadsheet.Spreadsheet}
+ * Loads the full dashboard in one request so date changes and name searches
+ * are instant in the browser.
  */
-function getSpreadsheet_() {
-  try {
-    if (
-      !SPREADSHEET_ID ||
-      SPREADSHEET_ID.trim() === ""
-    ) {
-      throw new Error(
-        "The spreadsheet ID is missing."
-      );
-    }
+function getDashboardData() {
+  const spreadsheet = SpreadsheetApp.getActiveSpreadsheet();
+  const scheduleSheet = spreadsheet.getSheetByName(DASHBOARD_CONFIG.SCHEDULE_SHEET)
+    || spreadsheet.getSheetByName(DASHBOARD_CONFIG.FALLBACK_SCHEDULE_SHEET);
 
-    const spreadsheet =
-      SpreadsheetApp.openById(
-        SPREADSHEET_ID.trim()
-      );
-
-    if (!spreadsheet) {
-      throw new Error(
-        "The spreadsheet could not be opened."
-      );
-    }
-
-    return spreadsheet;
-  } catch (error) {
-    console.error(
-      "getSpreadsheet_ error:",
-      error
-    );
-
+  if (!scheduleSheet) {
     throw new Error(
-      "Unable to open the medication spreadsheet. " +
-      "Verify the Spreadsheet ID and confirm that " +
-      "the Google account running the web app has access."
+      'Schedule sheet not found. Expected "' + DASHBOARD_CONFIG.SCHEDULE_SHEET
+      + '" or "' + DASHBOARD_CONFIG.FALLBACK_SCHEDULE_SHEET + '".'
     );
   }
-}
 
+  const timeZone = spreadsheet.getSpreadsheetTimeZone()
+    || Session.getScriptTimeZone()
+    || 'America/New_York';
 
-/**
- * Returns every medication found in columns B onward
- * on every worksheet.
- *
- * @return {Object}
- */
-function getMedicationList() {
-  try {
-    const cache =
-      CacheService.getScriptCache();
+  const range = scheduleSheet.getDataRange();
+  const rawValues = range.getValues();
+  const displayValues = range.getDisplayValues();
 
-    const cachedValue =
-      cache.get(MEDICATION_CACHE_KEY);
-
-    if (cachedValue) {
-      return {
-        success: true,
-        medications:
-          JSON.parse(cachedValue),
-        cached: true
-      };
-    }
-
-    const spreadsheet =
-      getSpreadsheet_();
-
-    const sheets =
-      spreadsheet.getSheets();
-
-    const medicationMap = {};
-
-    sheets.forEach(function (sheet) {
-      const sheetMedications =
-        readMedicationColumns_(sheet);
-
-      sheetMedications.forEach(
-        function (medication) {
-          const normalizedName =
-            normalizeText_(
-              medication.name
-            );
-
-          if (
-            normalizedName &&
-            !medicationMap[
-              normalizedName
-            ]
-          ) {
-            medicationMap[
-              normalizedName
-            ] = {
-              name: medication.name,
-              worksheetName:
-                medication.worksheetName,
-              columnNumber:
-                medication.columnNumber
-            };
-          }
-        }
-      );
-    });
-
-    const medications =
-      Object.keys(medicationMap)
-        .map(function (key) {
-          return medicationMap[key];
-        })
-        .sort(function (first, second) {
-          return first.name.localeCompare(
-            second.name,
-            undefined,
-            {
-              sensitivity: "base"
-            }
-          );
-        });
-
-    try {
-      cache.put(
-        MEDICATION_CACHE_KEY,
-        JSON.stringify(medications),
-        MEDICATION_CACHE_SECONDS
-      );
-    } catch (cacheError) {
-      console.warn(
-        "Medication cache error:",
-        cacheError
-      );
-    }
-
-    return {
-      success: true,
-      medications: medications,
-      cached: false
-    };
-  } catch (error) {
-    console.error(
-      "getMedicationList error:",
-      error
-    );
-
-    return {
-      success: false,
-      medications: [],
-      message:
-        getErrorMessage_(error)
-    };
-  }
-}
-
-
-/**
- * Searches for one medication.
- *
- * @param {string} medicationName
- * @return {Object}
- */
-function searchMedication(
-  medicationName
-) {
-  try {
-    const cleanedName =
-      cleanText_(medicationName);
-
-    if (!cleanedName) {
-      return {
-        success: false,
-        found: false,
-        message:
-          "Enter a medication name."
-      };
-    }
-
-    const medication =
-      locateMedicationColumn_(
-        cleanedName
-      );
-
-    if (!medication) {
-      return {
-        success: true,
-        found: false,
-        message:
-          "Medication not found."
-      };
-    }
-
-    return {
-      success: true,
-      found: true,
-      medication: {
-        name:
-          medication.medicationName,
-        worksheetName:
-          medication.sheet.getName(),
-        columnNumber:
-          medication.columnNumber,
-        note:
-          medication.note ||
-          "No medication note available."
-      }
-    };
-  } catch (error) {
-    console.error(
-      "searchMedication error:",
-      error
-    );
-
-    return {
-      success: false,
-      found: false,
-      message:
-        getErrorMessage_(error)
-    };
-  }
-}
-
-
-/**
- * Finds a renal or dialysis recommendation.
- *
- * @param {string} medicationName
- * @param {number|string|null} creatinineClearance
- * @param {string} dialysisMethod
- * @return {Object}
- */
-function findDose(
-  medicationName,
-  creatinineClearance,
-  dialysisMethod
-) {
-  try {
-    const cleanedMedicationName =
-      cleanText_(medicationName);
-
-    if (!cleanedMedicationName) {
-      return {
-        success: false,
-        found: false,
-        message:
-          "Enter a medication name."
-      };
-    }
-
-    const normalizedDialysisMethod =
-      normalizeDialysisMethod_(
-        dialysisMethod
-      );
-
-    if (
-      !normalizedDialysisMethod
-    ) {
-      return {
-        success: false,
-        found: false,
-        message:
-          "Select a valid dialysis method."
-      };
-    }
-
-    const medication =
-      locateMedicationColumn_(
-        cleanedMedicationName
-      );
-
-    if (!medication) {
-      return {
-        success: true,
-        found: false,
-        message:
-          "Medication not found."
-      };
-    }
-
-    let recommendation = "";
-    let enteredCrCl = null;
-    let usedCrCl = null;
-
-    if (
-      normalizedDialysisMethod !==
-      "not_on_dialysis"
-    ) {
-      recommendation =
-        findDialysisRecommendation_(
-          medication.rows,
-          normalizedDialysisMethod
-        );
-    } else {
-      const validation =
-        validateCreatinineClearance_(
-          creatinineClearance
-        );
-
-      if (!validation.valid) {
-        return {
-          success: false,
-          found: true,
-          message:
-            validation.message
-        };
-      }
-
-      enteredCrCl =
-        validation.originalValue;
-
-      usedCrCl =
-        determineCrClLookupValue_(
-          validation.roundedValue,
-          medication.rows
-        );
-
-      recommendation =
-        findCrClRecommendation_(
-          medication.rows,
-          usedCrCl
-        );
-    }
-
-    recommendation =
-      cleanText_(recommendation);
-
-    if (!recommendation) {
-      recommendation =
-        "No recommendation available.";
-    }
-
-    return {
-      success: true,
-      found: true,
-      result: {
-        medication:
-          medication.medicationName,
-
-        creatinineClearanceEntered:
-          enteredCrCl,
-
-        creatinineClearanceUsed:
-          usedCrCl,
-
-        dialysisMethod:
-          getDialysisDisplayName_(
-            normalizedDialysisMethod
-          ),
-
-        recommendedDose:
-          recommendation,
-
-        medicationNote:
-          cleanText_(medication.note) ||
-          "No medication note available.",
-
-        worksheetName:
-          medication.sheet.getName(),
-
-        spreadsheetColumn:
-          columnNumberToLetter_(
-            medication.columnNumber
-          )
-      }
-    };
-  } catch (error) {
-    console.error(
-      "findDose error:",
-      error
-    );
-
-    return {
-      success: false,
-      found: false,
-      message:
-        getErrorMessage_(error)
-    };
-  }
-}
-
-
-/**
- * Reads medication names from columns B onward.
- *
- * The medication name is taken from the row labeled
- * Drug Name in column A.
- *
- * @param {GoogleAppsScript.Spreadsheet.Sheet} sheet
- * @return {Array<Object>}
- */
-function readMedicationColumns_(
-  sheet
-) {
-  const lastRow =
-    sheet.getLastRow();
-
-  const lastColumn =
-    sheet.getLastColumn();
-
-  if (
-    lastRow < 1 ||
-    lastColumn < 2
-  ) {
-    return [];
+  if (!rawValues.length || !rawValues[0].length) {
+    throw new Error('The schedule sheet is empty.');
   }
 
-  const values =
-    sheet
-      .getRange(
-        1,
-        1,
-        lastRow,
-        lastColumn
-      )
-      .getDisplayValues();
+  const dateHeaderRow = findDateHeaderRow_(rawValues);
+  const weekdayRow = dateHeaderRow + 1;
+  const dateColumns = getDateColumns_(rawValues[dateHeaderRow], timeZone);
 
-  const drugNameRowIndex =
-    findLabelRowIndex_(
-      values,
-      [
-        "drug name",
-        "medication name",
-        "drug",
-        "medication"
-      ]
-    );
-
-  if (
-    drugNameRowIndex === -1
-  ) {
-    return [];
+  if (!dateColumns.length) {
+    throw new Error('No date columns were found in the schedule sheet.');
   }
 
-  const medications = [];
+  const shiftCodeMap = loadShiftCodes_(spreadsheet);
+  const people = [];
 
-  for (
-    let columnIndex = 1;
-    columnIndex < lastColumn;
-    columnIndex += 1
-  ) {
-    const medicationName =
-      cleanText_(
-        values[
-          drugNameRowIndex
-        ][columnIndex]
-      );
+  for (let rowIndex = weekdayRow + 1; rowIndex < displayValues.length; rowIndex += 1) {
+    const originalName = cleanText_(displayValues[rowIndex][DASHBOARD_CONFIG.NAME_COLUMN_INDEX]);
 
-    if (!medicationName) {
+    // This removes blank separator rows and numeric/formula-only rows such as "0".
+    if (!originalName || !/[A-Za-z]/.test(originalName) || /^schedule period$/i.test(originalName)) {
       continue;
     }
 
-    medications.push({
-      name:
-        medicationName,
+    const parsedName = parseName_(originalName);
+    const schedule = dateColumns.map(function (dateInfo) {
+      const code = cleanText_(displayValues[rowIndex][dateInfo.columnIndex]);
+      const status = getAssignmentStatus_(code);
+      const metadata = getAssignmentMetadata_(code, shiftCodeMap);
 
-      worksheetName:
-        sheet.getName(),
-
-      columnNumber:
-        columnIndex + 1
-    });
-  }
-
-  return medications;
-}
-
-
-/**
- * Locates a medication by searching every medication column
- * on every worksheet.
- *
- * @param {string} medicationName
- * @return {Object|null}
- */
-function locateMedicationColumn_(
-  medicationName
-) {
-  const normalizedSearchName =
-    normalizeText_(medicationName);
-
-  if (!normalizedSearchName) {
-    return null;
-  }
-
-  const spreadsheet =
-    getSpreadsheet_();
-
-  const sheets =
-    spreadsheet.getSheets();
-
-  for (
-    let sheetIndex = 0;
-    sheetIndex < sheets.length;
-    sheetIndex += 1
-  ) {
-    const sheet =
-      sheets[sheetIndex];
-
-    const lastRow =
-      sheet.getLastRow();
-
-    const lastColumn =
-      sheet.getLastColumn();
-
-    if (
-      lastRow < 1 ||
-      lastColumn < 2
-    ) {
-      continue;
-    }
-
-    const values =
-      sheet
-        .getRange(
-          1,
-          1,
-          lastRow,
-          lastColumn
-        )
-        .getDisplayValues();
-
-    const drugNameRowIndex =
-      findLabelRowIndex_(
-        values,
-        [
-          "drug name",
-          "medication name",
-          "drug",
-          "medication"
-        ]
-      );
-
-    if (
-      drugNameRowIndex === -1
-    ) {
-      continue;
-    }
-
-    for (
-      let columnIndex = 1;
-      columnIndex < lastColumn;
-      columnIndex += 1
-    ) {
-      const candidateName =
-        cleanText_(
-          values[
-            drugNameRowIndex
-          ][columnIndex]
-        );
-
-      if (!candidateName) {
-        continue;
-      }
-
-      if (
-        normalizeText_(candidateName) ===
-        normalizedSearchName
-      ) {
-        return buildMedicationRecord_(
-          sheet,
-          values,
-          columnIndex,
-          candidateName
-        );
-      }
-    }
-  }
-
-  return null;
-}
-
-
-/**
- * Builds a medication record using column A labels
- * and one medication column.
- *
- * @param {GoogleAppsScript.Spreadsheet.Sheet} sheet
- * @param {Array<Array<string>>} values
- * @param {number} columnIndex Zero-based array index
- * @param {string} medicationName
- * @return {Object}
- */
-function buildMedicationRecord_(
-  sheet,
-  values,
-  columnIndex,
-  medicationName
-) {
-  const rows =
-    values.map(function (row) {
       return {
-        key:
-          cleanText_(row[0]),
-
-        value:
-          cleanText_(
-            row[columnIndex]
-          )
+        dateKey: dateInfo.key,
+        code: code,
+        working: status.key === 'working',
+        status: status.key,
+        statusLabel: status.label,
+        meaning: metadata.meaning,
+        hours: metadata.hours,
+        type: metadata.type,
+        typeKey: metadata.typeKey
       };
     });
 
-  const noteRow =
-    rows.find(function (row) {
-      const label =
-        normalizeLabel_(row.key);
-
-      return (
-        label === "note" ||
-        label === "notes" ||
-        label ===
-          "medication note" ||
-        label ===
-          "drug note"
-      );
+    people.push({
+      id: 'person-row-' + (rowIndex + 1),
+      originalName: originalName,
+      displayName: parsedName.displayName,
+      firstName: parsedName.firstName,
+      lastName: parsedName.lastName,
+      searchText: normalizeSearchText_(
+        [originalName, parsedName.displayName, parsedName.firstName, parsedName.lastName].join(' ')
+      ),
+      schedule: schedule
     });
+  }
+
+  const dates = dateColumns.map(function (dateInfo) {
+    const weekdayFromSheet = weekdayRow < displayValues.length
+      ? cleanText_(displayValues[weekdayRow][dateInfo.columnIndex])
+      : '';
+
+    return {
+      key: dateInfo.key,
+      shortLabel: Utilities.formatDate(dateInfo.date, timeZone, 'M/d'),
+      weekday: weekdayFromSheet || Utilities.formatDate(dateInfo.date, timeZone, 'EEE').toUpperCase(),
+      fullLabel: Utilities.formatDate(dateInfo.date, timeZone, 'EEEE, MMMM d, yyyy')
+    };
+  });
 
   return {
-    sheet:
-      sheet,
-
-    columnNumber:
-      columnIndex + 1,
-
-    medicationName:
-      medicationName,
-
-    note:
-      noteRow
-        ? noteRow.value
-        : "",
-
-    rows:
-      rows
+    title: 'Pharmacist Schedule Dashboard',
+    scheduleSheet: scheduleSheet.getName(),
+    timeZone: timeZone,
+    generatedAt: Utilities.formatDate(new Date(), timeZone, "MMM d, yyyy 'at' h:mm a"),
+    dates: dates,
+    people: people
   };
 }
 
+/** Finds the row containing the largest number of real date values. */
+function findDateHeaderRow_(values) {
+  const rowsToScan = Math.min(DASHBOARD_CONFIG.HEADER_SCAN_ROWS, values.length);
+  let bestRow = -1;
+  let bestDateCount = 0;
 
-/**
- * Finds the row index for one of several accepted labels.
- *
- * @param {Array<Array<string>>} values
- * @param {Array<string>} acceptedLabels
- * @return {number}
- */
-function findLabelRowIndex_(
-  values,
-  acceptedLabels
-) {
-  for (
-    let rowIndex = 0;
-    rowIndex < values.length;
-    rowIndex += 1
-  ) {
-    const label =
-      normalizeLabel_(
-        values[rowIndex][0]
-      );
+  for (let rowIndex = 0; rowIndex < rowsToScan; rowIndex += 1) {
+    let dateCount = 0;
 
-    if (
-      acceptedLabels.indexOf(
-        label
-      ) !== -1
-    ) {
-      return rowIndex;
+    // Start at column B because column A contains the schedule period/name column.
+    for (let columnIndex = 1; columnIndex < values[rowIndex].length; columnIndex += 1) {
+      if (isValidDate_(values[rowIndex][columnIndex])) {
+        dateCount += 1;
+      }
+    }
+
+    if (dateCount > bestDateCount) {
+      bestDateCount = dateCount;
+      bestRow = rowIndex;
     }
   }
 
-  return -1;
-}
-
-
-/**
- * Finds the dialysis recommendation.
- *
- * @param {Array<Object>} rows
- * @param {string} dialysisMethod
- * @return {string}
- */
-function findDialysisRecommendation_(
-  rows,
-  dialysisMethod
-) {
-  const acceptedLabels = {
-    peritoneal_dialysis: [
-      "peritoneal dialysis",
-      "peritoneal",
-      "pd"
-    ],
-
-    hemodialysis: [
-      "hemodialysis",
-      "haemodialysis",
-      "hd"
-    ],
-
-    capd: [
-      "capd"
-    ],
-
-    crrt: [
-      "crrt",
-      "continuous renal replacement therapy"
-    ]
-  };
-
-  const targetLabels =
-    acceptedLabels[
-      dialysisMethod
-    ] || [];
-
-  const matchingRow =
-    rows.find(function (row) {
-      const normalizedLabel =
-        normalizeLabel_(row.key);
-
-      return targetLabels.some(
-        function (acceptedLabel) {
-          return (
-            normalizedLabel ===
-            acceptedLabel
-          );
-        }
-      );
-    });
-
-  return matchingRow
-    ? matchingRow.value
-    : "";
-}
-
-
-/**
- * Finds the recommendation for an exact CrCl row.
- *
- * @param {Array<Object>} rows
- * @param {number} crCl
- * @return {string}
- */
-function findCrClRecommendation_(
-  rows,
-  crCl
-) {
-  const matchingRow =
-    rows.find(function (row) {
-      const numericKey =
-        parseNumericKey_(row.key);
-
-      return (
-        numericKey !== null &&
-        numericKey === crCl
-      );
-    });
-
-  return matchingRow
-    ? matchingRow.value
-    : "";
-}
-
-
-/**
- * Determines the CrCl row to use.
- *
- * @param {number} roundedCrCl
- * @param {Array<Object>} rows
- * @return {number}
- */
-function determineCrClLookupValue_(
-  roundedCrCl,
-  rows
-) {
-  if (roundedCrCl <= 60) {
-    return roundedCrCl;
-  }
-
-  const exactHigherRowExists =
-    rows.some(function (row) {
-      const numericKey =
-        parseNumericKey_(
-          row.key
-        );
-
-      return (
-        numericKey !== null &&
-        numericKey === roundedCrCl
-      );
-    });
-
-  return exactHigherRowExists
-    ? roundedCrCl
-    : 60;
-}
-
-
-/**
- * Validates creatinine clearance.
- *
- * @param {number|string|null} value
- * @return {Object}
- */
-function validateCreatinineClearance_(
-  value
-) {
-  if (
-    value === null ||
-    value === undefined ||
-    String(value).trim() === ""
-  ) {
-    return {
-      valid: false,
-      message:
-        "Enter the patient's creatinine clearance."
-    };
-  }
-
-  const numericValue =
-    Number(
-      String(value).trim()
+  if (bestRow === -1 || bestDateCount < 2) {
+    throw new Error(
+      'The date header row could not be identified. Keep the schedule dates as real Google Sheets dates.'
     );
+  }
 
-  if (
-    !Number.isFinite(
-      numericValue
-    )
-  ) {
-    return {
-      valid: false,
-      message:
-        "Creatinine clearance must be a valid number."
+  return bestRow;
+}
+
+function getDateColumns_(dateRowValues, timeZone) {
+  const columns = [];
+
+  for (let columnIndex = 1; columnIndex < dateRowValues.length; columnIndex += 1) {
+    const value = dateRowValues[columnIndex];
+    if (!isValidDate_(value)) {
+      continue;
+    }
+
+    columns.push({
+      columnIndex: columnIndex,
+      date: value,
+      key: Utilities.formatDate(value, timeZone, 'yyyy-MM-dd')
+    });
+  }
+
+  return columns;
+}
+
+function loadShiftCodes_(spreadsheet) {
+  const codeSheet = spreadsheet.getSheetByName(DASHBOARD_CONFIG.CODE_SHEET);
+  const codeMap = {};
+
+  if (!codeSheet) {
+    return codeMap;
+  }
+
+  const values = codeSheet.getDataRange().getDisplayValues();
+  if (values.length < 2) {
+    return codeMap;
+  }
+
+  // In the attached workbook, row 2 is: Schedule Code | Meaning | Hours | Type.
+  for (let rowIndex = 2; rowIndex < values.length; rowIndex += 1) {
+    const code = cleanText_(values[rowIndex][0]).toUpperCase();
+    if (!code) {
+      continue;
+    }
+
+    const type = cleanText_(values[rowIndex][3]) || 'Other';
+    codeMap[code] = {
+      meaning: cleanText_(values[rowIndex][1]),
+      hours: cleanText_(values[rowIndex][2]),
+      type: type,
+      typeKey: normalizeTypeKey_(type)
     };
   }
 
-  if (numericValue < 0) {
+  return codeMap;
+}
+
+function getAssignmentMetadata_(assignmentCode, codeMap) {
+  if (!assignmentCode) {
+    return emptyMetadata_();
+  }
+
+  const candidates = getCodeCandidates_(assignmentCode);
+  const matches = [];
+
+  candidates.forEach(function (candidate) {
+    if (codeMap[candidate]) {
+      matches.push(codeMap[candidate]);
+    }
+  });
+
+  if (!matches.length) {
     return {
-      valid: false,
-      message:
-        "Creatinine clearance cannot be less than 0."
+      meaning: '',
+      hours: '',
+      type: 'Other',
+      typeKey: 'other'
     };
   }
+
+  const uniqueMeanings = uniqueNonBlank_(matches.map(function (item) { return item.meaning; }));
+  const uniqueHours = uniqueNonBlank_(matches.map(function (item) { return item.hours; }));
+  const uniqueTypes = uniqueNonBlank_(matches.map(function (item) { return item.type; }));
+  const uniqueTypeKeys = uniqueNonBlank_(matches.map(function (item) { return item.typeKey; }));
 
   return {
-    valid: true,
-    originalValue:
-      numericValue,
-    roundedValue:
-      Math.round(numericValue)
+    meaning: uniqueMeanings.join(' / '),
+    hours: uniqueHours.join(' / '),
+    type: uniqueTypes.length === 1 ? uniqueTypes[0] : uniqueTypes.join(' / '),
+    typeKey: uniqueTypeKeys.length === 1 ? uniqueTypeKeys[0] : 'other'
   };
 }
 
-
 /**
- * Normalizes a dialysis value.
- *
- * @param {string} value
- * @return {string}
+ * Examples handled here:
+ *   tE2      -> E2
+ *   tONC     -> ONC
+ *   CARD/E2  -> CARD and E2
+ *   C7/early -> C7
+ *   E1/Late  -> E1
  */
-function normalizeDialysisMethod_(
-  value
-) {
-  const normalized =
-    normalizeText_(value)
-      .replace(
-        /[\s-]+/g,
-        "_"
-      );
+function getCodeCandidates_(assignmentCode) {
+  const ignoredWords = ['EARLY', 'LATE'];
+  const candidates = [];
 
-  const acceptedValues = {
-    not_on_dialysis:
-      "not_on_dialysis",
+  cleanText_(assignmentCode)
+    .split('/')
+    .map(function (part) { return cleanText_(part); })
+    .filter(Boolean)
+    .forEach(function (part) {
+      let normalized = part;
 
-    notondialysis:
-      "not_on_dialysis",
+      // Resident/trainee assignments in this workbook use a lowercase "t" prefix.
+      if (/^t[A-Za-z0-9]/.test(normalized)) {
+        normalized = normalized.substring(1);
+      }
 
-    none:
-      "not_on_dialysis",
+      normalized = normalized.toUpperCase();
+      if (ignoredWords.indexOf(normalized) === -1 && candidates.indexOf(normalized) === -1) {
+        candidates.push(normalized);
+      }
+    });
 
-    peritoneal_dialysis:
-      "peritoneal_dialysis",
-
-    peritonealdialysis:
-      "peritoneal_dialysis",
-
-    pd:
-      "peritoneal_dialysis",
-
-    hemodialysis:
-      "hemodialysis",
-
-    haemodialysis:
-      "hemodialysis",
-
-    hd:
-      "hemodialysis",
-
-    capd:
-      "capd",
-
-    crrt:
-      "crrt"
-  };
-
-  return (
-    acceptedValues[
-      normalized
-    ] || ""
-  );
+  return candidates;
 }
 
+function getAssignmentStatus_(assignmentCode) {
+  const code = cleanText_(assignmentCode);
+  const normalized = code.toUpperCase();
 
-/**
- * Returns the display name for dialysis.
- *
- * @param {string} dialysisMethod
- * @return {string}
- */
-function getDialysisDisplayName_(
-  dialysisMethod
-) {
-  const names = {
-    not_on_dialysis:
-      "Not on Dialysis",
-
-    peritoneal_dialysis:
-      "Peritoneal Dialysis",
-
-    hemodialysis:
-      "Hemodialysis",
-
-    capd:
-      "CAPD",
-
-    crrt:
-      "CRRT"
-  };
-
-  return (
-    names[
-      dialysisMethod
-    ] || ""
-  );
-}
-
-
-/**
- * Parses a numeric row label.
- *
- * @param {*} value
- * @return {number|null}
- */
-function parseNumericKey_(
-  value
-) {
-  const cleanedValue =
-    cleanText_(value);
-
-  if (
-    !/^-?\d+(?:\.\d+)?$/.test(
-      cleanedValue
-    )
-  ) {
-    return null;
+  if (!code) {
+    return { key: 'not-scheduled', label: 'Not scheduled' };
   }
 
-  const numericValue =
-    Number(cleanedValue);
-
-  return Number.isFinite(
-    numericValue
-  )
-    ? numericValue
-    : null;
-}
-
-
-/**
- * Converts a spreadsheet column number to a letter.
- *
- * Example:
- * 2 = B
- * 3 = C
- * 27 = AA
- *
- * @param {number} columnNumber
- * @return {string}
- */
-function columnNumberToLetter_(
-  columnNumber
-) {
-  let number =
-    columnNumber;
-
-  let letter = "";
-
-  while (number > 0) {
-    const remainder =
-      (number - 1) % 26;
-
-    letter =
-      String.fromCharCode(
-        65 + remainder
-      ) + letter;
-
-    number =
-      Math.floor(
-        (number - 1) / 26
-      );
+  if (normalized === 'X' || normalized === 'OFF') {
+    return { key: 'off', label: 'Off' };
   }
 
-  return letter;
+  if (normalized === 'P' || normalized === 'PTO' || normalized === 'VAC' || normalized === 'VACATION') {
+    return { key: 'pto', label: 'PTO' };
+  }
+
+  if (normalized === 'H') {
+    return { key: 'holiday', label: 'Holiday' };
+  }
+
+  if (normalized === '*' || normalized === '0') {
+    return { key: 'not-scheduled', label: 'Not scheduled' };
+  }
+
+  return { key: 'working', label: 'Working' };
 }
 
+function parseName_(originalName) {
+  const commaPosition = originalName.indexOf(',');
 
-/**
- * Normalizes searchable text.
- *
- * @param {*} value
- * @return {string}
- */
-function normalizeText_(value) {
+  if (commaPosition === -1) {
+    const parts = originalName.split(/\s+/).filter(Boolean);
+    return {
+      firstName: parts.length ? parts[0] : originalName,
+      lastName: parts.length > 1 ? parts.slice(1).join(' ') : '',
+      displayName: originalName
+    };
+  }
+
+  const lastName = cleanText_(originalName.substring(0, commaPosition));
+  const firstName = cleanText_(originalName.substring(commaPosition + 1));
+
+  return {
+    firstName: firstName,
+    lastName: lastName,
+    displayName: [firstName, lastName].filter(Boolean).join(' ')
+  };
+}
+
+function normalizeTypeKey_(type) {
+  const normalized = cleanText_(type).toLowerCase();
+  if (normalized.indexOf('day') !== -1) return 'day';
+  if (normalized.indexOf('evening') !== -1) return 'evening';
+  if (normalized.indexOf('night') !== -1) return 'night';
+  return 'other';
+}
+
+function normalizeSearchText_(value) {
   return cleanText_(value)
-    .toLocaleLowerCase()
-    .replace(/\s+/g, " ");
-}
-
-
-/**
- * Normalizes labels in column A.
- *
- * @param {*} value
- * @return {string}
- */
-function normalizeLabel_(value) {
-  return normalizeText_(value)
-    .replace(
-      /[_:.-]+/g,
-      " "
-    )
-    .replace(/\s+/g, " ")
+    .toLowerCase()
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .replace(/[^a-z0-9]+/g, ' ')
     .trim();
 }
 
+function uniqueNonBlank_(items) {
+  return items.filter(function (item, index, array) {
+    return item && array.indexOf(item) === index;
+  });
+}
 
-/**
- * Cleans text.
- *
- * @param {*} value
- * @return {string}
- */
+function emptyMetadata_() {
+  return { meaning: '', hours: '', type: 'Other', typeKey: 'other' };
+}
+
+function isValidDate_(value) {
+  return Object.prototype.toString.call(value) === '[object Date]' && !isNaN(value.getTime());
+}
+
 function cleanText_(value) {
-  if (
-    value === null ||
-    value === undefined
-  ) {
-    return "";
-  }
-
-  return String(value)
-    .replace(/\s+/g, " ")
-    .trim();
-}
-
-
-/**
- * Returns a readable error message.
- *
- * @param {*} error
- * @return {string}
- */
-function getErrorMessage_(error) {
-  if (
-    error &&
-    error.message
-  ) {
-    return String(
-      error.message
-    );
-  }
-
-  return (
-    "An unexpected error occurred. " +
-    "Please try again."
-  );
-}
-
-
-/**
- * Clears the medication list cache.
- *
- * Run manually after adding, removing, or renaming
- * medication columns.
- *
- * @return {Object}
- */
-function clearMedicationCache() {
-  CacheService
-    .getScriptCache()
-    .remove(
-      MEDICATION_CACHE_KEY
-    );
-
-  return {
-    success: true,
-    message:
-      "Medication cache cleared."
-  };
-}
-
-
-/**
- * Tests the spreadsheet and medication columns.
- *
- * Run this function manually from Apps Script.
- *
- * @return {Object}
- */
-function testMedicationColumns() {
-  clearMedicationCache();
-
-  const spreadsheet =
-    getSpreadsheet_();
-
-  const sheets =
-    spreadsheet.getSheets();
-
-  const results =
-    sheets.map(function (sheet) {
-      return {
-        worksheetName:
-          sheet.getName(),
-
-        medications:
-          readMedicationColumns_(sheet)
-      };
-    });
-
-  const response = {
-    success: true,
-    spreadsheetName:
-      spreadsheet.getName(),
-    worksheets:
-      results
-  };
-
-  console.log(
-    JSON.stringify(
-      response,
-      null,
-      2
-    )
-  );
-
-  return response;
+  return value === null || value === undefined ? '' : String(value).trim();
 }
 
 
@@ -1216,2112 +367,971 @@ function testMedicationColumns() {
 
 
 
-
-
-
-
-
-
-
-<!DOCTYPE html>
-<html lang="en">
+    <!DOCTYPE html>
+<html>
 <head>
   <base target="_top">
-
   <meta charset="UTF-8">
-
-  <meta
-    name="viewport"
-    content="width=device-width, initial-scale=1.0"
-  >
-
-  <title>Renal Dose Adjustment</title>
-
   <style>
     :root {
-      --primary: #176b70;
-      --primary-dark: #10565a;
-      --primary-soft: #e2f3f2;
-      --accent: #2f8f83;
-
-      --background: #edf5f5;
+      --navy: #12365a;
+      --blue: #1f6ea9;
+      --blue-light: #eaf4fb;
+      --ink: #17212b;
+      --muted: #64748b;
+      --line: #dbe4ec;
       --surface: #ffffff;
-      --surface-soft: #f3f8f8;
-
-      --text: #183139;
-      --muted: #687d83;
-      --border: #d9e6e7;
-
-      --success-bg: #e7f7f2;
-      --success-border: #98d4c5;
-      --success-text: #155d51;
-
-      --error-bg: #fff0f0;
-      --error-border: #efb3b3;
-      --error-text: #9b3030;
-
-      --warning-bg: #fff8e5;
-      --warning-border: #ead083;
-      --warning-text: #72560a;
-
-      --shadow:
-        0 20px 60px rgba(25, 70, 76, 0.12);
-
-      --small-shadow:
-        0 12px 30px rgba(25, 70, 76, 0.10);
+      --background: #f4f7fa;
+      --working: #087f5b;
+      --off: #7c8794;
+      --warning: #b45309;
+      --shadow: 0 12px 35px rgba(18, 54, 90, 0.10);
+      --radius: 18px;
     }
 
-    * {
-      box-sizing: border-box;
-    }
+    * { box-sizing: border-box; }
 
     body {
-      min-height: 100vh;
       margin: 0;
-
-      color: var(--text);
-
-      background:
-        radial-gradient(
-          circle at 12% 8%,
-          rgba(49, 144, 130, 0.14),
-          transparent 34%
-        ),
-        linear-gradient(
-          145deg,
-          #edf5f5,
-          #f8fafb
-        );
-
-      font-family:
-        Inter,
-        -apple-system,
-        BlinkMacSystemFont,
-        "Segoe UI",
-        Roboto,
-        Arial,
-        sans-serif;
-
-      line-height: 1.5;
+      min-height: 100vh;
+      background: var(--background);
+      color: var(--ink);
+      font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
     }
 
-    button,
-    input,
-    select {
-      font: inherit;
+    button, input { font: inherit; }
+
+    .topbar {
+      background: linear-gradient(135deg, #0f3153, #1f6ea9);
+      color: #fff;
+      padding: 28px clamp(18px, 5vw, 64px) 76px;
+    }
+
+    .topbar-inner {
+      width: min(1280px, 100%);
+      margin: 0 auto;
+    }
+
+    .eyebrow {
+      margin: 0 0 8px;
+      font-size: 0.78rem;
+      font-weight: 800;
+      letter-spacing: 0.14em;
+      text-transform: uppercase;
+      opacity: 0.76;
+    }
+
+    h1 {
+      margin: 0;
+      font-size: clamp(1.8rem, 4vw, 3rem);
+      line-height: 1.08;
+      letter-spacing: -0.035em;
+    }
+
+    .subtitle {
+      margin: 12px 0 0;
+      max-width: 760px;
+      color: rgba(255,255,255,0.82);
+      font-size: 1rem;
     }
 
     .page {
-      width: min(1120px, 100%);
-      margin: 0 auto;
-      padding: 28px 18px 40px;
+      width: min(1280px, calc(100% - 28px));
+      margin: -48px auto 40px;
     }
 
-    .hero {
-      position: relative;
-      overflow: hidden;
-
-      margin-bottom: 22px;
-      padding: 34px;
-
-      color: #ffffff;
-
-      background:
-        linear-gradient(
-          135deg,
-          #135d63,
-          #319082
-        );
-
-      border-radius: 26px;
+    .panel {
+      background: var(--surface);
+      border: 1px solid rgba(219, 228, 236, 0.95);
+      border-radius: var(--radius);
       box-shadow: var(--shadow);
     }
 
-    .hero::before {
-      position: absolute;
-
-      top: -130px;
-      right: -60px;
-
-      width: 250px;
-      height: 250px;
-
-      content: "";
-
-      background:
-        rgba(255, 255, 255, 0.10);
-
-      border-radius: 999px;
-    }
-
-    .hero-content {
-      position: relative;
-      z-index: 1;
-    }
-
-    .hero-icon {
-      display: inline-flex;
-      align-items: center;
-      justify-content: center;
-
-      width: 54px;
-      height: 54px;
-
-      margin-bottom: 15px;
-
-      background:
-        rgba(255, 255, 255, 0.15);
-
-      border:
-        1px solid rgba(255, 255, 255, 0.22);
-
-      border-radius: 16px;
-
-      font-size: 24px;
-      font-weight: 800;
-    }
-
-    .hero h1 {
-      margin: 0;
-
-      font-size:
-        clamp(2rem, 4vw, 3rem);
-
-      line-height: 1.1;
-      letter-spacing: -0.04em;
-    }
-
-    .hero p {
-      max-width: 760px;
-
-      margin: 12px 0 0;
-
-      color:
-        rgba(255, 255, 255, 0.85);
-    }
-
-    .form-card {
-      padding: 28px;
-
-      background:
-        rgba(255, 255, 255, 0.96);
-
-      border:
-        1px solid rgba(255, 255, 255, 0.80);
-
-      border-radius: 26px;
-      box-shadow: var(--shadow);
-    }
-
-    .section-header {
-      margin-bottom: 24px;
-    }
-
-    .section-header h2 {
-      margin: 0;
-      font-size: 1.4rem;
-    }
-
-    .section-header p {
-      margin: 6px 0 0;
-
-      color: var(--muted);
-      font-size: 0.93rem;
-    }
-
-    .form-grid {
+    .controls {
+      padding: 20px;
       display: grid;
-
-      grid-template-columns:
-        minmax(0, 1.4fr)
-        minmax(250px, 0.7fr);
-
-      gap: 20px;
-    }
-
-    .full-width {
-      grid-column: 1 / -1;
+      grid-template-columns: minmax(260px, 1fr) auto;
+      gap: 16px;
+      align-items: end;
     }
 
     .field-label {
-      display: inline-block;
-
-      margin-bottom: 8px;
-
-      font-size: 0.92rem;
-      font-weight: 750;
+      display: block;
+      margin-bottom: 7px;
+      color: var(--muted);
+      font-size: 0.78rem;
+      font-weight: 800;
+      letter-spacing: 0.06em;
+      text-transform: uppercase;
     }
 
-    .required {
-      color: #b94343;
-    }
+    .search-wrap { position: relative; }
 
-    .input-wrapper,
-    .autocomplete-wrapper {
-      position: relative;
-    }
-
-    .field-input,
-    .field-select {
+    .search-input {
       width: 100%;
-      height: 53px;
-
-      padding: 0 15px;
-
-      color: var(--text);
-      background: var(--surface);
-
-      border:
-        1px solid var(--border);
-
-      border-radius: 13px;
+      height: 50px;
+      padding: 0 46px 0 44px;
+      border: 1px solid var(--line);
+      border-radius: 14px;
+      background: #fff;
+      color: var(--ink);
       outline: none;
+      transition: border-color .18s ease, box-shadow .18s ease;
     }
 
-    .field-input {
-      padding-right: 75px;
+    .search-input:focus {
+      border-color: var(--blue);
+      box-shadow: 0 0 0 4px rgba(31, 110, 169, 0.12);
     }
 
-    .field-input:focus,
-    .field-select:focus {
-      border-color:
-        var(--primary);
-
-      box-shadow:
-        0 0 0 4px
-        rgba(23, 107, 112, 0.14);
-    }
-
-    .field-input:disabled {
-      color: #87989d;
-      background: #eef3f3;
-      cursor: not-allowed;
-    }
-
-    .input-icon {
+    .search-icon {
       position: absolute;
-
-      top: 50%;
-      right: 15px;
-
-      color: #7b9298;
-      font-size: 0.82rem;
-
-      transform:
-        translateY(-50%);
-
+      left: 15px;
+      bottom: 15px;
+      width: 19px;
+      height: 19px;
+      color: var(--muted);
       pointer-events: none;
     }
 
-    .helper {
-      min-height: 20px;
-      margin-top: 7px;
-
-      color: var(--muted);
-      font-size: 0.81rem;
-    }
-
-    .helper.error {
-      color: var(--error-text);
-    }
-
-    .autocomplete-dropdown {
+    .clear-search {
       position: absolute;
-      z-index: 100;
-
-      top: calc(100% + 8px);
-      right: 0;
-      left: 0;
-
+      right: 10px;
+      bottom: 9px;
+      width: 32px;
+      height: 32px;
+      border: 0;
+      border-radius: 50%;
+      background: transparent;
+      color: var(--muted);
+      cursor: pointer;
       display: none;
-
-      max-height: 340px;
-      overflow-y: auto;
-
-      padding: 7px;
-
-      background: var(--surface);
-
-      border:
-        1px solid var(--border);
-
-      border-radius: 15px;
-
-      box-shadow:
-        0 20px 50px
-        rgba(25, 61, 67, 0.20);
     }
 
-    .autocomplete-dropdown.open {
-      display: block;
+    .clear-search:hover { background: #eef3f7; color: var(--ink); }
+
+    .suggestions {
+      position: absolute;
+      z-index: 30;
+      top: calc(100% + 8px);
+      left: 0;
+      right: 0;
+      max-height: 330px;
+      overflow-y: auto;
+      padding: 7px;
+      border: 1px solid var(--line);
+      border-radius: 14px;
+      background: #fff;
+      box-shadow: 0 20px 45px rgba(18,54,90,.18);
+      display: none;
     }
 
     .suggestion {
-      display: flex;
-      align-items: center;
-
       width: 100%;
-      gap: 11px;
-
       padding: 11px 12px;
-
-      color: var(--text);
-      text-align: left;
-      background: transparent;
-
       border: 0;
       border-radius: 10px;
-
+      background: transparent;
+      text-align: left;
       cursor: pointer;
     }
 
-    .suggestion:hover,
-    .suggestion.active {
-      background:
-        var(--primary-soft);
-    }
+    .suggestion:hover, .suggestion.active { background: var(--blue-light); }
+    .suggestion-name { display: block; font-weight: 800; }
+    .suggestion-original { display: block; margin-top: 2px; color: var(--muted); font-size: .82rem; }
 
-    .suggestion-icon {
-      display: inline-flex;
-      align-items: center;
-      justify-content: center;
-
-      flex: 0 0 auto;
-
-      width: 31px;
-      height: 31px;
-
-      color: var(--primary);
-      background: #edf8f7;
-
-      border-radius: 9px;
-
-      font-size: 13px;
-      font-weight: 800;
-    }
-
-    .suggestion-name {
-      overflow: hidden;
-      text-overflow: ellipsis;
-      white-space: nowrap;
-
-      font-size: 0.94rem;
-      font-weight: 650;
-    }
-
-    .empty-suggestion {
-      padding: 18px 13px;
-
-      color: var(--muted);
-      text-align: center;
-
-      font-size: 0.88rem;
-    }
-
-    .actions {
+    .date-nav {
       display: flex;
-      flex-wrap: wrap;
-
-      gap: 12px;
-      margin-top: 25px;
+      gap: 9px;
+      align-items: center;
     }
 
-    .button {
-      display: inline-flex;
-      align-items: center;
-      justify-content: center;
-
-      min-height: 49px;
-      gap: 9px;
-
-      padding: 0 21px;
-
-      border: 0;
-      border-radius: 13px;
-
-      font-weight: 750;
+    .nav-button {
+      height: 50px;
+      min-width: 50px;
+      padding: 0 14px;
+      border: 1px solid var(--line);
+      border-radius: 14px;
+      background: #fff;
+      color: var(--navy);
+      font-weight: 800;
       cursor: pointer;
     }
 
-    .button:disabled {
-      opacity: 0.62;
-      cursor: not-allowed;
+    .nav-button:hover:not(:disabled) { background: var(--blue-light); border-color: #b8d7eb; }
+    .nav-button:disabled { opacity: .35; cursor: not-allowed; }
+
+    .selected-date {
+      min-width: 220px;
+      text-align: center;
+      line-height: 1.18;
     }
 
-    .button-primary {
-      min-width: 150px;
-
-      color: #ffffff;
-      background: var(--primary);
-
-      box-shadow:
-        0 10px 24px
-        rgba(23, 107, 112, 0.23);
+    .date-strip-wrap {
+      border-top: 1px solid var(--line);
+      padding: 14px 20px 18px;
     }
 
-    .button-primary:hover:not(:disabled) {
-      background:
-        var(--primary-dark);
+    .date-strip {
+      display: flex;
+      gap: 8px;
+      overflow-x: auto;
+      scrollbar-width: thin;
+      padding-bottom: 3px;
     }
 
-    .button-secondary {
-      color: var(--text);
-      background: #edf3f3;
+    .date-chip {
+      flex: 0 0 auto;
+      min-width: 66px;
+      padding: 8px 10px;
+      border: 1px solid var(--line);
+      border-radius: 12px;
+      background: #fff;
+      color: var(--ink);
+      cursor: pointer;
+      text-align: center;
     }
 
-    .spinner {
-      display: none;
+    .date-chip:hover { border-color: #9fc9e4; background: var(--blue-light); }
+    .date-chip.selected { border-color: var(--blue); background: var(--blue); color: #fff; }
+    .chip-weekday { display: block; font-size: .7rem; font-weight: 900; letter-spacing: .06em; }
+    .chip-date { display: block; margin-top: 2px; font-size: .93rem; font-weight: 800; }
 
-      width: 18px;
-      height: 18px;
-
-      border:
-        2px solid rgba(255, 255, 255, 0.40);
-
-      border-top-color: #ffffff;
-      border-radius: 50%;
-
-      animation:
-        spin 700ms linear infinite;
+    .summary-grid {
+      display: grid;
+      grid-template-columns: repeat(4, minmax(0, 1fr));
+      gap: 14px;
+      margin: 18px 0;
     }
 
-    .button.loading .spinner {
-      display: inline-block;
+    .summary-card {
+      padding: 18px;
+      border: 1px solid var(--line);
+      border-radius: 16px;
+      background: #fff;
     }
 
-    @keyframes spin {
-      to {
-        transform: rotate(360deg);
-      }
+    .summary-label { color: var(--muted); font-size: .78rem; font-weight: 800; text-transform: uppercase; letter-spacing: .06em; }
+    .summary-value { margin-top: 4px; color: var(--navy); font-size: 2rem; font-weight: 900; line-height: 1; }
+
+    .section {
+      padding: 22px;
+      margin-top: 18px;
     }
 
-    .status {
-      display: none;
-
-      margin-top: 20px;
-      padding: 14px 15px;
-
-      border:
-        1px solid transparent;
-
-      border-radius: 13px;
-
-      font-size: 0.9rem;
-      font-weight: 600;
+    .section-heading {
+      display: flex;
+      gap: 16px;
+      align-items: flex-start;
+      justify-content: space-between;
+      margin-bottom: 18px;
     }
 
-    .status.show {
-      display: block;
+    h2 { margin: 0; font-size: 1.35rem; letter-spacing: -0.02em; }
+    .section-note { margin: 5px 0 0; color: var(--muted); font-size: .9rem; }
+    .count-badge { flex: 0 0 auto; padding: 7px 11px; border-radius: 999px; background: var(--blue-light); color: var(--blue); font-size: .82rem; font-weight: 900; }
+
+    .groups {
+      display: grid;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: 16px;
     }
 
-    .status.error {
-      color: var(--error-text);
-      background: var(--error-bg);
-      border-color: var(--error-border);
-    }
-
-    .status.warning {
-      color: var(--warning-text);
-      background: var(--warning-bg);
-      border-color: var(--warning-border);
-    }
-
-    .status.success {
-      color: var(--success-text);
-      background: var(--success-bg);
-      border-color: var(--success-border);
-    }
-
-    .result-card {
-      display: none;
-
-      margin-top: 22px;
+    .shift-group {
+      border: 1px solid var(--line);
+      border-radius: 16px;
       overflow: hidden;
-
-      background: var(--surface);
-
-      border:
-        1px solid var(--border);
-
-      border-radius: 25px;
-      box-shadow: var(--small-shadow);
     }
 
-    .result-card.show {
-      display: block;
-    }
-
-    .result-header {
+    .shift-header {
       display: flex;
       align-items: center;
       justify-content: space-between;
-
-      gap: 15px;
-      padding: 22px 24px;
-
-      background:
-        linear-gradient(
-          135deg,
-          #e2f3f2,
-          #f1f8f8
-        );
-
-      border-bottom:
-        1px solid var(--border);
+      padding: 12px 14px;
+      background: #f8fafc;
+      border-bottom: 1px solid var(--line);
+      font-weight: 900;
     }
 
-    .result-eyebrow {
-      margin: 0 0 4px;
+    .person-list { display: grid; }
 
-      color: var(--primary);
-
-      font-size: 0.74rem;
-      font-weight: 800;
-      letter-spacing: 0.08em;
-      text-transform: uppercase;
-    }
-
-    .result-title {
-      margin: 0;
-
-      font-size:
-        clamp(1.3rem, 3vw, 1.7rem);
-
-      overflow-wrap: anywhere;
-    }
-
-    .result-badge {
-      padding: 7px 11px;
-
-      color: var(--success-text);
-      background:
-        rgba(255, 255, 255, 0.78);
-
-      border:
-        1px solid var(--success-border);
-
-      border-radius: 999px;
-
-      font-size: 0.76rem;
-      font-weight: 800;
-    }
-
-    .result-body {
-      padding: 24px;
-    }
-
-    .dose-box {
-      margin-bottom: 21px;
-      padding: 19px;
-
-      background:
-        linear-gradient(
-          135deg,
-          #e7f7f2,
-          #effaf7
-        );
-
-      border:
-        1px solid var(--success-border);
-
-      border-left:
-        5px solid var(--accent);
-
-      border-radius: 15px;
-    }
-
-    .dose-label {
-      margin-bottom: 7px;
-
-      color: var(--success-text);
-
-      font-size: 0.76rem;
-      font-weight: 850;
-      letter-spacing: 0.07em;
-      text-transform: uppercase;
-    }
-
-    .dose-value {
-      margin: 0;
-
-      color: #123f39;
-
-      font-size:
-        clamp(1.05rem, 2.6vw, 1.28rem);
-
-      font-weight: 780;
-      line-height: 1.55;
-
-      overflow-wrap: anywhere;
-      white-space: pre-wrap;
-    }
-
-    .result-grid {
+    .person-card {
       display: grid;
-
-      grid-template-columns:
-        repeat(2, minmax(0, 1fr));
-
-      gap: 13px;
+      grid-template-columns: minmax(0, 1fr) auto;
+      gap: 12px;
+      padding: 13px 14px;
+      border-bottom: 1px solid #edf2f6;
+      cursor: pointer;
+      transition: background .16s ease;
     }
 
-    .result-item {
-      min-width: 0;
-      padding: 15px;
+    .person-card:last-child { border-bottom: 0; }
+    .person-card:hover { background: var(--blue-light); }
+    .person-name { font-weight: 850; }
+    .person-detail { margin-top: 3px; color: var(--muted); font-size: .82rem; }
+    .assignment-code { align-self: center; padding: 6px 9px; border-radius: 9px; background: #edf7f4; color: var(--working); font-size: .82rem; font-weight: 900; }
 
-      background:
-        var(--surface-soft);
+    .person-panel { display: none; }
 
-      border:
-        1px solid #e4eded;
-
-      border-radius: 13px;
+    .person-header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 18px;
+      padding-bottom: 16px;
+      border-bottom: 1px solid var(--line);
     }
 
-    .result-item.full {
-      grid-column: 1 / -1;
+    .person-name-large { margin: 0; font-size: 1.45rem; }
+    .person-meta { margin: 5px 0 0; color: var(--muted); }
+
+    .close-person {
+      border: 1px solid var(--line);
+      border-radius: 11px;
+      background: #fff;
+      padding: 9px 12px;
+      color: var(--navy);
+      font-weight: 800;
+      cursor: pointer;
     }
 
-    .result-item-label {
-      margin-bottom: 5px;
+    .table-wrap { margin-top: 16px; overflow-x: auto; border: 1px solid var(--line); border-radius: 14px; }
+    table { width: 100%; border-collapse: collapse; min-width: 760px; }
+    th, td { padding: 12px 13px; border-bottom: 1px solid #edf2f6; text-align: left; vertical-align: middle; }
+    th { background: #f8fafc; color: var(--muted); font-size: .75rem; letter-spacing: .06em; text-transform: uppercase; }
+    tr:last-child td { border-bottom: 0; }
+    tr.working-row { background: #fbfefd; }
 
+    .status-pill {
+      display: inline-flex;
+      align-items: center;
+      padding: 5px 9px;
+      border-radius: 999px;
+      font-size: .77rem;
+      font-weight: 900;
+      white-space: nowrap;
+    }
+
+    .status-working { background: #e3f6ef; color: var(--working); }
+    .status-off, .status-not-scheduled { background: #edf1f4; color: var(--off); }
+    .status-pto, .status-holiday { background: #fff3df; color: var(--warning); }
+
+    .empty-state {
+      padding: 34px 20px;
+      border: 1px dashed #bdcad5;
+      border-radius: 14px;
       color: var(--muted);
-
-      font-size: 0.75rem;
-      font-weight: 760;
-      letter-spacing: 0.04em;
-      text-transform: uppercase;
-    }
-
-    .result-item-value {
-      font-size: 0.94rem;
-      font-weight: 650;
-      line-height: 1.5;
-
-      overflow-wrap: anywhere;
-      white-space: pre-wrap;
-    }
-
-    .disclaimer {
-      margin-top: 22px;
-      padding: 17px 19px;
-
-      color: #576c72;
-      background:
-        rgba(255, 255, 255, 0.75);
-
-      border:
-        1px solid var(--border);
-
-      border-radius: 16px;
-
-      font-size: 0.84rem;
-      line-height: 1.6;
-    }
-
-    .footer {
-      padding-top: 18px;
-
-      color: #829397;
       text-align: center;
-
-      font-size: 0.77rem;
     }
 
-    @media (max-width: 760px) {
-      .page {
-        padding-right: 14px;
-        padding-left: 14px;
-      }
-
-      .hero {
-        padding: 27px 22px;
-      }
-
-      .form-card {
-        padding: 21px 17px;
-      }
-
-      .form-grid {
-        grid-template-columns: 1fr;
-      }
-
-      .full-width {
-        grid-column: auto;
-      }
-
-      .actions {
-        display: grid;
-        grid-template-columns: 1fr 1fr;
-      }
-
-      .button {
-        width: 100%;
-      }
-
-      .result-grid {
-        grid-template-columns: 1fr;
-      }
-
-      .result-item.full {
-        grid-column: auto;
-      }
+    .loading {
+      position: fixed;
+      inset: 0;
+      z-index: 100;
+      display: grid;
+      place-items: center;
+      background: rgba(244,247,250,.88);
+      backdrop-filter: blur(4px);
     }
 
-    @media (max-width: 430px) {
-      .actions {
-        grid-template-columns: 1fr;
-      }
+    .loading-card {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      padding: 18px 22px;
+      border: 1px solid var(--line);
+      border-radius: 15px;
+      background: #fff;
+      box-shadow: var(--shadow);
+      font-weight: 800;
+    }
 
-      .result-badge {
-        display: none;
-      }
+    .spinner {
+      width: 22px;
+      height: 22px;
+      border: 3px solid #d9e8f2;
+      border-top-color: var(--blue);
+      border-radius: 50%;
+      animation: spin .75s linear infinite;
+    }
+
+    .error-banner {
+      display: none;
+      margin: 18px 0;
+      padding: 14px 16px;
+      border: 1px solid #fecaca;
+      border-radius: 13px;
+      background: #fff1f2;
+      color: #9f1239;
+      font-weight: 700;
+    }
+
+    .footer-note { margin: 18px 4px 0; color: var(--muted); font-size: .8rem; text-align: right; }
+
+    @keyframes spin { to { transform: rotate(360deg); } }
+
+    @media (max-width: 860px) {
+      .controls { grid-template-columns: 1fr; }
+      .date-nav { justify-content: stretch; }
+      .selected-date { flex: 1; min-width: 0; }
+      .summary-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+      .groups { grid-template-columns: 1fr; }
+    }
+
+    @media (max-width: 540px) {
+      .topbar { padding-left: 18px; padding-right: 18px; }
+      .page { width: min(100% - 18px, 1280px); }
+      .controls, .section { padding: 16px; }
+      .summary-grid { gap: 9px; }
+      .summary-card { padding: 14px; }
+      .summary-value { font-size: 1.65rem; }
+      .person-header { align-items: flex-start; }
     }
   </style>
 </head>
-
 <body>
+  <header class="topbar">
+    <div class="topbar-inner">
+      <p class="eyebrow">Daily staffing view</p>
+      <h1>Pharmacist Schedule Dashboard</h1>
+      <p class="subtitle">Choose a date to see who is working, or type one letter of a first name to find a pharmacist’s complete schedule.</p>
+    </div>
+  </header>
+
   <main class="page">
-    <section class="hero">
-      <div class="hero-content">
-        <div class="hero-icon">
-          Rx
+    <div id="errorBanner" class="error-banner" role="alert"></div>
+
+    <section class="panel">
+      <div class="controls">
+        <div class="search-wrap">
+          <label class="field-label" for="personSearch">Find a person</label>
+          <svg class="search-icon" viewBox="0 0 24 24" aria-hidden="true">
+            <path fill="currentColor" d="m21 20.3-5.2-5.2a7.5 7.5 0 1 0-.7.7l5.2 5.2.7-.7ZM4.5 10.5a6 6 0 1 1 12 0 6 6 0 0 1-12 0Z"/>
+          </svg>
+          <input id="personSearch" class="search-input" type="search" autocomplete="off"
+                 placeholder="Start with one letter, for example A…"
+                 aria-autocomplete="list" aria-controls="suggestions" aria-expanded="false">
+          <button id="clearSearch" class="clear-search" type="button" aria-label="Clear person search">✕</button>
+          <div id="suggestions" class="suggestions" role="listbox"></div>
         </div>
 
-        <h1>
-          Renal Dose Adjustment
-        </h1>
-
-        <p>
-          Search for a medication and retrieve its renal or
-          dialysis dosing recommendation from the clinical
-          reference spreadsheet.
-        </p>
-      </div>
-    </section>
-
-    <section class="form-card">
-      <div class="section-header">
-        <h2>
-          Patient and medication information
-        </h2>
-
-        <p>
-          Type at least three letters to view medication
-          recommendations.
-        </p>
-      </div>
-
-      <form id="doseForm" novalidate>
-        <div class="form-grid">
-          <div class="full-width">
-            <label
-              class="field-label"
-              for="medicationInput"
-            >
-              Medication
-              <span class="required">*</span>
-            </label>
-
-            <div
-              id="autocompleteWrapper"
-              class="autocomplete-wrapper"
-            >
-              <input
-                id="medicationInput"
-                class="field-input"
-                type="text"
-                autocomplete="off"
-                spellcheck="false"
-                placeholder="Start typing a medication name"
-                aria-autocomplete="list"
-                aria-controls="suggestionDropdown"
-                aria-expanded="false"
-              >
-
-              <span class="input-icon">
-                Search
-              </span>
-
-              <div
-                id="suggestionDropdown"
-                class="autocomplete-dropdown"
-                role="listbox"
-              ></div>
-            </div>
-
-            <div
-              id="medicationHelper"
-              class="helper"
-            >
-              Loading medications...
-            </div>
-          </div>
-
-          <div>
-            <label
-              class="field-label"
-              for="crclInput"
-            >
-              Creatinine Clearance
-              <span class="required">*</span>
-            </label>
-
-            <div class="input-wrapper">
-              <input
-                id="crclInput"
-                class="field-input"
-                type="number"
-                min="0"
-                step="any"
-                inputmode="decimal"
-                placeholder="Example: 37.8"
-              >
-
-              <span class="input-icon">
-                mL/min
-              </span>
-            </div>
-
-            <div
-              id="crclHelper"
-              class="helper"
-            >
-              Decimal values are rounded to the nearest
-              whole number.
-            </div>
-          </div>
-
-          <div>
-            <label
-              class="field-label"
-              for="dialysisSelect"
-            >
-              Dialysis Method
-            </label>
-
-            <select
-              id="dialysisSelect"
-              class="field-select"
-            >
-              <option value="not_on_dialysis">
-                Not on Dialysis
-              </option>
-
-              <option value="peritoneal_dialysis">
-                Peritoneal Dialysis
-              </option>
-
-              <option value="hemodialysis">
-                Hemodialysis
-              </option>
-
-              <option value="capd">
-                CAPD
-              </option>
-
-              <option value="crrt">
-                CRRT
-              </option>
-            </select>
-
-            <div class="helper">
-              Selecting dialysis disables and ignores
-              creatinine clearance.
-            </div>
-          </div>
-        </div>
-
-        <div class="actions">
-          <button
-            id="findDoseButton"
-            class="button button-primary"
-            type="submit"
-          >
-            <span
-              id="findDoseButtonText"
-            >
-              Find Dose
-            </span>
-
-            <span class="spinner"></span>
-          </button>
-
-          <button
-            id="clearButton"
-            class="button button-secondary"
-            type="button"
-          >
-            Clear
-          </button>
-        </div>
-      </form>
-
-      <div
-        id="statusMessage"
-        class="status"
-        role="alert"
-      ></div>
-    </section>
-
-    <section
-      id="resultCard"
-      class="result-card"
-    >
-      <div class="result-header">
         <div>
-          <p class="result-eyebrow">
-            Dose recommendation
-          </p>
-
-          <h2
-            id="resultMedication"
-            class="result-title"
-          ></h2>
+          <span class="field-label">Selected date</span>
+          <div class="date-nav">
+            <button id="previousDate" class="nav-button" type="button" aria-label="Previous date">‹</button>
+            <button id="selectedDate" class="nav-button selected-date" type="button" title="Return to daily view">Loading…</button>
+            <button id="nextDate" class="nav-button" type="button" aria-label="Next date">›</button>
+          </div>
         </div>
-
-        <span class="result-badge">
-          Reference Result
-        </span>
       </div>
-
-      <div class="result-body">
-        <div class="dose-box">
-          <div class="dose-label">
-            Recommended Dose
-          </div>
-
-          <p
-            id="resultDose"
-            class="dose-value"
-          ></p>
-        </div>
-
-        <div class="result-grid">
-          <div class="result-item">
-            <div class="result-item-label">
-              Creatinine Clearance
-            </div>
-
-            <div
-              id="resultCrCl"
-              class="result-item-value"
-            ></div>
-          </div>
-
-          <div class="result-item">
-            <div class="result-item-label">
-              Dialysis Method
-            </div>
-
-            <div
-              id="resultDialysis"
-              class="result-item-value"
-            ></div>
-          </div>
-
-          <div class="result-item">
-            <div class="result-item-label">
-              Worksheet
-            </div>
-
-            <div
-              id="resultWorksheet"
-              class="result-item-value"
-            ></div>
-          </div>
-
-          <div class="result-item">
-            <div class="result-item-label">
-              Spreadsheet Column
-            </div>
-
-            <div
-              id="resultColumn"
-              class="result-item-value"
-            ></div>
-          </div>
-
-          <div class="result-item full">
-            <div class="result-item-label">
-              Medication Note
-            </div>
-
-            <div
-              id="resultNote"
-              class="result-item-value"
-            ></div>
-          </div>
-        </div>
+      <div class="date-strip-wrap">
+        <div id="dateStrip" class="date-strip" aria-label="Schedule dates"></div>
       </div>
     </section>
 
-    <aside class="disclaimer">
-      <strong>Clinical disclaimer:</strong>
-      This application is intended as a clinical reference
-      tool only and does not replace professional clinical
-      judgment, institutional protocols, or patient-specific
-      assessment.
-    </aside>
+    <section id="summaryGrid" class="summary-grid" aria-label="Daily staffing totals"></section>
 
-    <footer class="footer">
-      Renal Dose Adjustment Clinical Reference
-    </footer>
+    <section id="dailyPanel" class="panel section">
+      <div class="section-heading">
+        <div>
+          <h2 id="dailyTitle">Who is working</h2>
+          <p id="dailySubtitle" class="section-note"></p>
+        </div>
+        <span id="workingCount" class="count-badge">0 working</span>
+      </div>
+      <div id="dailyGroups" class="groups"></div>
+    </section>
+
+    <section id="personPanel" class="panel section person-panel" aria-live="polite">
+      <div class="person-header">
+        <div>
+          <h2 id="personName" class="person-name-large"></h2>
+          <p id="personMeta" class="person-meta"></p>
+        </div>
+        <button id="closePerson" class="close-person" type="button">Back to daily view</button>
+      </div>
+      <div class="table-wrap">
+        <table>
+          <thead>
+            <tr>
+              <th>Date</th>
+              <th>Day</th>
+              <th>Assignment</th>
+              <th>Meaning</th>
+              <th>Hours</th>
+              <th>Status</th>
+            </tr>
+          </thead>
+          <tbody id="personScheduleBody"></tbody>
+        </table>
+      </div>
+    </section>
+
+    <p id="footerNote" class="footer-note"></p>
   </main>
 
-  <script>
-    "use strict";
+  <div id="loading" class="loading" aria-live="polite">
+    <div class="loading-card"><span class="spinner" aria-hidden="true"></span>Loading the schedule…</div>
+  </div>
 
-    const state = {
-      medications: [],
-      suggestions: [],
-      activeIndex: -1,
-      loaded: false,
-      searching: false
-    };
+  <script>
+    'use strict';
+
+    let dashboardData = null;
+    let selectedDateKey = null;
+    let highlightedSuggestion = -1;
+    let currentSuggestions = [];
 
     const elements = {};
 
-    document.addEventListener(
-      "DOMContentLoaded",
-      initialize
-    );
-
-
-    function initialize() {
+    document.addEventListener('DOMContentLoaded', function () {
       cacheElements();
-      attachEvents();
-      updateDialysisState();
-      loadMedications();
-    }
-
-
-    function cacheElements() {
-      elements.form =
-        document.getElementById(
-          "doseForm"
-        );
-
-      elements.medicationInput =
-        document.getElementById(
-          "medicationInput"
-        );
-
-      elements.medicationHelper =
-        document.getElementById(
-          "medicationHelper"
-        );
-
-      elements.autocompleteWrapper =
-        document.getElementById(
-          "autocompleteWrapper"
-        );
-
-      elements.dropdown =
-        document.getElementById(
-          "suggestionDropdown"
-        );
-
-      elements.crclInput =
-        document.getElementById(
-          "crclInput"
-        );
-
-      elements.crclHelper =
-        document.getElementById(
-          "crclHelper"
-        );
-
-      elements.dialysis =
-        document.getElementById(
-          "dialysisSelect"
-        );
-
-      elements.findButton =
-        document.getElementById(
-          "findDoseButton"
-        );
-
-      elements.findButtonText =
-        document.getElementById(
-          "findDoseButtonText"
-        );
-
-      elements.clearButton =
-        document.getElementById(
-          "clearButton"
-        );
-
-      elements.status =
-        document.getElementById(
-          "statusMessage"
-        );
-
-      elements.resultCard =
-        document.getElementById(
-          "resultCard"
-        );
-
-      elements.resultMedication =
-        document.getElementById(
-          "resultMedication"
-        );
-
-      elements.resultDose =
-        document.getElementById(
-          "resultDose"
-        );
-
-      elements.resultCrCl =
-        document.getElementById(
-          "resultCrCl"
-        );
-
-      elements.resultDialysis =
-        document.getElementById(
-          "resultDialysis"
-        );
-
-      elements.resultWorksheet =
-        document.getElementById(
-          "resultWorksheet"
-        );
-
-      elements.resultColumn =
-        document.getElementById(
-          "resultColumn"
-        );
-
-      elements.resultNote =
-        document.getElementById(
-          "resultNote"
-        );
-    }
-
-
-    function attachEvents() {
-      elements.medicationInput
-        .addEventListener(
-          "input",
-          updateSuggestions
-        );
-
-      elements.medicationInput
-        .addEventListener(
-          "keydown",
-          handleKeyboard
-        );
-
-      elements.medicationInput
-        .addEventListener(
-          "focus",
-          function () {
-            if (
-              normalizeText(
-                elements.medicationInput.value
-              ).length >= 3
-            ) {
-              updateSuggestions();
-            }
-          }
-        );
-
-      elements.dialysis
-        .addEventListener(
-          "change",
-          updateDialysisState
-        );
-
-      elements.form
-        .addEventListener(
-          "submit",
-          function (event) {
-            event.preventDefault();
-            submitSearch();
-          }
-        );
-
-      elements.clearButton
-        .addEventListener(
-          "click",
-          clearForm
-        );
-
-      document.addEventListener(
-        "click",
-        function (event) {
-          if (
-            !elements
-              .autocompleteWrapper
-              .contains(event.target)
-          ) {
-            closeDropdown();
-          }
-        }
-      );
-    }
-
-
-    function loadMedications() {
-      setMedicationHelper(
-        "Loading medications...",
-        false
-      );
+      bindEvents();
 
       google.script.run
-        .withSuccessHandler(
-          handleMedicationLoadSuccess
-        )
-        .withFailureHandler(
-          handleMedicationLoadFailure
-        )
-        .getMedicationList();
+        .withSuccessHandler(initializeDashboard)
+        .withFailureHandler(showLoadError)
+        .getDashboardData();
+    });
+
+    function cacheElements() {
+      [
+        'errorBanner', 'personSearch', 'clearSearch', 'suggestions', 'previousDate',
+        'selectedDate', 'nextDate', 'dateStrip', 'summaryGrid', 'dailyPanel',
+        'dailyTitle', 'dailySubtitle', 'workingCount', 'dailyGroups', 'personPanel',
+        'personName', 'personMeta', 'personScheduleBody', 'closePerson', 'footerNote', 'loading'
+      ].forEach(function (id) {
+        elements[id] = document.getElementById(id);
+      });
     }
 
+    function bindEvents() {
+      elements.personSearch.addEventListener('input', handleSearchInput);
+      elements.personSearch.addEventListener('keydown', handleSearchKeyboard);
+      elements.personSearch.addEventListener('focus', handleSearchInput);
+      elements.clearSearch.addEventListener('click', clearPersonSearch);
+      elements.previousDate.addEventListener('click', function () { changeDate(-1); });
+      elements.nextDate.addEventListener('click', function () { changeDate(1); });
+      elements.selectedDate.addEventListener('click', showDailyView);
+      elements.closePerson.addEventListener('click', showDailyView);
 
-    function handleMedicationLoadSuccess(
-      response
-    ) {
-      if (
-        !response ||
-        response.success !== true
-      ) {
-        handleMedicationLoadFailure(
-          response &&
-          response.message
-            ? response.message
-            : "Unable to load medications."
-        );
+      document.addEventListener('click', function (event) {
+        if (!event.target.closest('.search-wrap')) {
+          closeSuggestions();
+        }
+      });
+    }
 
+    function initializeDashboard(data) {
+      dashboardData = data;
+
+      if (!data || !Array.isArray(data.dates) || !data.dates.length) {
+        showLoadError(new Error('The dashboard did not receive any schedule dates.'));
         return;
       }
 
-      const records =
-        Array.isArray(
-          response.medications
-        )
-          ? response.medications
-          : [];
+      selectedDateKey = chooseInitialDate(data.dates);
+      renderDateStrip();
+      renderDailyView();
+      elements.footerNote.textContent = 'Source: ' + data.scheduleSheet + ' • Updated ' + data.generatedAt;
+      elements.loading.style.display = 'none';
+    }
 
-      state.medications =
-        records
-          .map(function (record) {
-            return {
-              name:
-                cleanText(
-                  record &&
-                  record.name
-                ),
+    function chooseInitialDate(dates) {
+      const today = getLocalDateKey(new Date());
+      const exactToday = dates.find(function (date) { return date.key === today; });
+      if (exactToday) return exactToday.key;
 
-              worksheetName:
-                cleanText(
-                  record &&
-                  record.worksheetName
-                ),
+      const nextDate = dates.find(function (date) { return date.key > today; });
+      return nextDate ? nextDate.key : dates[dates.length - 1].key;
+    }
 
-              columnNumber:
-                record &&
-                record.columnNumber
-            };
-          })
-          .filter(function (record) {
-            return record.name !== "";
+    function renderDateStrip() {
+      elements.dateStrip.innerHTML = '';
+
+      dashboardData.dates.forEach(function (date) {
+        const button = document.createElement('button');
+        button.type = 'button';
+        button.className = 'date-chip' + (date.key === selectedDateKey ? ' selected' : '');
+        button.dataset.dateKey = date.key;
+        button.title = date.fullLabel;
+        button.innerHTML = '<span class="chip-weekday"></span><span class="chip-date"></span>';
+        button.querySelector('.chip-weekday').textContent = date.weekday;
+        button.querySelector('.chip-date').textContent = date.shortLabel;
+        button.addEventListener('click', function () {
+          selectDate(date.key);
+        });
+        elements.dateStrip.appendChild(button);
+      });
+    }
+
+    function selectDate(dateKey) {
+      selectedDateKey = dateKey;
+      renderDateStrip();
+      renderDailyView();
+
+      requestAnimationFrame(function () {
+        const selectedChip = elements.dateStrip.querySelector('.date-chip.selected');
+        if (selectedChip) {
+          selectedChip.scrollIntoView({ behavior: 'smooth', block: 'nearest', inline: 'center' });
+        }
+      });
+    }
+
+    function changeDate(direction) {
+      const currentIndex = dashboardData.dates.findIndex(function (date) {
+        return date.key === selectedDateKey;
+      });
+      const nextIndex = currentIndex + direction;
+
+      if (nextIndex >= 0 && nextIndex < dashboardData.dates.length) {
+        selectDate(dashboardData.dates[nextIndex].key);
+      }
+    }
+
+    function renderDailyView() {
+      showDailyView();
+
+      const dateIndex = dashboardData.dates.findIndex(function (date) {
+        return date.key === selectedDateKey;
+      });
+      const date = dashboardData.dates[dateIndex];
+
+      const working = dashboardData.people
+        .map(function (person) {
+          return { person: person, assignment: person.schedule[dateIndex] };
+        })
+        .filter(function (item) {
+          return item.assignment && item.assignment.working;
+        });
+
+      const totals = { day: 0, evening: 0, night: 0, other: 0 };
+      working.forEach(function (item) {
+        const key = Object.prototype.hasOwnProperty.call(totals, item.assignment.typeKey)
+          ? item.assignment.typeKey
+          : 'other';
+        totals[key] += 1;
+      });
+
+      elements.selectedDate.textContent = date.fullLabel;
+      elements.dailyTitle.textContent = 'Who is working — ' + date.weekday;
+      elements.dailySubtitle.textContent = date.fullLabel;
+      elements.workingCount.textContent = working.length + (working.length === 1 ? ' working' : ' working');
+
+      elements.previousDate.disabled = dateIndex === 0;
+      elements.nextDate.disabled = dateIndex === dashboardData.dates.length - 1;
+
+      renderSummaryCards(working.length, totals);
+      renderWorkingGroups(working);
+    }
+
+    function renderSummaryCards(total, totals) {
+      const cards = [
+        { label: 'Total working', value: total },
+        { label: 'Day', value: totals.day },
+        { label: 'Evening', value: totals.evening },
+        { label: 'Night', value: totals.night }
+      ];
+
+      elements.summaryGrid.innerHTML = '';
+      cards.forEach(function (card) {
+        const item = document.createElement('article');
+        item.className = 'summary-card';
+
+        const label = document.createElement('div');
+        label.className = 'summary-label';
+        label.textContent = card.label;
+
+        const value = document.createElement('div');
+        value.className = 'summary-value';
+        value.textContent = card.value;
+
+        item.appendChild(label);
+        item.appendChild(value);
+        elements.summaryGrid.appendChild(item);
+      });
+    }
+
+    function renderWorkingGroups(workingItems) {
+      elements.dailyGroups.innerHTML = '';
+
+      if (!workingItems.length) {
+        elements.dailyGroups.innerHTML = '<div class="empty-state">No working assignments were found for this date.</div>';
+        return;
+      }
+
+      const groupDefinitions = [
+        { key: 'day', title: 'Day shifts' },
+        { key: 'evening', title: 'Evening shifts' },
+        { key: 'night', title: 'Night shifts' },
+        { key: 'other', title: 'Other assignments' }
+      ];
+
+      groupDefinitions.forEach(function (groupDefinition) {
+        const groupItems = workingItems
+          .filter(function (item) { return item.assignment.typeKey === groupDefinition.key; })
+          .sort(function (a, b) { return a.person.displayName.localeCompare(b.person.displayName); });
+
+        if (!groupItems.length) return;
+
+        const group = document.createElement('section');
+        group.className = 'shift-group';
+
+        const header = document.createElement('div');
+        header.className = 'shift-header';
+        header.innerHTML = '<span></span><span></span>';
+        header.children[0].textContent = groupDefinition.title;
+        header.children[1].textContent = groupItems.length;
+
+        const list = document.createElement('div');
+        list.className = 'person-list';
+
+        groupItems.forEach(function (item) {
+          const card = document.createElement('div');
+          card.className = 'person-card';
+          card.tabIndex = 0;
+          card.setAttribute('role', 'button');
+          card.setAttribute('aria-label', 'Open schedule for ' + item.person.displayName);
+
+          const text = document.createElement('div');
+          const name = document.createElement('div');
+          name.className = 'person-name';
+          name.textContent = item.person.displayName;
+
+          const detail = document.createElement('div');
+          detail.className = 'person-detail';
+          detail.textContent = [item.assignment.meaning, item.assignment.hours].filter(Boolean).join(' • ') || 'Assignment details not listed';
+
+          const code = document.createElement('span');
+          code.className = 'assignment-code';
+          code.textContent = item.assignment.code || 'Working';
+
+          text.appendChild(name);
+          text.appendChild(detail);
+          card.appendChild(text);
+          card.appendChild(code);
+
+          card.addEventListener('click', function () { openPersonSchedule(item.person); });
+          card.addEventListener('keydown', function (event) {
+            if (event.key === 'Enter' || event.key === ' ') {
+              event.preventDefault();
+              openPersonSchedule(item.person);
+            }
           });
 
-      state.loaded = true;
+          list.appendChild(card);
+        });
 
-      if (
-        state.medications.length === 0
-      ) {
-        setMedicationHelper(
-          "No medication columns were found.",
-          true
-        );
-
-        showStatus(
-          "No medications were found. Make sure column A contains a Drug Name row and medication names begin in column B.",
-          "warning"
-        );
-
-        return;
-      }
-
-      setMedicationHelper(
-        state.medications.length +
-        " medications loaded. Type at least three letters.",
-        false
-      );
+        group.appendChild(header);
+        group.appendChild(list);
+        elements.dailyGroups.appendChild(group);
+      });
     }
 
+    function handleSearchInput() {
+      if (!dashboardData) return;
 
-    function handleMedicationLoadFailure(
-      error
-    ) {
-      state.loaded = false;
-      state.medications = [];
+      const query = normalizeText(elements.personSearch.value);
+      elements.clearSearch.style.display = query ? 'block' : 'none';
+      highlightedSuggestion = -1;
 
-      const message =
-        extractError(
-          error,
-          "Unable to load medications."
-        );
-
-      setMedicationHelper(
-        message,
-        true
-      );
-
-      showStatus(
-        message,
-        "error"
-      );
-    }
-
-
-    function updateSuggestions() {
-      hideStatus();
-      hideResult();
-
-      const query =
-        normalizeText(
-          elements.medicationInput.value
-        );
-
-      state.activeIndex = -1;
-
-      if (query.length < 3) {
-        state.suggestions = [];
-        closeDropdown();
-
-        if (state.loaded) {
-          setMedicationHelper(
-            "Type at least three letters.",
-            false
-          );
-        }
-
+      if (!query) {
+        currentSuggestions = [];
+        closeSuggestions();
         return;
       }
 
-      if (!state.loaded) {
-        setMedicationHelper(
-          "Medications are still loading.",
-          true
-        );
-
-        return;
-      }
-
-      const starts = [];
-      const contains = [];
-
-      state.medications.forEach(
-        function (medication) {
-          const name =
-            normalizeText(
-              medication.name
-            );
-
-          if (
-            name.startsWith(query)
-          ) {
-            starts.push(medication);
-          } else if (
-            name.includes(query)
-          ) {
-            contains.push(medication);
-          }
-        }
-      );
-
-      starts.sort(compareNames);
-      contains.sort(compareNames);
-
-      state.suggestions =
-        starts
-          .concat(contains)
-          .slice(0, 10);
+      currentSuggestions = dashboardData.people
+        .map(function (person) {
+          return { person: person, score: getSearchScore(person, query) };
+        })
+        .filter(function (item) { return item.score < 99; })
+        .sort(function (a, b) {
+          return a.score - b.score || a.person.displayName.localeCompare(b.person.displayName);
+        })
+        .slice(0, 10)
+        .map(function (item) { return item.person; });
 
       renderSuggestions();
     }
 
+    function getSearchScore(person, query) {
+      const firstName = normalizeText(person.firstName);
+      const lastName = normalizeText(person.lastName);
+      const displayName = normalizeText(person.displayName);
+      const originalName = normalizeText(person.originalName);
 
-    function compareNames(
-      first,
-      second
-    ) {
-      return first.name.localeCompare(
-        second.name,
-        undefined,
-        {
-          sensitivity: "base"
-        }
-      );
+      if (firstName.startsWith(query)) return 0;
+      if (displayName.startsWith(query)) return 1;
+      if (lastName.startsWith(query)) return 2;
+      if (firstName.includes(query)) return 3;
+      if (displayName.includes(query) || originalName.includes(query) || person.searchText.includes(query)) return 4;
+      return 99;
     }
-
 
     function renderSuggestions() {
-      elements.dropdown.innerHTML = "";
+      elements.suggestions.innerHTML = '';
 
-      if (
-        state.suggestions.length === 0
-      ) {
-        const empty =
-          document.createElement(
-            "div"
-          );
-
-        empty.className =
-          "empty-suggestion";
-
-        empty.textContent =
-          "No matching medications";
-
-        elements.dropdown
-          .appendChild(empty);
-
-        openDropdown();
-
-        setMedicationHelper(
-          "No matching medications found.",
-          true
-        );
-
-        return;
-      }
-
-      state.suggestions.forEach(
-        function (medication, index) {
-          const button =
-            document.createElement(
-              "button"
-            );
-
-          button.type = "button";
-          button.className =
-            "suggestion";
-
-          const icon =
-            document.createElement(
-              "span"
-            );
-
-          icon.className =
-            "suggestion-icon";
-
-          icon.textContent = "Rx";
-
-          const name =
-            document.createElement(
-              "span"
-            );
-
-          name.className =
-            "suggestion-name";
-
-          name.textContent =
-            medication.name;
-
-          button.appendChild(icon);
-          button.appendChild(name);
-
-          button.addEventListener(
-            "mousedown",
-            function (event) {
-              event.preventDefault();
-            }
-          );
-
-          button.addEventListener(
-            "click",
-            function () {
-              selectSuggestion(index);
-            }
-          );
-
-          button.addEventListener(
-            "mouseenter",
-            function () {
-              setActiveSuggestion(index);
-            }
-          );
-
-          elements.dropdown
-            .appendChild(button);
-        }
-      );
-
-      openDropdown();
-
-      setMedicationHelper(
-        state.suggestions.length +
-        " matching medication" +
-        (
-          state.suggestions.length === 1
-            ? ""
-            : "s"
-        ) +
-        " found.",
-        false
-      );
-    }
-
-
-    function handleKeyboard(event) {
-      if (
-        event.key === "ArrowDown"
-      ) {
-        if (
-          state.suggestions.length === 0
-        ) {
-          return;
-        }
-
-        event.preventDefault();
-
-        state.activeIndex =
-          (
-            state.activeIndex + 1
-          ) %
-          state.suggestions.length;
-
-        setActiveSuggestion(
-          state.activeIndex
-        );
-
-        return;
-      }
-
-      if (
-        event.key === "ArrowUp"
-      ) {
-        if (
-          state.suggestions.length === 0
-        ) {
-          return;
-        }
-
-        event.preventDefault();
-
-        state.activeIndex =
-          state.activeIndex <= 0
-            ? state.suggestions.length - 1
-            : state.activeIndex - 1;
-
-        setActiveSuggestion(
-          state.activeIndex
-        );
-
-        return;
-      }
-
-      if (
-        event.key === "Enter" &&
-        elements.dropdown
-          .classList
-          .contains("open") &&
-        state.activeIndex >= 0
-      ) {
-        event.preventDefault();
-
-        selectSuggestion(
-          state.activeIndex
-        );
-
-        return;
-      }
-
-      if (
-        event.key === "Escape"
-      ) {
-        closeDropdown();
-      }
-    }
-
-
-    function setActiveSuggestion(
-      index
-    ) {
-      const buttons =
-        elements.dropdown
-          .querySelectorAll(
-            ".suggestion"
-          );
-
-      buttons.forEach(
-        function (button, buttonIndex) {
-          button.classList.toggle(
-            "active",
-            buttonIndex === index
-          );
-        }
-      );
-
-      state.activeIndex = index;
-
-      if (buttons[index]) {
-        buttons[index]
-          .scrollIntoView({
-            block: "nearest"
-          });
-      }
-    }
-
-
-    function selectSuggestion(index) {
-      const medication =
-        state.suggestions[index];
-
-      if (!medication) {
-        return;
-      }
-
-      elements.medicationInput.value =
-        medication.name;
-
-      closeDropdown();
-
-      setMedicationHelper(
-        "Medication selected. Click Find Dose.",
-        false
-      );
-    }
-
-
-    function openDropdown() {
-      elements.dropdown
-        .classList
-        .add("open");
-
-      elements.medicationInput
-        .setAttribute(
-          "aria-expanded",
-          "true"
-        );
-    }
-
-
-    function closeDropdown() {
-      elements.dropdown
-        .classList
-        .remove("open");
-
-      elements.medicationInput
-        .setAttribute(
-          "aria-expanded",
-          "false"
-        );
-
-      state.activeIndex = -1;
-    }
-
-
-    function updateDialysisState() {
-      const onDialysis =
-        elements.dialysis.value !==
-        "not_on_dialysis";
-
-      elements.crclInput.disabled =
-        onDialysis;
-
-      if (onDialysis) {
-        elements.crclInput.value = "";
-
-        elements.crclInput.placeholder =
-          "Not required";
-
-        elements.crclHelper.textContent =
-          "Creatinine clearance is ignored for dialysis.";
+      if (!currentSuggestions.length) {
+        const empty = document.createElement('div');
+        empty.className = 'empty-state';
+        empty.style.padding = '16px';
+        empty.textContent = 'No matching person was found.';
+        elements.suggestions.appendChild(empty);
       } else {
-        elements.crclInput.placeholder =
-          "Example: 37.8";
+        currentSuggestions.forEach(function (person, index) {
+          const button = document.createElement('button');
+          button.type = 'button';
+          button.className = 'suggestion';
+          button.setAttribute('role', 'option');
+          button.dataset.index = String(index);
 
-        elements.crclHelper.textContent =
-          "Decimal values are rounded to the nearest whole number.";
-      }
+          const displayName = document.createElement('span');
+          displayName.className = 'suggestion-name';
+          displayName.textContent = person.displayName;
 
-      hideStatus();
-      hideResult();
-    }
+          const original = document.createElement('span');
+          original.className = 'suggestion-original';
+          original.textContent = person.originalName;
 
-
-    function submitSearch() {
-      if (state.searching) {
-        return;
-      }
-
-      closeDropdown();
-      hideStatus();
-      hideResult();
-
-      const medicationName =
-        cleanText(
-          elements.medicationInput.value
-        );
-
-      const dialysisMethod =
-        elements.dialysis.value;
-
-      const onDialysis =
-        dialysisMethod !==
-        "not_on_dialysis";
-
-      let crCl = null;
-
-      if (!medicationName) {
-        showStatus(
-          "Enter a medication name.",
-          "error"
-        );
-
-        elements.medicationInput.focus();
-        return;
-      }
-
-      if (!onDialysis) {
-        const rawCrCl =
-          cleanText(
-            elements.crclInput.value
-          );
-
-        if (!rawCrCl) {
-          showStatus(
-            "Enter the patient's creatinine clearance.",
-            "error"
-          );
-
-          elements.crclInput.focus();
-          return;
-        }
-
-        crCl = Number(rawCrCl);
-
-        if (
-          !Number.isFinite(crCl) ||
-          crCl < 0
-        ) {
-          showStatus(
-            "Creatinine clearance must be a valid number of 0 or greater.",
-            "error"
-          );
-
-          elements.crclInput.focus();
-          return;
-        }
-      }
-
-      setSearching(true);
-
-      google.script.run
-        .withSuccessHandler(
-          handleDoseSuccess
-        )
-        .withFailureHandler(
-          handleDoseFailure
-        )
-        .findDose(
-          medicationName,
-          crCl,
-          dialysisMethod
-        );
-    }
-
-
-    function handleDoseSuccess(
-      response
-    ) {
-      setSearching(false);
-
-      if (
-        !response ||
-        response.success !== true
-      ) {
-        showStatus(
-          response &&
-          response.message
-            ? response.message
-            : "Unable to retrieve the recommendation.",
-          "error"
-        );
-
-        return;
-      }
-
-      if (
-        response.found !== true ||
-        !response.result
-      ) {
-        showStatus(
-          response.message ||
-          "Medication not found.",
-          "warning"
-        );
-
-        return;
-      }
-
-      displayResult(
-        response.result
-      );
-
-      showStatus(
-        "Dose recommendation retrieved.",
-        "success"
-      );
-    }
-
-
-    function handleDoseFailure(error) {
-      setSearching(false);
-
-      showStatus(
-        extractError(
-          error,
-          "Unable to retrieve the recommendation."
-        ),
-        "error"
-      );
-    }
-
-
-    function displayResult(result) {
-      elements.resultMedication.textContent =
-        cleanText(
-          result.medication
-        );
-
-      elements.resultDose.textContent =
-        cleanText(
-          result.recommendedDose
-        ) ||
-        "No recommendation available.";
-
-      elements.resultDialysis.textContent =
-        cleanText(
-          result.dialysisMethod
-        );
-
-      elements.resultWorksheet.textContent =
-        cleanText(
-          result.worksheetName
-        );
-
-      elements.resultColumn.textContent =
-        cleanText(
-          result.spreadsheetColumn
-        );
-
-      elements.resultNote.textContent =
-        cleanText(
-          result.medicationNote
-        ) ||
-        "No medication note available.";
-
-      if (
-        normalizeText(
-          result.dialysisMethod
-        ) !== "not on dialysis"
-      ) {
-        elements.resultCrCl.textContent =
-          "Not applicable";
-      } else {
-        elements.resultCrCl.textContent =
-          formatCrCl(result);
-      }
-
-      elements.resultCard
-        .classList
-        .add("show");
-
-      elements.resultCard
-        .scrollIntoView({
-          behavior: "smooth",
-          block: "nearest"
+          button.appendChild(displayName);
+          button.appendChild(original);
+          button.addEventListener('click', function () { chooseSuggestion(index); });
+          elements.suggestions.appendChild(button);
         });
-    }
-
-
-    function formatCrCl(result) {
-      const entered =
-        Number(
-          result
-            .creatinineClearanceEntered
-        );
-
-      const used =
-        Number(
-          result
-            .creatinineClearanceUsed
-        );
-
-      if (
-        Number.isFinite(entered) &&
-        Number.isFinite(used)
-      ) {
-        if (entered !== used) {
-          return (
-            entered +
-            " mL/min entered; " +
-            used +
-            " mL/min used"
-          );
-        }
-
-        return used + " mL/min";
       }
 
-      return "Not available";
+      elements.suggestions.style.display = 'block';
+      elements.personSearch.setAttribute('aria-expanded', 'true');
     }
 
-
-    function setSearching(searching) {
-      state.searching = searching;
-
-      elements.findButton.disabled =
-        searching;
-
-      elements.clearButton.disabled =
-        searching;
-
-      elements.medicationInput.disabled =
-        searching;
-
-      elements.dialysis.disabled =
-        searching;
-
-      elements.crclInput.disabled =
-        searching ||
-        elements.dialysis.value !==
-          "not_on_dialysis";
-
-      elements.findButton
-        .classList
-        .toggle(
-          "loading",
-          searching
-        );
-
-      elements.findButtonText.textContent =
-        searching
-          ? "Finding Dose..."
-          : "Find Dose";
-    }
-
-
-    function clearForm() {
-      if (state.searching) {
+    function handleSearchKeyboard(event) {
+      if (elements.suggestions.style.display !== 'block' || !currentSuggestions.length) {
+        if (event.key === 'Enter' && currentSuggestions.length === 1) {
+          event.preventDefault();
+          chooseSuggestion(0);
+        }
         return;
       }
 
-      elements.form.reset();
-
-      state.suggestions = [];
-      state.activeIndex = -1;
-
-      closeDropdown();
-      hideStatus();
-      hideResult();
-      updateDialysisState();
-
-      setMedicationHelper(
-        state.loaded
-          ? state.medications.length +
-            " medications loaded. Type at least three letters."
-          : "Loading medications...",
-        false
-      );
-
-      elements.medicationInput.focus();
-    }
-
-
-    function showStatus(
-      message,
-      type
-    ) {
-      elements.status.textContent =
-        message;
-
-      elements.status.className =
-        "status show " + type;
-    }
-
-
-    function hideStatus() {
-      elements.status.textContent = "";
-      elements.status.className =
-        "status";
-    }
-
-
-    function hideResult() {
-      elements.resultCard
-        .classList
-        .remove("show");
-    }
-
-
-    function setMedicationHelper(
-      message,
-      error
-    ) {
-      elements.medicationHelper.textContent =
-        message;
-
-      elements.medicationHelper
-        .classList
-        .toggle(
-          "error",
-          Boolean(error)
-        );
-    }
-
-
-    function cleanText(value) {
-      if (
-        value === null ||
-        value === undefined
-      ) {
-        return "";
+      if (event.key === 'ArrowDown') {
+        event.preventDefault();
+        highlightedSuggestion = Math.min(highlightedSuggestion + 1, currentSuggestions.length - 1);
+        updateSuggestionHighlight();
+      } else if (event.key === 'ArrowUp') {
+        event.preventDefault();
+        highlightedSuggestion = Math.max(highlightedSuggestion - 1, 0);
+        updateSuggestionHighlight();
+      } else if (event.key === 'Enter') {
+        event.preventDefault();
+        chooseSuggestion(highlightedSuggestion >= 0 ? highlightedSuggestion : 0);
+      } else if (event.key === 'Escape') {
+        closeSuggestions();
       }
+    }
 
-      return String(value)
-        .replace(/\s+/g, " ")
+    function updateSuggestionHighlight() {
+      const buttons = elements.suggestions.querySelectorAll('.suggestion');
+      buttons.forEach(function (button, index) {
+        button.classList.toggle('active', index === highlightedSuggestion);
+      });
+      if (buttons[highlightedSuggestion]) {
+        buttons[highlightedSuggestion].scrollIntoView({ block: 'nearest' });
+      }
+    }
+
+    function chooseSuggestion(index) {
+      const person = currentSuggestions[index];
+      if (!person) return;
+
+      elements.personSearch.value = person.displayName;
+      elements.clearSearch.style.display = 'block';
+      closeSuggestions();
+      openPersonSchedule(person);
+    }
+
+    function openPersonSchedule(person) {
+      const workingDays = person.schedule.filter(function (assignment) { return assignment.working; }).length;
+      elements.personName.textContent = person.displayName;
+      elements.personMeta.textContent = person.originalName + ' • ' + workingDays + ' working day' + (workingDays === 1 ? '' : 's');
+      elements.personScheduleBody.innerHTML = '';
+
+      person.schedule.forEach(function (assignment, index) {
+        const date = dashboardData.dates[index];
+        const row = document.createElement('tr');
+        if (assignment.working) row.className = 'working-row';
+
+        appendCell(row, date.shortLabel);
+        appendCell(row, date.weekday);
+        appendCell(row, assignment.code || '—');
+        appendCell(row, assignment.meaning || '—');
+        appendCell(row, assignment.hours || '—');
+
+        const statusCell = document.createElement('td');
+        const pill = document.createElement('span');
+        pill.className = 'status-pill status-' + assignment.status;
+        pill.textContent = assignment.statusLabel;
+        statusCell.appendChild(pill);
+        row.appendChild(statusCell);
+
+        elements.personScheduleBody.appendChild(row);
+      });
+
+      elements.dailyPanel.style.display = 'none';
+      elements.summaryGrid.style.display = 'none';
+      elements.personPanel.style.display = 'block';
+      elements.personPanel.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    }
+
+    function appendCell(row, text) {
+      const cell = document.createElement('td');
+      cell.textContent = text;
+      row.appendChild(cell);
+    }
+
+    function showDailyView() {
+      elements.dailyPanel.style.display = 'block';
+      elements.summaryGrid.style.display = 'grid';
+      elements.personPanel.style.display = 'none';
+    }
+
+    function clearPersonSearch() {
+      elements.personSearch.value = '';
+      elements.clearSearch.style.display = 'none';
+      closeSuggestions();
+      showDailyView();
+      elements.personSearch.focus();
+    }
+
+    function closeSuggestions() {
+      elements.suggestions.style.display = 'none';
+      elements.personSearch.setAttribute('aria-expanded', 'false');
+      highlightedSuggestion = -1;
+    }
+
+    function normalizeText(value) {
+      return String(value || '')
+        .toLowerCase()
+        .normalize('NFD')
+        .replace(/[\u0300-\u036f]/g, '')
+        .replace(/[^a-z0-9]+/g, ' ')
         .trim();
     }
 
-
-    function normalizeText(value) {
-      return cleanText(value)
-        .toLocaleLowerCase();
+    function getLocalDateKey(date) {
+      const year = date.getFullYear();
+      const month = String(date.getMonth() + 1).padStart(2, '0');
+      const day = String(date.getDate()).padStart(2, '0');
+      return year + '-' + month + '-' + day;
     }
 
-
-    function extractError(
-      error,
-      fallback
-    ) {
-      if (
-        typeof error === "string" &&
-        error.trim()
-      ) {
-        return error.trim();
-      }
-
-      if (
-        error &&
-        error.message
-      ) {
-        return String(
-          error.message
-        );
-      }
-
-      return fallback;
+    function showLoadError(error) {
+      elements.loading.style.display = 'none';
+      elements.errorBanner.style.display = 'block';
+      elements.errorBanner.textContent = error && error.message
+        ? error.message
+        : 'The schedule could not be loaded. Check the Apps Script execution log.';
     }
   </script>
 </body>
 </html>
-
-
-    
