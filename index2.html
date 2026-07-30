@@ -1,373 +1,4 @@
-/**
- * Pharmacist Schedule Dashboard
- * Bind this Apps Script project to the Google Sheet that contains:
- *   1) Printable Schedule
- *   2) Schedule Codes
- */
-
-const DASHBOARD_CONFIG = Object.freeze({
-  SCHEDULE_SHEET: 'Printable Schedule',
-  FALLBACK_SCHEDULE_SHEET: 'Schedule',
-  CODE_SHEET: 'Schedule Codes',
-  HEADER_SCAN_ROWS: 12,
-  NAME_COLUMN_INDEX: 0 // Column A, zero-based
-});
-
-function doGet() {
-  return HtmlService.createHtmlOutputFromFile('Index')
-    .setTitle('Pharmacist Schedule Dashboard')
-    .addMetaTag('viewport', 'width=device-width, initial-scale=1');
-}
-
-/**
- * Loads the full dashboard in one request so date changes and name searches
- * are instant in the browser.
- */
-function getDashboardData() {
-  const spreadsheet = SpreadsheetApp.getActiveSpreadsheet();
-  const scheduleSheet = spreadsheet.getSheetByName(DASHBOARD_CONFIG.SCHEDULE_SHEET)
-    || spreadsheet.getSheetByName(DASHBOARD_CONFIG.FALLBACK_SCHEDULE_SHEET);
-
-  if (!scheduleSheet) {
-    throw new Error(
-      'Schedule sheet not found. Expected "' + DASHBOARD_CONFIG.SCHEDULE_SHEET
-      + '" or "' + DASHBOARD_CONFIG.FALLBACK_SCHEDULE_SHEET + '".'
-    );
-  }
-
-  const timeZone = spreadsheet.getSpreadsheetTimeZone()
-    || Session.getScriptTimeZone()
-    || 'America/New_York';
-
-  const range = scheduleSheet.getDataRange();
-  const rawValues = range.getValues();
-  const displayValues = range.getDisplayValues();
-
-  if (!rawValues.length || !rawValues[0].length) {
-    throw new Error('The schedule sheet is empty.');
-  }
-
-  const dateHeaderRow = findDateHeaderRow_(rawValues);
-  const weekdayRow = dateHeaderRow + 1;
-  const dateColumns = getDateColumns_(rawValues[dateHeaderRow], timeZone);
-
-  if (!dateColumns.length) {
-    throw new Error('No date columns were found in the schedule sheet.');
-  }
-
-  const shiftCodeMap = loadShiftCodes_(spreadsheet);
-  const people = [];
-
-  for (let rowIndex = weekdayRow + 1; rowIndex < displayValues.length; rowIndex += 1) {
-    const originalName = cleanText_(displayValues[rowIndex][DASHBOARD_CONFIG.NAME_COLUMN_INDEX]);
-
-    // This removes blank separator rows and numeric/formula-only rows such as "0".
-    if (!originalName || !/[A-Za-z]/.test(originalName) || /^schedule period$/i.test(originalName)) {
-      continue;
-    }
-
-    const parsedName = parseName_(originalName);
-    const schedule = dateColumns.map(function (dateInfo) {
-      const code = cleanText_(displayValues[rowIndex][dateInfo.columnIndex]);
-      const status = getAssignmentStatus_(code);
-      const metadata = getAssignmentMetadata_(code, shiftCodeMap);
-
-      return {
-        dateKey: dateInfo.key,
-        code: code,
-        working: status.key === 'working',
-        status: status.key,
-        statusLabel: status.label,
-        meaning: metadata.meaning,
-        hours: metadata.hours,
-        type: metadata.type,
-        typeKey: metadata.typeKey
-      };
-    });
-
-    people.push({
-      id: 'person-row-' + (rowIndex + 1),
-      originalName: originalName,
-      displayName: parsedName.displayName,
-      firstName: parsedName.firstName,
-      lastName: parsedName.lastName,
-      searchText: normalizeSearchText_(
-        [originalName, parsedName.displayName, parsedName.firstName, parsedName.lastName].join(' ')
-      ),
-      schedule: schedule
-    });
-  }
-
-  const dates = dateColumns.map(function (dateInfo) {
-    const weekdayFromSheet = weekdayRow < displayValues.length
-      ? cleanText_(displayValues[weekdayRow][dateInfo.columnIndex])
-      : '';
-
-    return {
-      key: dateInfo.key,
-      shortLabel: Utilities.formatDate(dateInfo.date, timeZone, 'M/d'),
-      weekday: weekdayFromSheet || Utilities.formatDate(dateInfo.date, timeZone, 'EEE').toUpperCase(),
-      fullLabel: Utilities.formatDate(dateInfo.date, timeZone, 'EEEE, MMMM d, yyyy')
-    };
-  });
-
-  return {
-    title: 'Pharmacist Schedule Dashboard',
-    scheduleSheet: scheduleSheet.getName(),
-    timeZone: timeZone,
-    generatedAt: Utilities.formatDate(new Date(), timeZone, "MMM d, yyyy 'at' h:mm a"),
-    dates: dates,
-    people: people
-  };
-}
-
-/** Finds the row containing the largest number of real date values. */
-function findDateHeaderRow_(values) {
-  const rowsToScan = Math.min(DASHBOARD_CONFIG.HEADER_SCAN_ROWS, values.length);
-  let bestRow = -1;
-  let bestDateCount = 0;
-
-  for (let rowIndex = 0; rowIndex < rowsToScan; rowIndex += 1) {
-    let dateCount = 0;
-
-    // Start at column B because column A contains the schedule period/name column.
-    for (let columnIndex = 1; columnIndex < values[rowIndex].length; columnIndex += 1) {
-      if (isValidDate_(values[rowIndex][columnIndex])) {
-        dateCount += 1;
-      }
-    }
-
-    if (dateCount > bestDateCount) {
-      bestDateCount = dateCount;
-      bestRow = rowIndex;
-    }
-  }
-
-  if (bestRow === -1 || bestDateCount < 2) {
-    throw new Error(
-      'The date header row could not be identified. Keep the schedule dates as real Google Sheets dates.'
-    );
-  }
-
-  return bestRow;
-}
-
-function getDateColumns_(dateRowValues, timeZone) {
-  const columns = [];
-
-  for (let columnIndex = 1; columnIndex < dateRowValues.length; columnIndex += 1) {
-    const value = dateRowValues[columnIndex];
-    if (!isValidDate_(value)) {
-      continue;
-    }
-
-    columns.push({
-      columnIndex: columnIndex,
-      date: value,
-      key: Utilities.formatDate(value, timeZone, 'yyyy-MM-dd')
-    });
-  }
-
-  return columns;
-}
-
-function loadShiftCodes_(spreadsheet) {
-  const codeSheet = spreadsheet.getSheetByName(DASHBOARD_CONFIG.CODE_SHEET);
-  const codeMap = {};
-
-  if (!codeSheet) {
-    return codeMap;
-  }
-
-  const values = codeSheet.getDataRange().getDisplayValues();
-  if (values.length < 2) {
-    return codeMap;
-  }
-
-  // In the attached workbook, row 2 is: Schedule Code | Meaning | Hours | Type.
-  for (let rowIndex = 2; rowIndex < values.length; rowIndex += 1) {
-    const code = cleanText_(values[rowIndex][0]).toUpperCase();
-    if (!code) {
-      continue;
-    }
-
-    const type = cleanText_(values[rowIndex][3]) || 'Other';
-    codeMap[code] = {
-      meaning: cleanText_(values[rowIndex][1]),
-      hours: cleanText_(values[rowIndex][2]),
-      type: type,
-      typeKey: normalizeTypeKey_(type)
-    };
-  }
-
-  return codeMap;
-}
-
-function getAssignmentMetadata_(assignmentCode, codeMap) {
-  if (!assignmentCode) {
-    return emptyMetadata_();
-  }
-
-  const candidates = getCodeCandidates_(assignmentCode);
-  const matches = [];
-
-  candidates.forEach(function (candidate) {
-    if (codeMap[candidate]) {
-      matches.push(codeMap[candidate]);
-    }
-  });
-
-  if (!matches.length) {
-    return {
-      meaning: '',
-      hours: '',
-      type: 'Other',
-      typeKey: 'other'
-    };
-  }
-
-  const uniqueMeanings = uniqueNonBlank_(matches.map(function (item) { return item.meaning; }));
-  const uniqueHours = uniqueNonBlank_(matches.map(function (item) { return item.hours; }));
-  const uniqueTypes = uniqueNonBlank_(matches.map(function (item) { return item.type; }));
-  const uniqueTypeKeys = uniqueNonBlank_(matches.map(function (item) { return item.typeKey; }));
-
-  return {
-    meaning: uniqueMeanings.join(' / '),
-    hours: uniqueHours.join(' / '),
-    type: uniqueTypes.length === 1 ? uniqueTypes[0] : uniqueTypes.join(' / '),
-    typeKey: uniqueTypeKeys.length === 1 ? uniqueTypeKeys[0] : 'other'
-  };
-}
-
-/**
- * Examples handled here:
- *   tE2      -> E2
- *   tONC     -> ONC
- *   CARD/E2  -> CARD and E2
- *   C7/early -> C7
- *   E1/Late  -> E1
- */
-function getCodeCandidates_(assignmentCode) {
-  const ignoredWords = ['EARLY', 'LATE'];
-  const candidates = [];
-
-  cleanText_(assignmentCode)
-    .split('/')
-    .map(function (part) { return cleanText_(part); })
-    .filter(Boolean)
-    .forEach(function (part) {
-      let normalized = part;
-
-      // Resident/trainee assignments in this workbook use a lowercase "t" prefix.
-      if (/^t[A-Za-z0-9]/.test(normalized)) {
-        normalized = normalized.substring(1);
-      }
-
-      normalized = normalized.toUpperCase();
-      if (ignoredWords.indexOf(normalized) === -1 && candidates.indexOf(normalized) === -1) {
-        candidates.push(normalized);
-      }
-    });
-
-  return candidates;
-}
-
-function getAssignmentStatus_(assignmentCode) {
-  const code = cleanText_(assignmentCode);
-  const normalized = code.toUpperCase();
-
-  if (!code) {
-    return { key: 'not-scheduled', label: 'Not scheduled' };
-  }
-
-  if (normalized === 'X' || normalized === 'OFF') {
-    return { key: 'off', label: 'Off' };
-  }
-
-  if (normalized === 'P' || normalized === 'PTO' || normalized === 'VAC' || normalized === 'VACATION') {
-    return { key: 'pto', label: 'PTO' };
-  }
-
-  if (normalized === 'H') {
-    return { key: 'holiday', label: 'Holiday' };
-  }
-
-  if (normalized === '*' || normalized === '0') {
-    return { key: 'not-scheduled', label: 'Not scheduled' };
-  }
-
-  return { key: 'working', label: 'Working' };
-}
-
-function parseName_(originalName) {
-  const commaPosition = originalName.indexOf(',');
-
-  if (commaPosition === -1) {
-    const parts = originalName.split(/\s+/).filter(Boolean);
-    return {
-      firstName: parts.length ? parts[0] : originalName,
-      lastName: parts.length > 1 ? parts.slice(1).join(' ') : '',
-      displayName: originalName
-    };
-  }
-
-  const lastName = cleanText_(originalName.substring(0, commaPosition));
-  const firstName = cleanText_(originalName.substring(commaPosition + 1));
-
-  return {
-    firstName: firstName,
-    lastName: lastName,
-    displayName: [firstName, lastName].filter(Boolean).join(' ')
-  };
-}
-
-function normalizeTypeKey_(type) {
-  const normalized = cleanText_(type).toLowerCase();
-  if (normalized.indexOf('day') !== -1) return 'day';
-  if (normalized.indexOf('evening') !== -1) return 'evening';
-  if (normalized.indexOf('night') !== -1) return 'night';
-  return 'other';
-}
-
-function normalizeSearchText_(value) {
-  return cleanText_(value)
-    .toLowerCase()
-    .normalize('NFD')
-    .replace(/[\u0300-\u036f]/g, '')
-    .replace(/[^a-z0-9]+/g, ' ')
-    .trim();
-}
-
-function uniqueNonBlank_(items) {
-  return items.filter(function (item, index, array) {
-    return item && array.indexOf(item) === index;
-  });
-}
-
-function emptyMetadata_() {
-  return { meaning: '', hours: '', type: 'Other', typeKey: 'other' };
-}
-
-function isValidDate_(value) {
-  return Object.prototype.toString.call(value) === '[object Date]' && !isNaN(value.getTime());
-}
-
-function cleanText_(value) {
-  return value === null || value === undefined ? '' : String(value).trim();
-}
-
-
-
-
-
-
-
-
-
-
-
-
-    <!DOCTYPE html>
+<!DOCTYPE html>
 <html>
 <head>
   <base target="_top">
@@ -671,6 +302,44 @@ function cleanText_(value) {
     .person-detail { margin-top: 3px; color: var(--muted); font-size: .82rem; }
     .assignment-code { align-self: center; padding: 6px 9px; border-radius: 9px; background: #edf7f4; color: var(--working); font-size: .82rem; font-weight: 900; }
 
+    .has-shift-tooltip {
+      cursor: help;
+      text-decoration-line: underline;
+      text-decoration-style: dotted;
+      text-decoration-thickness: 1px;
+      text-underline-offset: 3px;
+    }
+
+    .has-shift-tooltip:focus {
+      outline: 3px solid rgba(31, 110, 169, 0.22);
+      outline-offset: 3px;
+    }
+
+    .shift-tooltip-popup {
+      position: fixed;
+      z-index: 200;
+      width: max-content;
+      max-width: min(360px, calc(100vw - 24px));
+      padding: 10px 12px;
+      border: 1px solid rgba(255,255,255,.18);
+      border-radius: 10px;
+      background: #102a43;
+      color: #fff;
+      box-shadow: 0 12px 30px rgba(15, 42, 67, .28);
+      font-size: .82rem;
+      font-weight: 700;
+      line-height: 1.4;
+      pointer-events: none;
+      opacity: 0;
+      transform: translateY(4px);
+      transition: opacity .12s ease, transform .12s ease;
+    }
+
+    .shift-tooltip-popup.visible {
+      opacity: 1;
+      transform: translateY(0);
+    }
+
     .person-panel { display: none; }
 
     .person-header {
@@ -870,6 +539,8 @@ function cleanText_(value) {
     <p id="footerNote" class="footer-note"></p>
   </main>
 
+  <div id="shiftTooltip" class="shift-tooltip-popup" role="tooltip" aria-hidden="true"></div>
+
   <div id="loading" class="loading" aria-live="polite">
     <div class="loading-card"><span class="spinner" aria-hidden="true"></span>Loading the schedule…</div>
   </div>
@@ -899,7 +570,8 @@ function cleanText_(value) {
         'errorBanner', 'personSearch', 'clearSearch', 'suggestions', 'previousDate',
         'selectedDate', 'nextDate', 'dateStrip', 'summaryGrid', 'dailyPanel',
         'dailyTitle', 'dailySubtitle', 'workingCount', 'dailyGroups', 'personPanel',
-        'personName', 'personMeta', 'personScheduleBody', 'closePerson', 'footerNote', 'loading'
+        'personName', 'personMeta', 'personScheduleBody', 'closePerson', 'footerNote',
+        'shiftTooltip', 'loading'
       ].forEach(function (id) {
         elements[id] = document.getElementById(id);
       });
@@ -920,6 +592,12 @@ function cleanText_(value) {
           closeSuggestions();
         }
       });
+
+      document.addEventListener('mouseover', handleShiftTooltipEnter);
+      document.addEventListener('mousemove', handleShiftTooltipMove);
+      document.addEventListener('mouseout', handleShiftTooltipLeave);
+      document.addEventListener('focusin', handleShiftTooltipFocus);
+      document.addEventListener('focusout', handleShiftTooltipLeave);
     }
 
     function initializeDashboard(data) {
@@ -1015,7 +693,7 @@ function cleanText_(value) {
 
       elements.selectedDate.textContent = date.fullLabel;
       elements.dailyTitle.textContent = 'Who is working — ' + date.weekday;
-      elements.dailySubtitle.textContent = date.fullLabel;
+      elements.dailySubtitle.textContent = date.fullLabel + ' • Hover over a shift code to see its definition.';
       elements.workingCount.textContent = working.length + (working.length === 1 ? ' working' : ' working');
 
       elements.previousDate.disabled = dateIndex === 0;
@@ -1105,6 +783,7 @@ function cleanText_(value) {
           const code = document.createElement('span');
           code.className = 'assignment-code';
           code.textContent = item.assignment.code || 'Working';
+          applyShiftTooltip(code, item.assignment);
 
           text.appendChild(name);
           text.appendChild(detail);
@@ -1263,7 +942,7 @@ function cleanText_(value) {
 
         appendCell(row, date.shortLabel);
         appendCell(row, date.weekday);
-        appendCell(row, assignment.code || '—');
+        appendAssignmentCell(row, assignment);
         appendCell(row, assignment.meaning || '—');
         appendCell(row, assignment.hours || '—');
 
@@ -1281,6 +960,114 @@ function cleanText_(value) {
       elements.summaryGrid.style.display = 'none';
       elements.personPanel.style.display = 'block';
       elements.personPanel.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    }
+
+    function appendAssignmentCell(row, assignment) {
+      const cell = document.createElement('td');
+      const code = document.createElement('span');
+      code.textContent = assignment.code || '—';
+      applyShiftTooltip(code, assignment);
+      cell.appendChild(code);
+      row.appendChild(cell);
+    }
+
+    function applyShiftTooltip(element, assignment) {
+      const tooltipText = assignment && assignment.tooltip
+        ? assignment.tooltip
+        : buildClientTooltip(assignment);
+
+      if (!tooltipText || !assignment || !assignment.code) return;
+
+      element.classList.add('has-shift-tooltip');
+      element.tabIndex = 0;
+      element.dataset.shiftTooltip = tooltipText;
+      element.setAttribute('aria-label', tooltipText);
+    }
+
+    function buildClientTooltip(assignment) {
+      if (!assignment) return '';
+      const code = assignment.code || '';
+      const details = [];
+      if (assignment.meaning) details.push(assignment.meaning);
+      if (assignment.hours) details.push('Hours: ' + assignment.hours);
+      if (assignment.type && assignment.type !== 'Other') details.push('Shift type: ' + assignment.type);
+      if (!details.length && assignment.statusLabel) details.push(assignment.statusLabel);
+      return code + (details.length ? ' — ' + details.join(' • ') : '');
+    }
+
+    function getShiftTooltipTarget(event) {
+      return event.target && typeof event.target.closest === 'function'
+        ? event.target.closest('.has-shift-tooltip')
+        : null;
+    }
+
+    function handleShiftTooltipEnter(event) {
+      const target = getShiftTooltipTarget(event);
+      if (!target || !target.dataset.shiftTooltip) return;
+      showShiftTooltip(target.dataset.shiftTooltip);
+      positionShiftTooltipAtPointer(event.clientX, event.clientY);
+    }
+
+    function handleShiftTooltipMove(event) {
+      if (!elements.shiftTooltip.classList.contains('visible')) return;
+      if (!getShiftTooltipTarget(event)) return;
+      positionShiftTooltipAtPointer(event.clientX, event.clientY);
+    }
+
+    function handleShiftTooltipFocus(event) {
+      const target = getShiftTooltipTarget(event);
+      if (!target || !target.dataset.shiftTooltip) return;
+      showShiftTooltip(target.dataset.shiftTooltip);
+      positionShiftTooltipAtElement(target);
+    }
+
+    function handleShiftTooltipLeave(event) {
+      const leaving = getShiftTooltipTarget(event);
+      if (!leaving) return;
+
+      const entering = event.relatedTarget && event.relatedTarget.closest
+        ? event.relatedTarget.closest('.has-shift-tooltip')
+        : null;
+      if (entering === leaving) return;
+
+      hideShiftTooltip();
+    }
+
+    function showShiftTooltip(text) {
+      elements.shiftTooltip.textContent = text;
+      elements.shiftTooltip.setAttribute('aria-hidden', 'false');
+      elements.shiftTooltip.classList.add('visible');
+    }
+
+    function hideShiftTooltip() {
+      elements.shiftTooltip.classList.remove('visible');
+      elements.shiftTooltip.setAttribute('aria-hidden', 'true');
+    }
+
+    function positionShiftTooltipAtPointer(clientX, clientY) {
+      positionShiftTooltip(clientX + 14, clientY + 16);
+    }
+
+    function positionShiftTooltipAtElement(element) {
+      const rect = element.getBoundingClientRect();
+      positionShiftTooltip(rect.left + rect.width / 2, rect.bottom + 10, true);
+    }
+
+    function positionShiftTooltip(left, top, centerOnPoint) {
+      const tooltip = elements.shiftTooltip;
+      const margin = 12;
+      const width = tooltip.offsetWidth;
+      const height = tooltip.offsetHeight;
+      let adjustedLeft = centerOnPoint ? left - width / 2 : left;
+      let adjustedTop = top;
+
+      adjustedLeft = Math.max(margin, Math.min(adjustedLeft, window.innerWidth - width - margin));
+      if (adjustedTop + height > window.innerHeight - margin) {
+        adjustedTop = Math.max(margin, top - height - 28);
+      }
+
+      tooltip.style.left = adjustedLeft + 'px';
+      tooltip.style.top = adjustedTop + 'px';
     }
 
     function appendCell(row, text) {
