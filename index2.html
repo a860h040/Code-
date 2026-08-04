@@ -52,7 +52,6 @@
       --general-soft: #f1f5f9;
 
       --success: #16845b;
-      --danger: #c2414d;
 
       --shadow:
         0 16px 45px rgba(31, 45, 71, 0.09);
@@ -74,10 +73,11 @@
     body {
       margin: 0;
       min-height: 100vh;
+
       background:
         radial-gradient(
           circle at top left,
-          rgba(37, 99, 235, 0.10),
+          rgba(37, 99, 235, 0.1),
           transparent 31rem
         ),
         radial-gradient(
@@ -86,7 +86,9 @@
           transparent 26rem
         ),
         var(--page-background);
+
       color: var(--text);
+
       font-family:
         Inter,
         ui-sans-serif,
@@ -134,16 +136,21 @@
       height: 57px;
       flex: 0 0 auto;
       place-items: center;
+
       border-radius: 18px;
+
       background:
         linear-gradient(
           145deg,
           var(--primary),
           var(--rites)
         );
+
       color: #ffffff;
+
       box-shadow:
         0 14px 30px rgba(37, 99, 235, 0.25);
+
       font-size: 27px;
       font-weight: 900;
     }
@@ -168,14 +175,19 @@
       align-items: center;
       justify-content: center;
       gap: 9px;
+
       border: 0;
       border-radius: 14px;
       padding: 0 19px;
+
       background: var(--primary);
       color: #ffffff;
+
       font-weight: 750;
+
       box-shadow:
         0 9px 22px rgba(37, 99, 235, 0.22);
+
       transition:
         background 160ms ease,
         transform 160ms ease,
@@ -213,13 +225,17 @@
       display: none;
       align-items: center;
       gap: 11px;
+
       border: 1px solid rgba(37, 99, 235, 0.18);
       border-radius: 15px;
       padding: 12px 15px;
       margin-bottom: 18px;
+
       background: rgba(239, 246, 255, 0.96);
       color: #1e4e98;
+
       box-shadow: var(--small-shadow);
+
       font-size: 13px;
       font-weight: 650;
     }
@@ -232,9 +248,11 @@
       width: 18px;
       height: 18px;
       flex: 0 0 auto;
+
       border: 2px solid rgba(37, 99, 235, 0.22);
       border-top-color: var(--primary);
       border-radius: 50%;
+
       animation: spin 750ms linear infinite;
     }
 
@@ -242,17 +260,21 @@
 
     .stats {
       display: grid;
+
       grid-template-columns:
         repeat(4, minmax(0, 1fr));
+
       gap: 14px;
       margin-bottom: 18px;
     }
 
     .stat-card {
       min-width: 0;
+
       border: 1px solid var(--border);
       border-radius: 18px;
       padding: 17px;
+
       background: rgba(255, 255, 255, 0.95);
       box-shadow: var(--small-shadow);
     }
@@ -262,7 +284,9 @@
       align-items: center;
       gap: 7px;
       margin-bottom: 9px;
+
       color: var(--muted);
+
       font-size: 13px;
       font-weight: 750;
     }
@@ -280,10 +304,12 @@
       position: sticky;
       top: 7px;
       z-index: 20;
+
       border: 1px solid rgba(225, 231, 239, 0.92);
       border-radius: 18px;
       padding: 14px;
       margin-bottom: 20px;
+
       background: rgba(255, 255, 255, 0.94);
       box-shadow: var(--shadow);
       backdrop-filter: blur(18px);
@@ -297,7 +323,9 @@
       position: absolute;
       top: 50%;
       left: 15px;
+
       color: var(--muted);
+
       transform: translateY(-50%);
       pointer-events: none;
     }
@@ -305,12 +333,16 @@
     .search-input {
       width: 100%;
       min-height: 47px;
+
       border: 1px solid var(--border);
       border-radius: 13px;
       padding: 0 16px 0 43px;
+
       outline: none;
+
       background: var(--surface-soft);
       color: var(--text);
+
       transition:
         border-color 150ms ease,
         box-shadow 150ms ease;
@@ -318,14 +350,16 @@
 
     .search-input:focus {
       border-color: var(--primary);
+
       box-shadow:
-        0 0 0 4px rgba(37, 99, 235, 0.10);
+        0 0 0 4px rgba(37, 99, 235, 0.1);
     }
 
     .filters {
       display: flex;
       gap: 7px;
       margin-top: 12px;
+
       overflow-x: auto;
       scrollbar-width: none;
     }
@@ -337,13 +371,20 @@
     .filter-button {
       flex: 0 0 auto;
       min-height: 37px;
+
       border: 1px solid transparent;
       border-radius: 10px;
       padding: 0 14px;
+
       background: transparent;
       color: var(--muted);
+
       font-size: 13px;
       font-weight: 750;
+
+      transition:
+        background 150ms ease,
+        color 150ms ease;
     }
 
     .filter-button:hover {
@@ -352,7 +393,7 @@
     }
 
     .filter-button.active {
-      background: rgba(37, 99, 235, 0.10);
+      background: rgba(37, 99, 235, 0.1);
       color: var(--primary);
     }
 
@@ -360,9 +401,11 @@
 
     .dashboard-grid {
       display: grid;
+
       grid-template-columns:
         minmax(310px, 390px)
         minmax(0, 1fr);
+
       gap: 18px;
       align-items: start;
     }
@@ -374,10 +417,13 @@
 
     .dashboard-panel {
       min-width: 0;
+
       border: 1px solid var(--border);
       border-radius: var(--radius);
+
       background: rgba(255, 255, 255, 0.96);
       box-shadow: var(--shadow);
+
       overflow: hidden;
     }
 
@@ -397,8 +443,10 @@
       align-items: center;
       justify-content: space-between;
       gap: 13px;
+
       border-bottom: 1px solid var(--border);
       padding: 17px 18px;
+
       background: rgba(248, 250, 252, 0.75);
     }
 
@@ -425,11 +473,15 @@
       min-width: 31px;
       height: 31px;
       place-items: center;
+
       border-radius: 10px;
+
       background: var(--surface);
       color: var(--muted);
+
       box-shadow:
         inset 0 0 0 1px var(--border);
+
       font-size: 12px;
       font-weight: 850;
     }
@@ -499,13 +551,17 @@
 
     .event-card {
       position: relative;
+
       border: 1px solid var(--border);
       border-left: 5px solid var(--event-color);
       border-radius: 15px;
       margin-bottom: 10px;
+
       background: var(--surface);
       box-shadow: var(--small-shadow);
+
       overflow: hidden;
+
       transition:
         border-color 160ms ease,
         box-shadow 160ms ease,
@@ -515,6 +571,7 @@
     .event-card:hover {
       box-shadow:
         0 12px 28px rgba(31, 45, 71, 0.11);
+
       transform: translateY(-1px);
     }
 
@@ -529,13 +586,16 @@
 
     .event-main-row {
       display: grid;
+
       grid-template-columns:
         auto minmax(0, 1fr);
+
       align-items: stretch;
     }
 
     .event-card.compact .event-main-row {
-      grid-template-columns: minmax(0, 1fr);
+      grid-template-columns:
+        minmax(0, 1fr);
     }
 
     .check-column {
@@ -547,6 +607,7 @@
 
     .check-wrapper {
       position: relative;
+
       display: grid;
       width: 24px;
       height: 24px;
@@ -566,10 +627,13 @@
       width: 23px;
       height: 23px;
       place-items: center;
+
       border: 2px solid #c5ced9;
       border-radius: 8px;
+
       background: #ffffff;
       color: #ffffff;
+
       transition:
         background 150ms ease,
         border-color 150ms ease;
@@ -588,10 +652,13 @@
 
     .event-toggle {
       width: 100%;
+
       border: 0;
       padding: 15px 44px 15px 15px;
+
       background: transparent;
       color: inherit;
+
       text-align: left;
     }
 
@@ -603,12 +670,16 @@
       position: absolute;
       top: 20px;
       right: 16px;
+
       color: var(--event-color);
+
       content: "⌄";
       font-size: 18px;
       font-weight: 900;
       line-height: 1;
-      transition: transform 160ms ease;
+
+      transition:
+        transform 160ms ease;
     }
 
     .event-card.open .event-toggle::after {
@@ -617,7 +688,9 @@
 
     .event-title {
       margin: 0;
+
       overflow-wrap: anywhere;
+
       font-size: 16px;
       font-weight: 820;
       line-height: 1.35;
@@ -633,7 +706,9 @@
       flex-wrap: wrap;
       gap: 6px 12px;
       margin-top: 8px;
+
       color: var(--muted);
+
       font-size: 12px;
       font-weight: 650;
       line-height: 1.45;
@@ -647,9 +722,11 @@
 
     .event-details {
       display: none;
+
       border-top: 1px solid var(--border);
       padding: 13px 15px 15px;
       margin-left: 47px;
+
       background: var(--event-soft);
     }
 
@@ -668,9 +745,12 @@
 
     .detail-row {
       min-width: 0;
+
       color: #485467;
+
       font-size: 12px;
       line-height: 1.55;
+
       overflow-wrap: anywhere;
     }
 
@@ -692,7 +772,7 @@
       text-decoration: underline;
     }
 
-    /* Month and date headings */
+    /* Group headings */
 
     .month-group,
     .date-group {
@@ -708,8 +788,11 @@
       display: flex;
       align-items: center;
       gap: 9px;
+
       margin: 4px 2px 10px;
+
       color: var(--muted);
+
       font-size: 11px;
       font-weight: 850;
       letter-spacing: 0.055em;
@@ -723,16 +806,19 @@
       content: "";
     }
 
-    /* Empty, loading and error states */
+    /* Loading and empty states */
 
     .state-box {
       display: grid;
       min-height: 220px;
       place-items: center;
+
       border: 1px dashed #cbd4df;
       border-radius: 16px;
       padding: 25px;
+
       background: rgba(248, 250, 252, 0.72);
+
       text-align: center;
     }
 
@@ -753,7 +839,9 @@
     .state-message {
       max-width: 500px;
       margin: 0;
+
       color: var(--muted);
+
       font-size: 13px;
       line-height: 1.55;
     }
@@ -767,9 +855,12 @@
       width: 9px;
       height: 9px;
       margin: 3px;
+
       border-radius: 50%;
       background: var(--primary);
-      animation: pulse 1.1s infinite ease-in-out;
+
+      animation:
+        pulse 1.1s infinite ease-in-out;
     }
 
     .loading-dot:nth-child(2) {
@@ -796,18 +887,23 @@
 
     .retry-button {
       min-height: 40px;
+
       border: 0;
       border-radius: 11px;
       padding: 0 16px;
       margin-top: 16px;
+
       background: var(--primary);
       color: #ffffff;
+
       font-weight: 750;
     }
 
     .footer-note {
       margin-top: 25px;
+
       color: var(--muted);
+
       text-align: center;
       font-size: 11px;
       line-height: 1.6;
@@ -818,18 +914,27 @@
       right: 20px;
       bottom: 20px;
       z-index: 100;
-      max-width: min(390px, calc(100% - 40px));
+
+      max-width:
+        min(390px, calc(100% - 40px));
+
       border-radius: 13px;
       padding: 13px 16px;
+
       background: #172033;
       color: #ffffff;
+
       box-shadow:
         0 17px 45px rgba(23, 32, 51, 0.25);
+
       font-size: 13px;
       font-weight: 700;
+
       opacity: 0;
       pointer-events: none;
+
       transform: translateY(15px);
+
       transition:
         opacity 180ms ease,
         transform 180ms ease;
@@ -935,6 +1040,15 @@
       .event-toggle {
         padding-left: 10px;
       }
+
+      .event-card.compact .event-main-row {
+        grid-template-columns:
+          minmax(0, 1fr);
+      }
+
+      .event-card.compact .event-details {
+        margin-left: 0;
+      }
     }
   </style>
 </head>
@@ -988,6 +1102,7 @@
     </div>
 
     <section class="stats">
+
       <article class="stat-card">
         <div class="stat-label">
           <span>📅</span>
@@ -1043,9 +1158,11 @@
           0
         </div>
       </article>
+
     </section>
 
     <section class="control-panel">
+
       <div class="search-box">
         <span class="search-icon">
           ⌕
@@ -1083,6 +1200,14 @@
         <button
           class="filter-button"
           type="button"
+          data-filter="week"
+        >
+          One Week
+        </button>
+
+        <button
+          class="filter-button"
+          type="button"
           data-filter="future"
         >
           Future
@@ -1096,6 +1221,7 @@
           Completed
         </button>
       </nav>
+
     </section>
 
     <section class="dashboard-grid">
@@ -1154,7 +1280,7 @@
               </h2>
 
               <p class="panel-description">
-                Upcoming staffing schedule
+                Upcoming staffing and weekend schedule
               </p>
             </div>
 
@@ -1189,6 +1315,7 @@
       </aside>
 
       <section class="dashboard-panel main-panel">
+
         <header class="panel-header">
           <div class="panel-heading-group">
             <h2
@@ -1233,6 +1360,7 @@
             </div>
           </div>
         </div>
+
       </section>
 
     </section>
@@ -1240,7 +1368,7 @@
     <p class="footer-note">
       Only events occurring today or later are displayed.
       The dashboard reads from Sheet2 while Calendar Feed
-      can update separately in the background.
+      updates separately in the background.
     </p>
 
   </main>
@@ -1252,7 +1380,7 @@
 
   <script>
     const STORAGE_KEY =
-      "calendarTaskCompletionStatusV3";
+      "calendarTaskCompletionStatusV5";
 
     const AUTO_RELOAD_INTERVAL =
       5 * 60 * 1000;
@@ -1270,6 +1398,7 @@
     const filterTitles = {
       all: "Upcoming Event Tasks",
       today: "Today's Event Tasks",
+      week: "One Week Event View",
       future: "Future Event Tasks",
       completed: "Completed Event Tasks"
     };
@@ -1332,7 +1461,7 @@
 
       /*
        * Reload Sheet2 every five minutes.
-       * This does not start the slower calendar sync.
+       * This does not begin a full Calendar Feed sync.
        */
       window.setInterval(
         function() {
@@ -1346,7 +1475,7 @@
 
 
     /**
-     * Loads task information.
+     * Loads tasks from Sheet2.
      *
      * synchronizeCalendar = false:
      * Reads Sheet2 immediately.
@@ -1371,6 +1500,10 @@
         setSyncBannerVisible(true);
       }
 
+      /*
+       * Only display a loading screen when no
+       * events are currently available.
+       */
       if (
         state.tasks.length === 0 &&
         !silent
@@ -1416,12 +1549,17 @@
               setSyncBannerVisible(false);
 
               const message =
-                error && error.message
+                error &&
+                error.message
                   ? error.message
                   : String(error);
 
               console.error(message);
 
+              /*
+               * Do not remove events already loaded
+               * from Sheet2 when synchronization fails.
+               */
               if (state.tasks.length > 0) {
                 showToast(
                   "Calendar synchronization failed. " +
@@ -1443,6 +1581,9 @@
     }
 
 
+    /**
+     * Cleans and validates an event returned by Apps Script.
+     */
     function normalizeTask(task) {
       if (
         !task ||
@@ -1478,13 +1619,21 @@
           ),
 
         eventId:
-          String(task.eventId || ""),
+          String(
+            task.eventId || ""
+          ),
 
         calendar:
-          String(task.calendar || "Calendar"),
+          String(
+            task.calendar ||
+            "Calendar"
+          ),
 
         title:
-          String(task.title || "(No title)").trim(),
+          String(
+            task.title ||
+            "(No title)"
+          ).trim(),
 
         start: start,
         end: end,
@@ -1493,19 +1642,29 @@
           Boolean(task.allDay),
 
         location:
-          String(task.location || ""),
+          String(
+            task.location || ""
+          ),
 
         description:
-          String(task.description || ""),
+          String(
+            task.description || ""
+          ),
 
         createdBy:
-          String(task.createdBy || ""),
+          String(
+            task.createdBy || ""
+          ),
 
         guests:
-          String(task.guests || ""),
+          String(
+            task.guests || ""
+          ),
 
         myStatus:
-          String(task.myStatus || ""),
+          String(
+            task.myStatus || ""
+          ),
 
         recurring:
           Boolean(task.recurring),
@@ -1558,25 +1717,28 @@
 
 
     /**
-     * Returns only today and future events.
-     * Past events are never displayed.
+     * Only returns events occurring today or later.
+     * Past events are completely removed.
      */
     function getEligibleTasks() {
       const todayStart =
-        startOfDay(new Date());
+        startOfDay(
+          new Date()
+        ).getTime();
 
       return state.tasks
         .filter(function(task) {
-          /*
-           * Include events that occur today,
-           * including events that started earlier today.
-           */
           return (
             task.end > todayStart &&
-            !shouldExcludeTitle(task.title)
+            !shouldExcludeTitle(
+              task.title
+            )
           );
         })
-        .sort(function(firstTask, secondTask) {
+        .sort(function(
+          firstTask,
+          secondTask
+        ) {
           return (
             firstTask.start -
             secondTask.start
@@ -1586,15 +1748,45 @@
 
 
     /**
-     * Removes unwanted event titles.
+     * Determines whether an event belongs
+     * in the Alhamza Staffing section.
+     *
+     * Included examples:
+     *
+     * Alhamza Staff
+     * Alhamza Staffing
+     * Alhamza Staff Weekend
+     * Weekend Alhamza Staff
+     * Paa/Alhamza Staff
+     * Paa / Alhamza Staff
+     * Paa Staffing / Alhamza Staff
+     */
+    function isAlhamzaStaffingEvent(
+      title
+    ) {
+      const cleanTitle =
+        String(title || "")
+          .trim();
+
+      return /\balhamza\s+staff(?:ing)?\b/i
+        .test(cleanTitle);
+    }
+
+
+    /**
+     * Removes unwanted titles from every dashboard section.
      */
     function shouldExcludeTitle(title) {
       const cleanTitle =
-        String(title || "").trim();
+        String(title || "")
+          .trim();
 
       const lowerTitle =
         cleanTitle.toLowerCase();
 
+      /*
+       * Remove only when the complete title is Staff Huddle.
+       */
       if (
         lowerTitle ===
         "staff huddle"
@@ -1602,10 +1794,31 @@
         return true;
       }
 
+      /*
+       * Removes every title containing Inservice,
+       * including Inservice at Huddle.
+       */
       if (
-        /\binservice\b/i.test(cleanTitle)
+        /\binservice\b/i.test(
+          cleanTitle
+        )
       ) {
         return true;
+      }
+
+      /*
+       * Keep mixed Alhamza events even when
+       * another staffing name appears.
+       *
+       * Example:
+       * Paa Staffing / Alhamza Staff
+       */
+      if (
+        isAlhamzaStaffingEvent(
+          cleanTitle
+        )
+      ) {
+        return false;
       }
 
       const excludedStaffingTitles = [
@@ -1626,15 +1839,18 @@
 
 
     /**
-     * Returns true when the title contains RITES,
-     * but is not simply "RITES" by itself.
+     * Includes titles containing RITES.
+     * A title containing only RITES is excluded.
      */
     function isRitesEvent(title) {
       const cleanTitle =
-        String(title || "").trim();
+        String(title || "")
+          .trim();
 
       if (
-        !/\brites\b/i.test(cleanTitle)
+        !/\brites\b/i.test(
+          cleanTitle
+        )
       ) {
         return false;
       }
@@ -1644,6 +1860,7 @@
        * RITES
        * RITES:
        * RITES -
+       * RITES —
        */
       if (
         /^\s*rites\s*[:\-–—]?\s*$/i
@@ -1653,17 +1870,6 @@
       }
 
       return true;
-    }
-
-
-    function isAlhamzaStaffingEvent(
-      title
-    ) {
-      return String(title || "")
-        .toLowerCase()
-        .includes(
-          "alhamza staffing"
-        );
     }
 
 
@@ -1690,7 +1896,9 @@
         function(task) {
           const key =
             monthKey(
-              new Date(task.start)
+              new Date(
+                task.start
+              )
             );
 
           const currentCount =
@@ -1712,6 +1920,10 @@
     }
 
 
+    /**
+     * Returns all Alhamza Staff or
+     * Alhamza Staffing events.
+     */
     function getStaffingTasks(
       eligibleTasks
     ) {
@@ -1730,31 +1942,48 @@
 
 
     /**
-     * RITES and Alhamza Staffing events are displayed
-     * in their dedicated left-side sections and are
-     * therefore removed from the main event list.
+     * Returns the events for the large main task list.
+     *
+     * RITES events and Alhamza Staff events are removed
+     * because they appear in their dedicated panels.
      */
     function getMainTasks(
       eligibleTasks
     ) {
-      const now =
-        new Date();
-
       const todayStart =
-        startOfDay(now);
+        startOfDay(
+          new Date()
+        );
 
       const tomorrowStart =
-        new Date(todayStart);
+        new Date(
+          todayStart
+        );
 
       tomorrowStart.setDate(
         tomorrowStart.getDate() + 1
+      );
+
+      /*
+       * One Week view includes today and
+       * the following six calendar days.
+       */
+      const weekEnd =
+        new Date(
+          todayStart
+        );
+
+      weekEnd.setDate(
+        weekEnd.getDate() + 7
       );
 
       let tasks =
         eligibleTasks.filter(
           function(task) {
             return (
-              !isRitesEvent(task.title) &&
+              !isRitesEvent(
+                task.title
+              ) &&
               !isAlhamzaStaffingEvent(
                 task.title
               )
@@ -1770,17 +1999,27 @@
           function(task) {
             const completed =
               Boolean(
-                state.completed[task.id]
+                state.completed[
+                  task.id
+                ]
               );
 
             const start =
-              new Date(task.start);
+              new Date(
+                task.start
+              );
 
             const end =
-              new Date(task.end);
+              new Date(
+                task.end
+              );
 
+            /*
+             * Today's events.
+             */
             if (
-              state.filter === "today"
+              state.filter ===
+              "today"
             ) {
               return (
                 end > todayStart &&
@@ -1788,17 +2027,40 @@
               );
             }
 
+            /*
+             * One Week:
+             * Today plus the following six days.
+             */
             if (
-              state.filter === "future"
+              state.filter ===
+              "week"
             ) {
               return (
-                start >= tomorrowStart &&
+                end > todayStart &&
+                start < weekEnd
+              );
+            }
+
+            /*
+             * Events starting tomorrow or later.
+             */
+            if (
+              state.filter ===
+              "future"
+            ) {
+              return (
+                start >=
+                  tomorrowStart &&
                 !completed
               );
             }
 
+            /*
+             * Completed upcoming events.
+             */
             if (
-              state.filter === "completed"
+              state.filter ===
+              "completed"
             ) {
               return completed;
             }
@@ -1808,21 +2070,29 @@
         );
 
       return tasks.sort(
-        function(firstTask, secondTask) {
+        function(
+          firstTask,
+          secondTask
+        ) {
           const firstCompleted =
             Boolean(
-              state.completed[firstTask.id]
+              state.completed[
+                firstTask.id
+              ]
             );
 
           const secondCompleted =
             Boolean(
-              state.completed[secondTask.id]
+              state.completed[
+                secondTask.id
+              ]
             );
 
           if (
             firstCompleted !==
               secondCompleted &&
-            state.filter !== "completed"
+            state.filter !==
+              "completed"
           ) {
             return firstCompleted
               ? 1
@@ -1838,6 +2108,9 @@
     }
 
 
+    /**
+     * Searches all useful event fields.
+     */
     function applySearch(tasks) {
       if (!state.search) {
         return tasks;
@@ -1890,49 +2163,58 @@
       }
 
       const groups =
-        groupTasksByMonth(tasks);
+        groupTasksByMonth(
+          tasks
+        );
 
       let html = "";
 
       Object.keys(groups)
         .sort()
-        .forEach(function(key) {
-          const group =
-            groups[key];
+        .forEach(
+          function(key) {
+            const group =
+              groups[key];
 
-          html += `
-            <section class="month-group">
-              <h3 class="section-label">
-                ${escapeHtml(group.label)}
-              </h3>
+            html += `
+              <section class="month-group">
+                <h3 class="section-label">
+                  ${escapeHtml(group.label)}
+                </h3>
 
-              ${
-                group.tasks
-                  .map(function(task) {
-                    return createEventCard(
-                      task,
-                      {
-                        compact: true,
-                        theme:
-                          "theme-rites",
-                        showCheckbox:
-                          false,
-                        staffingFormat:
-                          false
+                ${
+                  group.tasks
+                    .map(
+                      function(task) {
+                        return createEventCard(
+                          task,
+                          {
+                            compact: true,
+                            theme:
+                              "theme-rites",
+                            showCheckbox:
+                              false,
+                            staffingFormat:
+                              false
+                          }
+                        );
                       }
-                    );
-                  })
-                  .join("")
-              }
-            </section>
-          `;
-        });
+                    )
+                    .join("")
+                }
+              </section>
+            `;
+          }
+        );
 
-      container.innerHTML = html;
+      container.innerHTML =
+        html;
     }
 
 
-    function renderStaffingPanel(tasks) {
+    function renderStaffingPanel(
+      tasks
+    ) {
       const container =
         document.getElementById(
           "staffingList"
@@ -1943,14 +2225,16 @@
       ).textContent =
         tasks.length;
 
-      if (tasks.length === 0) {
+      if (
+        tasks.length === 0
+      ) {
         container.innerHTML =
           createEmptyState(
             "💼",
             "No upcoming staffing",
             state.search
-              ? "No Alhamza Staffing events match your search."
-              : "There are no upcoming Alhamza Staffing events."
+              ? "No Alhamza Staff events match your search."
+              : "There are no upcoming Alhamza Staff events."
           );
 
         return;
@@ -1976,7 +2260,9 @@
     }
 
 
-    function renderMainPanel(tasks) {
+    function renderMainPanel(
+      tasks
+    ) {
       const container =
         document.getElementById(
           "mainTaskList"
@@ -1985,7 +2271,9 @@
       document.getElementById(
         "mainPanelTitle"
       ).textContent =
-        filterTitles[state.filter] ||
+        filterTitles[
+          state.filter
+        ] ||
         "Upcoming Event Tasks";
 
       document.getElementById(
@@ -1993,7 +2281,9 @@
       ).textContent =
         tasks.length;
 
-      if (tasks.length === 0) {
+      if (
+        tasks.length === 0
+      ) {
         container.innerHTML =
           createEmptyState(
             "🗓️",
@@ -2007,55 +2297,70 @@
       }
 
       const groups =
-        groupTasksByDate(tasks);
+        groupTasksByDate(
+          tasks
+        );
 
       let html = "";
 
       Object.keys(groups)
         .sort()
-        .forEach(function(key) {
-          const group =
-            groups[key];
+        .forEach(
+          function(key) {
+            const group =
+              groups[key];
 
-          html += `
-            <section class="date-group">
-              <h3 class="section-label">
-                ${escapeHtml(group.label)}
-              </h3>
+            html += `
+              <section class="date-group">
+                <h3 class="section-label">
+                  ${escapeHtml(group.label)}
+                </h3>
 
-              ${
-                group.tasks
-                  .map(function(task) {
-                    return createEventCard(
-                      task,
-                      {
-                        compact: false,
-                        theme:
-                          getEventTheme(
-                            task.title
-                          ),
-                        showCheckbox:
-                          true,
-                        staffingFormat:
-                          false
+                ${
+                  group.tasks
+                    .map(
+                      function(task) {
+                        return createEventCard(
+                          task,
+                          {
+                            compact:
+                              false,
+
+                            theme:
+                              getEventTheme(
+                                task.title
+                              ),
+
+                            showCheckbox:
+                              true,
+
+                            staffingFormat:
+                              false
+                          }
+                        );
                       }
-                    );
-                  })
-                  .join("")
-              }
-            </section>
-          `;
-        });
+                    )
+                    .join("")
+                }
+              </section>
+            `;
+          }
+        );
 
-      container.innerHTML = html;
+      container.innerHTML =
+        html;
     }
 
 
     /**
      * Initially displays only:
-     * title, date, weekday, start time and end time.
      *
-     * Additional details appear after the card is clicked.
+     * Event name
+     * Date
+     * Day
+     * Start and end time
+     *
+     * Additional details appear after clicking.
      */
     function createEventCard(
       task,
@@ -2063,18 +2368,25 @@
     ) {
       const completed =
         Boolean(
-          state.completed[task.id]
+          state.completed[
+            task.id
+          ]
         );
 
       const encodedId =
-        encodeURIComponent(task.id);
+        encodeURIComponent(
+          task.id
+        );
 
       const cardClasses = [
         "event-card",
+
         options.compact
           ? "compact"
           : "",
+
         options.theme,
+
         completed
           ? "completed"
           : ""
@@ -2191,7 +2503,12 @@
     }
 
 
-    function createEventDetails(task) {
+    /**
+     * Builds details displayed after an event is clicked.
+     */
+    function createEventDetails(
+      task
+    ) {
       const details = [];
 
       if (task.calendar) {
@@ -2285,7 +2602,9 @@
         `);
       }
 
-      if (details.length === 0) {
+      if (
+        details.length === 0
+      ) {
         details.push(`
           <div class="detail-row">
             No additional event details are available.
@@ -2301,62 +2620,115 @@
     }
 
 
-    function getEventTheme(title) {
+    /**
+     * Assigns matching colors to similar event categories.
+     */
+    function getEventTheme(
+      title
+    ) {
       const lowerTitle =
         String(title || "")
           .toLowerCase();
 
       if (
-        lowerTitle.includes("staffing")
+        isAlhamzaStaffingEvent(
+          title
+        )
       ) {
         return "theme-staffing";
       }
 
       if (
-        lowerTitle.includes("research") ||
-        lowerTitle.includes("proposal") ||
-        lowerTitle.includes("mue")
+        lowerTitle.includes(
+          "staffing"
+        )
+      ) {
+        return "theme-staffing";
+      }
+
+      if (
+        lowerTitle.includes(
+          "research"
+        ) ||
+        lowerTitle.includes(
+          "proposal"
+        ) ||
+        lowerTitle.includes(
+          "mue"
+        )
       ) {
         return "theme-research";
       }
 
       if (
-        lowerTitle.includes("training") ||
-        lowerTitle.includes("orientation") ||
-        lowerTitle.includes("education")
+        lowerTitle.includes(
+          "training"
+        ) ||
+        lowerTitle.includes(
+          "orientation"
+        ) ||
+        lowerTitle.includes(
+          "education"
+        )
       ) {
         return "theme-training";
       }
 
       if (
-        lowerTitle.includes("deadline") ||
-        lowerTitle.includes("due") ||
-        lowerTitle.includes("submit")
+        lowerTitle.includes(
+          "deadline"
+        ) ||
+        lowerTitle.includes(
+          "due"
+        ) ||
+        lowerTitle.includes(
+          "submit"
+        )
       ) {
         return "theme-deadline";
       }
 
       if (
-        lowerTitle.includes("rotation") ||
-        lowerTitle.includes("clinic") ||
-        lowerTitle.includes("rounds")
+        lowerTitle.includes(
+          "rotation"
+        ) ||
+        lowerTitle.includes(
+          "clinic"
+        ) ||
+        lowerTitle.includes(
+          "rounds"
+        )
       ) {
         return "theme-rotation";
       }
 
       if (
-        lowerTitle.includes("exam") ||
-        lowerTitle.includes("test") ||
-        lowerTitle.includes("quiz")
+        lowerTitle.includes(
+          "exam"
+        ) ||
+        lowerTitle.includes(
+          "test"
+        ) ||
+        lowerTitle.includes(
+          "quiz"
+        )
       ) {
         return "theme-exam";
       }
 
       if (
-        lowerTitle.includes("meeting") ||
-        lowerTitle.includes("conference") ||
-        lowerTitle.includes("discussion") ||
-        lowerTitle.includes("check-in")
+        lowerTitle.includes(
+          "meeting"
+        ) ||
+        lowerTitle.includes(
+          "conference"
+        ) ||
+        lowerTitle.includes(
+          "discussion"
+        ) ||
+        lowerTitle.includes(
+          "check-in"
+        )
       ) {
         return "theme-meeting";
       }
@@ -2365,12 +2737,23 @@
     }
 
 
-    function handlePageClick(event) {
-      if (
-        event.target &&
-        event.target.id === "retryButton"
-      ) {
-        loadTasks(false, false);
+    /**
+     * Handles event expansion and retry buttons.
+     */
+    function handlePageClick(
+      event
+    ) {
+      const retryButton =
+        event.target.closest(
+          '[data-action="retry"]'
+        );
+
+      if (retryButton) {
+        loadTasks(
+          false,
+          false
+        );
+
         return;
       }
 
@@ -2404,23 +2787,33 @@
     }
 
 
-    function handleTaskCheckbox(event) {
+    /**
+     * Saves completed task checkboxes in the browser.
+     */
+    function handleTaskCheckbox(
+      event
+    ) {
       if (
-        !event.target.classList.contains(
-          "task-check"
-        )
+        !event.target.classList
+          .contains(
+            "task-check"
+          )
       ) {
         return;
       }
 
       const taskId =
         decodeURIComponent(
-          event.target.dataset.taskId
+          event.target.dataset
+            .taskId
         );
 
-      if (event.target.checked) {
-        state.completed[taskId] =
-          true;
+      if (
+        event.target.checked
+      ) {
+        state.completed[
+          taskId
+        ] = true;
 
         showToast(
           "Task marked as completed."
@@ -2440,17 +2833,25 @@
     }
 
 
-    function setFilter(filter) {
-      state.filter = filter;
+    function setFilter(
+      filter
+    ) {
+      state.filter =
+        filter;
 
       document
-        .querySelectorAll(".filter-button")
-        .forEach(function(button) {
-          button.classList.toggle(
-            "active",
-            button.dataset.filter === filter
-          );
-        });
+        .querySelectorAll(
+          ".filter-button"
+        )
+        .forEach(
+          function(button) {
+            button.classList.toggle(
+              "active",
+              button.dataset.filter ===
+                filter
+            );
+          }
+        );
 
       renderDashboard();
     }
@@ -2462,10 +2863,14 @@
       staffingTasks
     ) {
       const todayStart =
-        startOfDay(new Date());
+        startOfDay(
+          new Date()
+        );
 
       const tomorrowStart =
-        new Date(todayStart);
+        new Date(
+          todayStart
+        );
 
       tomorrowStart.setDate(
         tomorrowStart.getDate() + 1
@@ -2475,7 +2880,8 @@
         eligibleTasks.filter(
           function(task) {
             return (
-              task.end > todayStart &&
+              task.end >
+                todayStart.getTime() &&
               task.start <
                 tomorrowStart.getTime()
             );
@@ -2514,59 +2920,82 @@
     }
 
 
-    function groupTasksByMonth(tasks) {
+    function groupTasksByMonth(
+      tasks
+    ) {
       const groups = {};
 
-      tasks.forEach(function(task) {
-        const date =
-          new Date(task.start);
+      tasks.forEach(
+        function(task) {
+          const date =
+            new Date(
+              task.start
+            );
 
-        const key =
-          monthKey(date);
+          const key =
+            monthKey(date);
 
-        if (!groups[key]) {
-          groups[key] = {
-            label:
-              date.toLocaleDateString(
-                [],
-                {
-                  month: "long",
-                  year: "numeric"
-                }
-              ),
+          if (!groups[key]) {
+            groups[key] = {
+              label:
+                date.toLocaleDateString(
+                  [],
+                  {
+                    month:
+                      "long",
 
-            tasks: []
-          };
+                    year:
+                      "numeric"
+                  }
+                ),
+
+              tasks: []
+            };
+          }
+
+          groups[key].tasks.push(
+            task
+          );
         }
-
-        groups[key].tasks.push(task);
-      });
+      );
 
       return groups;
     }
 
 
-    function groupTasksByDate(tasks) {
+    function groupTasksByDate(
+      tasks
+    ) {
       const groups = {};
 
-      tasks.forEach(function(task) {
-        const date =
-          new Date(task.start);
+      tasks.forEach(
+        function(task) {
+          const date =
+            new Date(
+              task.start
+            );
 
-        const key =
-          localDateKey(date);
+          const key =
+            localDateKey(
+              date
+            );
 
-        if (!groups[key]) {
-          groups[key] = {
-            label:
-              getDateHeading(date),
+          if (!groups[key]) {
+            groups[key] = {
+              label:
+                getDateHeading(
+                  date
+                ),
 
-            tasks: []
-          };
+              tasks: []
+            };
+          }
+
+          groups[key].tasks.push(
+            task
+          );
         }
-
-        groups[key].tasks.push(task);
-      });
+      );
 
       return groups;
     }
@@ -2635,7 +3064,9 @@
     }
 
 
-    function showErrorDashboard(message) {
+    function showErrorDashboard(
+      message
+    ) {
       const errorHtml = `
         <div class="state-box">
           <div>
@@ -2653,7 +3084,7 @@
 
             <button
               class="retry-button"
-              id="retryButton"
+              data-action="retry"
               type="button"
             >
               Try again
@@ -2679,7 +3110,9 @@
     }
 
 
-    function updateLastLoaded(result) {
+    function updateLastLoaded(
+      result
+    ) {
       const time =
         result.serverTime
           ? new Date(
@@ -2700,10 +3133,17 @@
         time.toLocaleString(
           [],
           {
-            month: "short",
-            day: "numeric",
-            hour: "numeric",
-            minute: "2-digit"
+            month:
+              "short",
+
+            day:
+              "numeric",
+
+            hour:
+              "numeric",
+
+            minute:
+              "2-digit"
           }
         );
     }
@@ -2751,29 +3191,51 @@
     }
 
 
-    function formatStaffingLine(task) {
+    /**
+     * Staffing format:
+     * 08/03/2026 Monday — 0800 to 1600
+     */
+    function formatStaffingLine(
+      task
+    ) {
       return (
-        formatDate(task.start) +
+        formatDate(
+          task.start
+        ) +
         " " +
-        formatWeekday(task.start) +
+        formatWeekday(
+          task.start
+        ) +
         " — " +
-        formatTimeRange(task)
+        formatTimeRange(
+          task
+        )
       );
     }
 
 
-    function formatDate(milliseconds) {
+    function formatDate(
+      milliseconds
+    ) {
       const date =
-        new Date(milliseconds);
+        new Date(
+          milliseconds
+        );
 
       return [
         String(
           date.getMonth() + 1
-        ).padStart(2, "0"),
+        ).padStart(
+          2,
+          "0"
+        ),
 
         String(
           date.getDate()
-        ).padStart(2, "0"),
+        ).padStart(
+          2,
+          "0"
+        ),
 
         date.getFullYear()
       ].join("/");
@@ -2788,13 +3250,16 @@
       ).toLocaleDateString(
         [],
         {
-          weekday: "long"
+          weekday:
+            "long"
         }
       );
     }
 
 
-    function formatTimeRange(task) {
+    function formatTimeRange(
+      task
+    ) {
       if (task.allDay) {
         return "All day";
       }
@@ -2815,20 +3280,30 @@
       milliseconds
     ) {
       const date =
-        new Date(milliseconds);
+        new Date(
+          milliseconds
+        );
 
       return (
         String(
           date.getHours()
-        ).padStart(2, "0") +
+        ).padStart(
+          2,
+          "0"
+        ) +
         String(
           date.getMinutes()
-        ).padStart(2, "0")
+        ).padStart(
+          2,
+          "0"
+        )
       );
     }
 
 
-    function startOfDay(date) {
+    function startOfDay(
+      date
+    ) {
       const result =
         new Date(date);
 
@@ -2843,40 +3318,57 @@
     }
 
 
-    function monthKey(date) {
+    function monthKey(
+      date
+    ) {
       return (
         date.getFullYear() +
         "-" +
         String(
           date.getMonth() + 1
-        ).padStart(2, "0")
+        ).padStart(
+          2,
+          "0"
+        )
       );
     }
 
 
-    function localDateKey(date) {
+    function localDateKey(
+      date
+    ) {
       return [
         date.getFullYear(),
 
         String(
           date.getMonth() + 1
-        ).padStart(2, "0"),
+        ).padStart(
+          2,
+          "0"
+        ),
 
         String(
           date.getDate()
-        ).padStart(2, "0")
+        ).padStart(
+          2,
+          "0"
+        )
       ].join("-");
     }
 
 
-    function getDateHeading(date) {
+    function getDateHeading(
+      date
+    ) {
       const today =
         startOfDay(
           new Date()
         );
 
       const eventDate =
-        startOfDay(date);
+        startOfDay(
+          date
+        );
 
       const difference =
         Math.round(
@@ -2887,7 +3379,9 @@
           86400000
         );
 
-      if (difference === 0) {
+      if (
+        difference === 0
+      ) {
         return (
           "Today — " +
           formatDate(date) +
@@ -2896,7 +3390,9 @@
         );
       }
 
-      if (difference === 1) {
+      if (
+        difference === 1
+      ) {
         return (
           "Tomorrow — " +
           formatDate(date) +
@@ -2921,7 +3417,9 @@
           );
 
         return saved
-          ? JSON.parse(saved)
+          ? JSON.parse(
+              saved
+            )
           : {};
       } catch (error) {
         return {};
@@ -2945,6 +3443,10 @@
     }
 
 
+    /**
+     * Removes saved checkbox records for events
+     * that no longer exist or are now in the past.
+     */
     function removeOldCompletionRecords() {
       const eligibleIds =
         new Set(
@@ -2955,18 +3457,24 @@
           )
         );
 
-      let changed = false;
+      let changed =
+        false;
 
       Object.keys(
         state.completed
       ).forEach(
         function(taskId) {
-          if (!eligibleIds.has(taskId)) {
+          if (
+            !eligibleIds.has(
+              taskId
+            )
+          ) {
             delete state.completed[
               taskId
             ];
 
-            changed = true;
+            changed =
+              true;
           }
         }
       );
@@ -2977,8 +3485,12 @@
     }
 
 
-    function escapeHtml(value) {
-      return String(value || "")
+    function escapeHtml(
+      value
+    ) {
+      return String(
+        value || ""
+      )
         .replace(
           /&/g,
           "&amp;"
@@ -3005,7 +3517,9 @@
     let toastTimer;
 
 
-    function showToast(message) {
+    function showToast(
+      message
+    ) {
       const toast =
         document.getElementById(
           "toast"
