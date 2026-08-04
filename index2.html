@@ -1,5 +1,75 @@
+const SETTINGS = {
+  // Sheet updated directly from Google Calendar
+  SHEET_NAME: "Calendar Feed",
+
+  // Stable sheet used by the HTML task list
+  TASK_SHEET_NAME: "Sheet2",
+
+  DAYS_BACK: 30,
+  DAYS_FORWARD: 365,
+
+  /*
+   * false = import all accessible calendars
+   * true  = import only checked/visible calendars
+   */
+  ONLY_SELECTED_CALENDARS: false,
+
+  /*
+   * Leave empty to import all accessible calendars.
+   *
+   * Example:
+   * CALENDAR_IDS: [
+   *   "your-email@gmail.com",
+   *   "calendar-id@group.calendar.google.com"
+   * ]
+   */
+  CALENDAR_IDS: [],
+
+  REFRESH_EVERY_MINUTES: 15,
+
+  // Number of event columns copied to Sheet2
+  EVENT_COLUMN_COUNT: 14
+};
+
+
 /**
- * Opens the calendar task-list webpage.
+ * Adds a custom menu to the Google Sheet.
+ */
+function onOpen() {
+  SpreadsheetApp.getUi()
+    .createMenu("Calendar Feed")
+    .addItem(
+      "Set up calendar feed",
+      "setupCalendarFeed"
+    )
+    .addItem(
+      "Sync calendar now",
+      "syncCalendarToSheet"
+    )
+    .addSeparator()
+    .addItem(
+      "Check and update Sheet2",
+      "checkAndUpdateSheet2"
+    )
+    .addItem(
+      "Force rebuild Sheet2",
+      "forceRebuildSheet2"
+    )
+    .addSeparator()
+    .addItem(
+      "Test calendar access",
+      "testCalendarAccess"
+    )
+    .addItem(
+      "Remove automatic sync",
+      "removeAutomaticSync"
+    )
+    .addToUi();
+}
+
+
+/**
+ * Opens the HTML task-list webpage.
  */
 function doGet() {
   return HtmlService
@@ -13,146 +83,987 @@ function doGet() {
 
 
 /**
- * Reads events from the Calendar Feed sheet.
- *
- * All dates are converted to numbers because HTML Service
- * cannot directly receive JavaScript Date objects.
+ * Run this function first.
  */
-function getTaskEvents() {
-  const spreadsheet = taskAppGetSpreadsheet_();
+function setupCalendarFeed() {
+  const spreadsheet =
+    SpreadsheetApp.getActiveSpreadsheet();
 
-  const sheetName =
-    typeof SETTINGS !== "undefined" &&
-    SETTINGS.SHEET_NAME
-      ? SETTINGS.SHEET_NAME
-      : "Calendar Feed";
-
-  const sheet = spreadsheet.getSheetByName(sheetName);
-
-  if (!sheet) {
+  if (!spreadsheet) {
     throw new Error(
-      'The sheet "' +
-      sheetName +
-      '" was not found. Run setupCalendarFeed first.'
+      "Open this script from your Google Sheet using Extensions > Apps Script."
     );
   }
 
-  const lastRow = sheet.getLastRow();
-  const lastColumn = sheet.getLastColumn();
+  PropertiesService
+    .getScriptProperties()
+    .setProperty(
+      "SPREADSHEET_ID",
+      spreadsheet.getId()
+    );
 
-  if (lastRow < 2 || lastColumn < 1) {
+  // Remove duplicate triggers.
+  removeCalendarTriggers();
+
+  // Perform the first synchronization.
+  syncCalendarToSheet();
+
+  // Create a new automatic trigger.
+  ScriptApp
+    .newTrigger("syncCalendarToSheet")
+    .timeBased()
+    .everyMinutes(
+      SETTINGS.REFRESH_EVERY_MINUTES
+    )
+    .create();
+
+  SpreadsheetApp.getUi().alert(
+    "Setup completed.\n\n" +
+    "Calendar Feed will refresh approximately every " +
+    SETTINGS.REFRESH_EVERY_MINUTES +
+    " minutes.\n\n" +
+    "The HTML task list will read from Sheet2."
+  );
+}
+
+
+/**
+ * Imports Google Calendar events into Calendar Feed.
+ *
+ * Sheet2 remains unchanged while this function is running.
+ */
+function syncCalendarToSheet() {
+  const spreadsheet =
+    getConnectedSpreadsheet();
+
+  const calendarFeedSheet =
+    getOrCreateSheet(
+      spreadsheet,
+      SETTINGS.SHEET_NAME
+    );
+
+  const lock =
+    LockService.getScriptLock();
+
+  try {
+    lock.waitLock(30000);
+  } catch (error) {
+    console.log(
+      "Another calendar synchronization is already running."
+    );
+
     return {
-      tasks: [],
-      sheetName: sheetName,
-      serverTime: Date.now(),
-      spreadsheetTimeZone:
-        spreadsheet.getSpreadsheetTimeZone()
+      success: false,
+      message:
+        "Another calendar synchronization is already running."
     };
   }
 
-  const values = sheet
-    .getRange(1, 1, lastRow, lastColumn)
-    .getValues();
+  try {
+    /*
+     * Calendar Feed can be cleared because the webpage
+     * no longer reads from it.
+     */
+    resetSheet(calendarFeedSheet);
 
-  const headers = values[0].map(function(header) {
-    return String(header).trim();
-  });
+    calendarFeedSheet
+      .getRange("A1")
+      .setValue(
+        "Loading calendar events..."
+      );
 
-  const headerMap = {};
+    SpreadsheetApp.flush();
 
-  headers.forEach(function(header, index) {
-    headerMap[header] = index;
-  });
+    const dateRange = getDateRange();
+    const calendars = getCalendarsToImport();
 
-  function getValue(row, headerName) {
-    const index = headerMap[headerName];
-
-    if (index === undefined) {
-      return "";
+    if (calendars.length === 0) {
+      throw new Error(
+        "No calendars were found. Run testCalendarAccess to check calendar permissions."
+      );
     }
 
-    return row[index];
+    const rows = [];
+
+    calendars.forEach(function(calendar) {
+      try {
+        const events =
+          calendar.getEvents(
+            dateRange.startDate,
+            dateRange.endDate
+          );
+
+        events.forEach(function(event) {
+          rows.push(
+            createEventRow(
+              calendar,
+              event
+            )
+          );
+        });
+
+      } catch (calendarError) {
+        console.log(
+          "Could not read calendar: " +
+          calendar.getName() +
+          ". Error: " +
+          calendarError.message
+        );
+      }
+    });
+
+    rows.sort(function(firstRow, secondRow) {
+      return firstRow[4] - secondRow[4];
+    });
+
+    writeCalendarFeed(
+      calendarFeedSheet,
+      rows,
+      calendars.length
+    );
+
+    /*
+     * Calendar Feed is now completely finished.
+     * Only now do we compare it with Sheet2.
+     */
+    const snapshotResult =
+      updateSheet2IfSourceHasMoreEvents_(
+        spreadsheet
+      );
+
+    const message =
+      rows.length +
+      " events imported into Calendar Feed. " +
+      snapshotResult.message;
+
+    spreadsheet.toast(
+      message,
+      "Calendar Feed",
+      7
+    );
+
+    return {
+      success: true,
+      calendarFeedCount: rows.length,
+      sheet2Updated:
+        snapshotResult.updated,
+      sheet2Count:
+        snapshotResult.sheet2Count,
+      message: message
+    };
+
+  } catch (error) {
+    showErrorInSheet(
+      calendarFeedSheet,
+      error
+    );
+
+    throw error;
+
+  } finally {
+    lock.releaseLock();
+  }
+}
+
+
+/**
+ * Returns the calendar search date range.
+ */
+function getDateRange() {
+  const startDate = new Date();
+
+  startDate.setDate(
+    startDate.getDate() -
+    SETTINGS.DAYS_BACK
+  );
+
+  startDate.setHours(0, 0, 0, 0);
+
+  const endDate = new Date();
+
+  endDate.setDate(
+    endDate.getDate() +
+    SETTINGS.DAYS_FORWARD
+  );
+
+  endDate.setHours(
+    23,
+    59,
+    59,
+    999
+  );
+
+  return {
+    startDate: startDate,
+    endDate: endDate
+  };
+}
+
+
+/**
+ * Gets the calendars that should be imported.
+ */
+function getCalendarsToImport() {
+  if (
+    Array.isArray(
+      SETTINGS.CALENDAR_IDS
+    ) &&
+    SETTINGS.CALENDAR_IDS.length > 0
+  ) {
+    return SETTINGS.CALENDAR_IDS
+      .map(function(calendarId) {
+        return CalendarApp.getCalendarById(
+          String(calendarId).trim()
+        );
+      })
+      .filter(function(calendar) {
+        return calendar !== null;
+      });
   }
 
-  const tasks = values
-    .slice(1)
-    .map(function(row) {
-      const title = String(
-        getValue(row, "Event Title") || ""
-      ).trim();
+  let calendars =
+    CalendarApp.getAllCalendars();
 
-      const startTime = taskAppDateToMillis_(
-        getValue(row, "Start Date and Time")
+  if (
+    SETTINGS.ONLY_SELECTED_CALENDARS
+  ) {
+    calendars =
+      calendars.filter(
+        function(calendar) {
+          return calendar.isSelected();
+        }
       );
+  }
 
-      const endTime = taskAppDateToMillis_(
-        getValue(row, "End Date and Time")
+  return calendars;
+}
+
+
+/**
+ * Converts one Calendar event into one sheet row.
+ */
+function createEventRow(
+  calendar,
+  event
+) {
+  const startTime =
+    event.getStartTime();
+
+  const endTime =
+    event.getEndTime();
+
+  let guests = "";
+  let creators = "";
+  let myStatus = "";
+  let recurring = "No";
+  let lastUpdated = "";
+
+  try {
+    guests = event
+      .getGuestList()
+      .map(function(guest) {
+        return guest.getEmail();
+      })
+      .filter(function(email) {
+        return Boolean(email);
+      })
+      .join(", ");
+  } catch (error) {
+    guests = "";
+  }
+
+  try {
+    creators = event
+      .getCreators()
+      .filter(function(creator) {
+        return Boolean(creator);
+      })
+      .join(", ");
+  } catch (error) {
+    creators = "";
+  }
+
+  try {
+    myStatus =
+      String(event.getMyStatus());
+  } catch (error) {
+    myStatus = "";
+  }
+
+  try {
+    recurring =
+      event.isRecurringEvent()
+        ? "Yes"
+        : "No";
+  } catch (error) {
+    recurring = "No";
+  }
+
+  try {
+    lastUpdated =
+      event.getLastUpdated();
+  } catch (error) {
+    lastUpdated = "";
+  }
+
+  const eventId =
+    event.getId();
+
+  const eventKey =
+    eventId +
+    "|" +
+    startTime.toISOString();
+
+  return [
+    eventKey,
+    eventId,
+    calendar.getName(),
+    event.getTitle() || "(No title)",
+    startTime,
+    endTime,
+    event.isAllDayEvent()
+      ? "Yes"
+      : "No",
+    event.getLocation() || "",
+    event.getDescription() || "",
+    creators,
+    guests,
+    myStatus,
+    recurring,
+    lastUpdated
+  ];
+}
+
+
+/**
+ * Writes completed event data into Calendar Feed.
+ */
+function writeCalendarFeed(
+  sheet,
+  rows,
+  calendarCount
+) {
+  resetSheet(sheet);
+
+  const headers = getEventHeaders_();
+
+  sheet
+    .getRange(
+      1,
+      1,
+      1,
+      headers.length
+    )
+    .setValues([headers])
+    .setFontWeight("bold")
+    .setBackground("#1a73e8")
+    .setFontColor("#ffffff")
+    .setHorizontalAlignment("center");
+
+  if (rows.length > 0) {
+    sheet
+      .getRange(
+        2,
+        1,
+        rows.length,
+        headers.length
+      )
+      .setValues(rows);
+
+    formatEventSheet_(
+      sheet,
+      rows.length
+    );
+
+  } else {
+    sheet
+      .getRange("A2")
+      .setValue(
+        "The calendar connection worked, but no events were found."
       );
+  }
 
-      if (!title || startTime === null) {
-        return null;
-      }
+  sheet.setFrozenRows(1);
+  sheet.setFrozenColumns(1);
 
-      const eventId = String(
-        getValue(row, "Event ID") || ""
-      );
+  setEventColumnWidths_(sheet);
 
-      let eventKey = String(
-        getValue(row, "Event Key") || ""
-      );
+  sheet
+    .getRange("P1")
+    .setValue(
+      "Last synchronized"
+    )
+    .setFontWeight("bold");
 
-      if (!eventKey) {
-        eventKey = eventId + "|" + startTime;
-      }
+  sheet
+    .getRange("P2")
+    .setValue(new Date())
+    .setNumberFormat(
+      "MM/dd/yyyy hh:mm:ss AM/PM"
+    );
+
+  sheet
+    .getRange("P4")
+    .setValue(
+      "Calendars checked"
+    )
+    .setFontWeight("bold");
+
+  sheet
+    .getRange("P5")
+    .setValue(calendarCount);
+
+  sheet
+    .getRange("P7")
+    .setValue(
+      "Events found"
+    )
+    .setFontWeight("bold");
+
+  sheet
+    .getRange("P8")
+    .setValue(rows.length);
+
+  sheet.setColumnWidth(16, 210);
+}
+
+
+/**
+ * Menu function that compares Calendar Feed and Sheet2.
+ */
+function checkAndUpdateSheet2() {
+  const spreadsheet =
+    getConnectedSpreadsheet();
+
+  const result =
+    updateSheet2IfSourceHasMoreEvents_(
+      spreadsheet
+    );
+
+  SpreadsheetApp.getUi().alert(
+    result.message
+  );
+}
+
+
+/**
+ * Updates Sheet2 only when Calendar Feed has more events.
+ */
+function updateSheet2IfSourceHasMoreEvents_(
+  spreadsheet
+) {
+  const sourceSheet =
+    spreadsheet.getSheetByName(
+      SETTINGS.SHEET_NAME
+    );
+
+  if (!sourceSheet) {
+    throw new Error(
+      'The sheet "' +
+      SETTINGS.SHEET_NAME +
+      '" was not found.'
+    );
+  }
+
+  const sheet2 =
+    getOrCreateSheet(
+      spreadsheet,
+      SETTINGS.TASK_SHEET_NAME
+    );
+
+  const sourceRows =
+    getValidEventRows_(sourceSheet);
+
+  const sheet2Rows =
+    getValidEventRows_(sheet2);
+
+  const sourceCount =
+    sourceRows.length;
+
+  const sheet2Count =
+    sheet2Rows.length;
+
+  const sheet2NeedsInitialization =
+    String(
+      sheet2.getRange("A1").getValue()
+    ).trim() !== "Event Key";
+
+  /*
+   * This is the exact comparison requested:
+   *
+   * Update when Calendar Feed has more events than Sheet2.
+   */
+  if (
+    sourceCount > sheet2Count ||
+    sheet2NeedsInitialization
+  ) {
+    copyEventsIntoSheet2_(
+      sourceSheet,
+      sheet2,
+      sourceRows
+    );
+
+    return {
+      updated: true,
+      calendarFeedCount:
+        sourceCount,
+      sheet2Count:
+        sourceCount,
+      message:
+        "Sheet2 was updated from " +
+        sheet2Count +
+        " events to " +
+        sourceCount +
+        " events."
+    };
+  }
+
+  return {
+    updated: false,
+    calendarFeedCount:
+      sourceCount,
+    sheet2Count:
+      sheet2Count,
+    message:
+      "Sheet2 was not changed because Calendar Feed has " +
+      sourceCount +
+      " events and Sheet2 already has " +
+      sheet2Count +
+      " events."
+  };
+}
+
+
+/**
+ * Copies completed Calendar Feed data into Sheet2.
+ *
+ * On later updates, Sheet2 is not cleared first.
+ * Existing tasks therefore remain available while
+ * the new values are written.
+ */
+function copyEventsIntoSheet2_(
+  sourceSheet,
+  targetSheet,
+  sourceRows
+) {
+  const headers =
+    sourceSheet
+      .getRange(
+        1,
+        1,
+        1,
+        SETTINGS.EVENT_COLUMN_COUNT
+      )
+      .getValues()[0];
+
+  const isNewSheet =
+    String(
+      targetSheet
+        .getRange("A1")
+        .getValue()
+    ).trim() !== "Event Key";
+
+  if (isNewSheet) {
+    resetSheet(targetSheet);
+  } else {
+    const oldFilter =
+      targetSheet.getFilter();
+
+    if (oldFilter) {
+      oldFilter.remove();
+    }
+
+    /*
+     * Do not clear Sheet2.
+     * The old task data stays visible until overwritten.
+     */
+  }
+
+  targetSheet
+    .getRange(
+      1,
+      1,
+      1,
+      headers.length
+    )
+    .setValues([headers])
+    .setFontWeight("bold")
+    .setBackground("#16845b")
+    .setFontColor("#ffffff")
+    .setHorizontalAlignment("center");
+
+  if (sourceRows.length > 0) {
+    targetSheet
+      .getRange(
+        2,
+        1,
+        sourceRows.length,
+        SETTINGS.EVENT_COLUMN_COUNT
+      )
+      .setValues(sourceRows);
+
+    formatEventSheet_(
+      targetSheet,
+      sourceRows.length
+    );
+  }
+
+  targetSheet.setFrozenRows(1);
+  targetSheet.setFrozenColumns(1);
+
+  setEventColumnWidths_(targetSheet);
+
+  targetSheet
+    .getRange("P1")
+    .setValue(
+      "Sheet2 snapshot updated"
+    )
+    .setFontWeight("bold");
+
+  targetSheet
+    .getRange("P2")
+    .setValue(new Date())
+    .setNumberFormat(
+      "MM/dd/yyyy hh:mm:ss AM/PM"
+    );
+
+  targetSheet
+    .getRange("P4")
+    .setValue(
+      "Events stored"
+    )
+    .setFontWeight("bold");
+
+  targetSheet
+    .getRange("P5")
+    .setValue(
+      sourceRows.length
+    );
+
+  targetSheet
+    .getRange("P7")
+    .setValue(
+      "HTML data source"
+    )
+    .setFontWeight("bold");
+
+  targetSheet
+    .getRange("P8")
+    .setValue("Yes");
+
+  targetSheet.setColumnWidth(16, 210);
+
+  SpreadsheetApp.flush();
+}
+
+
+/**
+ * Forces Sheet2 to match Calendar Feed regardless of event count.
+ *
+ * Use this manually when events were edited, deleted or canceled.
+ */
+function forceRebuildSheet2() {
+  const spreadsheet =
+    getConnectedSpreadsheet();
+
+  const sourceSheet =
+    spreadsheet.getSheetByName(
+      SETTINGS.SHEET_NAME
+    );
+
+  if (!sourceSheet) {
+    throw new Error(
+      'The sheet "' +
+      SETTINGS.SHEET_NAME +
+      '" was not found.'
+    );
+  }
+
+  const targetSheet =
+    getOrCreateSheet(
+      spreadsheet,
+      SETTINGS.TASK_SHEET_NAME
+    );
+
+  const sourceRows =
+    getValidEventRows_(sourceSheet);
+
+  resetSheet(targetSheet);
+
+  copyEventsIntoSheet2_(
+    sourceSheet,
+    targetSheet,
+    sourceRows
+  );
+
+  SpreadsheetApp.getUi().alert(
+    "Sheet2 was completely rebuilt with " +
+    sourceRows.length +
+    " events."
+  );
+}
+
+
+/**
+ * Returns only actual event rows.
+ *
+ * This ignores messages and metadata rows.
+ */
+function getValidEventRows_(sheet) {
+  if (!sheet || sheet.getLastRow() < 2) {
+    return [];
+  }
+
+  const numberOfRows =
+    sheet.getLastRow() - 1;
+
+  const values =
+    sheet
+      .getRange(
+        2,
+        1,
+        numberOfRows,
+        SETTINGS.EVENT_COLUMN_COUNT
+      )
+      .getValues();
+
+  return values.filter(function(row) {
+    const eventKey =
+      String(row[0] || "").trim();
+
+    const title =
+      String(row[3] || "").trim();
+
+    const startDate =
+      row[4];
+
+    return (
+      eventKey !== "" &&
+      title !== "" &&
+      isValidDateValue_(startDate)
+    );
+  });
+}
+
+
+/**
+ * Checks whether a value can be used as a date.
+ */
+function isValidDateValue_(value) {
+  if (
+    value instanceof Date &&
+    !isNaN(value.getTime())
+  ) {
+    return true;
+  }
+
+  if (
+    value === "" ||
+    value === null ||
+    value === undefined
+  ) {
+    return false;
+  }
+
+  return !isNaN(
+    new Date(value).getTime()
+  );
+}
+
+
+/**
+ * Returns the Calendar Feed column headers.
+ */
+function getEventHeaders_() {
+  return [
+    "Event Key",
+    "Event ID",
+    "Calendar",
+    "Event Title",
+    "Start Date and Time",
+    "End Date and Time",
+    "All-Day Event",
+    "Location",
+    "Description",
+    "Created By",
+    "Guests",
+    "My Status",
+    "Recurring Event",
+    "Last Updated"
+  ];
+}
+
+
+/**
+ * Applies formatting and creates a filter.
+ */
+function formatEventSheet_(
+  sheet,
+  eventCount
+) {
+  if (eventCount < 1) {
+    return;
+  }
+
+  sheet
+    .getRange(
+      2,
+      5,
+      eventCount,
+      2
+    )
+    .setNumberFormat(
+      "MM/dd/yyyy hh:mm AM/PM"
+    );
+
+  sheet
+    .getRange(
+      2,
+      14,
+      eventCount,
+      1
+    )
+    .setNumberFormat(
+      "MM/dd/yyyy hh:mm AM/PM"
+    );
+
+  sheet
+    .getRange(
+      2,
+      1,
+      eventCount,
+      SETTINGS.EVENT_COLUMN_COUNT
+    )
+    .setVerticalAlignment("middle");
+
+  sheet
+    .getRange(
+      2,
+      8,
+      eventCount,
+      4
+    )
+    .setWrap(true);
+
+  const oldFilter =
+    sheet.getFilter();
+
+  if (oldFilter) {
+    oldFilter.remove();
+  }
+
+  sheet
+    .getRange(
+      1,
+      1,
+      eventCount + 1,
+      SETTINGS.EVENT_COLUMN_COUNT
+    )
+    .createFilter();
+}
+
+
+/**
+ * Sets calendar column widths.
+ */
+function setEventColumnWidths_(sheet) {
+  sheet.setColumnWidth(1, 290);
+  sheet.setColumnWidth(2, 250);
+  sheet.setColumnWidth(3, 180);
+  sheet.setColumnWidth(4, 260);
+  sheet.setColumnWidth(5, 180);
+  sheet.setColumnWidth(6, 180);
+  sheet.setColumnWidth(7, 110);
+  sheet.setColumnWidth(8, 220);
+  sheet.setColumnWidth(9, 350);
+  sheet.setColumnWidth(10, 220);
+  sheet.setColumnWidth(11, 300);
+  sheet.setColumnWidth(12, 130);
+  sheet.setColumnWidth(13, 130);
+  sheet.setColumnWidth(14, 180);
+}
+
+
+/**
+ * Reads task events from Sheet2.
+ *
+ * The HTML does not read Calendar Feed.
+ */
+function getTaskEvents() {
+  const spreadsheet =
+    getConnectedSpreadsheet();
+
+  const sheet =
+    spreadsheet.getSheetByName(
+      SETTINGS.TASK_SHEET_NAME
+    );
+
+  if (!sheet) {
+    return {
+      tasks: [],
+      sheetName:
+        SETTINGS.TASK_SHEET_NAME,
+      serverTime: Date.now(),
+      message:
+        "Sheet2 has not been created yet. Run setupCalendarFeed."
+    };
+  }
+
+  const rows =
+    getValidEventRows_(sheet);
+
+  const tasks =
+    rows.map(function(row) {
+      const startTime =
+        taskAppDateToMillis_(row[4]);
+
+      const endTime =
+        taskAppDateToMillis_(row[5]);
 
       return {
-        id: eventKey,
-        eventId: eventId,
-        calendar: String(
-          getValue(row, "Calendar") || "Calendar"
-        ),
-        title: title,
+        id: String(row[0] || ""),
+        eventId: String(row[1] || ""),
+        calendar:
+          String(row[2] || "Calendar"),
+        title:
+          String(row[3] || "(No title)"),
         start: startTime,
         end: endTime || startTime,
         allDay:
-          String(
-            getValue(row, "All-Day Event")
-          ).toLowerCase() === "yes",
-        location: String(
-          getValue(row, "Location") || ""
-        ),
-        description: String(
-          getValue(row, "Description") || ""
-        ),
-        createdBy: String(
-          getValue(row, "Created By") || ""
-        ),
-        guests: String(
-          getValue(row, "Guests") || ""
-        ),
-        myStatus: String(
-          getValue(row, "My Status") || ""
-        ),
+          String(row[6] || "")
+            .toLowerCase() === "yes",
+        location:
+          String(row[7] || ""),
+        description:
+          String(row[8] || ""),
+        createdBy:
+          String(row[9] || ""),
+        guests:
+          String(row[10] || ""),
+        myStatus:
+          String(row[11] || ""),
         recurring:
-          String(
-            getValue(row, "Recurring Event")
-          ).toLowerCase() === "yes",
-        lastUpdated: taskAppDateToMillis_(
-          getValue(row, "Last Updated")
-        )
+          String(row[12] || "")
+            .toLowerCase() === "yes",
+        lastUpdated:
+          taskAppDateToMillis_(row[13])
       };
-    })
-    .filter(function(task) {
-      return task !== null;
     });
 
-  tasks.sort(function(firstTask, secondTask) {
-    return firstTask.start - secondTask.start;
+  tasks.sort(function(
+    firstTask,
+    secondTask
+  ) {
+    return (
+      firstTask.start -
+      secondTask.start
+    );
   });
 
   return {
     tasks: tasks,
-    sheetName: sheetName,
+    sheetName:
+      SETTINGS.TASK_SHEET_NAME,
     serverTime: Date.now(),
     spreadsheetTimeZone:
       spreadsheet.getSpreadsheetTimeZone()
@@ -161,27 +1072,121 @@ function getTaskEvents() {
 
 
 /**
- * Synchronizes Google Calendar and then returns the new tasks.
+ * Called by the HTML Sync Calendar button.
+ *
+ * Sheet2 remains available while Calendar Feed updates.
  */
 function refreshTaskEvents() {
-  if (
-    typeof syncCalendarToSheet === "function"
-  ) {
-    syncCalendarToSheet();
-  }
+  syncCalendarToSheet();
 
   return getTaskEvents();
 }
 
 
 /**
- * Opens the spreadsheet connected during setupCalendarFeed.
+ * Shows calendars accessible by the account.
  */
-function taskAppGetSpreadsheet_() {
+function testCalendarAccess() {
+  const spreadsheet =
+    getConnectedSpreadsheet();
+
+  const sheet =
+    getOrCreateSheet(
+      spreadsheet,
+      "Calendar Test"
+    );
+
+  resetSheet(sheet);
+
+  const calendars =
+    CalendarApp.getAllCalendars();
+
+  const headers = [
+    "Calendar Name",
+    "Calendar ID",
+    "Selected",
+    "Hidden",
+    "Owned By Me",
+    "Description"
+  ];
+
+  const rows =
+    calendars.map(function(calendar) {
+      let description = "";
+
+      try {
+        description =
+          calendar.getDescription() || "";
+      } catch (error) {
+        description = "";
+      }
+
+      return [
+        calendar.getName(),
+        calendar.getId(),
+        calendar.isSelected()
+          ? "Yes"
+          : "No",
+        calendar.isHidden()
+          ? "Yes"
+          : "No",
+        calendar.isOwnedByMe()
+          ? "Yes"
+          : "No",
+        description
+      ];
+    });
+
+  sheet
+    .getRange(
+      1,
+      1,
+      1,
+      headers.length
+    )
+    .setValues([headers])
+    .setFontWeight("bold")
+    .setBackground("#1a73e8")
+    .setFontColor("#ffffff");
+
+  if (rows.length > 0) {
+    sheet
+      .getRange(
+        2,
+        1,
+        rows.length,
+        headers.length
+      )
+      .setValues(rows);
+
+    sheet
+      .getRange(
+        1,
+        1,
+        rows.length + 1,
+        headers.length
+      )
+      .createFilter();
+  }
+
+  sheet.setFrozenRows(1);
+  sheet.autoResizeColumns(
+    1,
+    headers.length
+  );
+}
+
+
+/**
+ * Gets the connected spreadsheet.
+ */
+function getConnectedSpreadsheet() {
   const spreadsheetId =
     PropertiesService
       .getScriptProperties()
-      .getProperty("SPREADSHEET_ID");
+      .getProperty(
+        "SPREADSHEET_ID"
+      );
 
   if (spreadsheetId) {
     return SpreadsheetApp.openById(
@@ -194,7 +1199,7 @@ function taskAppGetSpreadsheet_() {
 
   if (!spreadsheet) {
     throw new Error(
-      "The spreadsheet is not connected. Open the Google Sheet and run setupCalendarFeed first."
+      "The spreadsheet is not connected. Run setupCalendarFeed first."
     );
   }
 
@@ -210,7 +1215,98 @@ function taskAppGetSpreadsheet_() {
 
 
 /**
- * Converts a spreadsheet date into milliseconds.
+ * Gets or creates a sheet.
+ */
+function getOrCreateSheet(
+  spreadsheet,
+  sheetName
+) {
+  let sheet =
+    spreadsheet.getSheetByName(
+      sheetName
+    );
+
+  if (!sheet) {
+    sheet =
+      spreadsheet.insertSheet(
+        sheetName
+      );
+  }
+
+  return sheet;
+}
+
+
+/**
+ * Removes filters, merged cells and data.
+ */
+function resetSheet(sheet) {
+  const filter =
+    sheet.getFilter();
+
+  if (filter) {
+    filter.remove();
+  }
+
+  try {
+    sheet
+      .getDataRange()
+      .breakApart();
+  } catch (error) {
+    console.log(
+      "No merged cells needed to be separated."
+    );
+  }
+
+  sheet.clear();
+}
+
+
+/**
+ * Shows synchronization errors in Calendar Feed.
+ */
+function showErrorInSheet(
+  sheet,
+  error
+) {
+  try {
+    resetSheet(sheet);
+
+    sheet
+      .getRange("A1")
+      .setValue(
+        "CALENDAR ERROR"
+      )
+      .setFontWeight("bold")
+      .setBackground("#d93025")
+      .setFontColor("#ffffff");
+
+    sheet
+      .getRange("A2")
+      .setValue(
+        error.message ||
+        String(error)
+      );
+
+    sheet
+      .getRange("A4")
+      .setValue(
+        "Sheet2 was not changed. The HTML task list can continue using its existing data."
+      );
+
+    sheet.setColumnWidth(1, 650);
+    sheet
+      .getRange("A1:A4")
+      .setWrap(true);
+
+  } catch (displayError) {
+    console.log(displayError);
+  }
+}
+
+
+/**
+ * Converts a spreadsheet date to milliseconds.
  */
 function taskAppDateToMillis_(value) {
   if (
@@ -228,14 +1324,58 @@ function taskAppDateToMillis_(value) {
     return null;
   }
 
-  const parsedDate = new Date(value);
+  const parsedDate =
+    new Date(value);
 
-  if (isNaN(parsedDate.getTime())) {
+  if (
+    isNaN(parsedDate.getTime())
+  ) {
     return null;
   }
 
   return parsedDate.getTime();
 }
+
+
+/**
+ * Removes existing automatic calendar triggers.
+ */
+function removeCalendarTriggers() {
+  const triggers =
+    ScriptApp.getProjectTriggers();
+
+  triggers.forEach(function(trigger) {
+    if (
+      trigger.getHandlerFunction() ===
+      "syncCalendarToSheet"
+    ) {
+      ScriptApp.deleteTrigger(
+        trigger
+      );
+    }
+  });
+}
+
+
+/**
+ * Removes automatic synchronization.
+ */
+function removeAutomaticSync() {
+  removeCalendarTriggers();
+
+  SpreadsheetApp.getUi().alert(
+    "Automatic calendar synchronization was removed."
+  );
+}
+
+
+
+
+
+
+
+
+
 
 
 
@@ -277,20 +1417,20 @@ function taskAppDateToMillis_(value) {
 
   <style>
     :root {
-      --background: #f4f7fb;
+      --background: #f3f6fb;
       --surface: #ffffff;
       --surface-soft: #f8fafc;
-      --text: #172033;
+      --text: #162033;
       --muted: #667085;
-      --border: #e3e8ef;
+      --border: #e2e8f0;
       --primary: #2563eb;
       --primary-dark: #1d4ed8;
       --success: #16845b;
-      --warning: #c16a0b;
+      --warning: #b9680a;
       --danger: #c43d4b;
       --purple: #7257d9;
-      --shadow: 0 15px 45px rgba(31, 45, 71, 0.09);
-      --small-shadow: 0 6px 20px rgba(31, 45, 71, 0.07);
+      --shadow: 0 16px 45px rgba(31, 45, 71, 0.09);
+      --small-shadow: 0 7px 22px rgba(31, 45, 71, 0.07);
       --radius: 18px;
     }
 
@@ -308,8 +1448,13 @@ function taskAppDateToMillis_(value) {
       background:
         radial-gradient(
           circle at top left,
-          rgba(37, 99, 235, 0.09),
-          transparent 27rem
+          rgba(37, 99, 235, 0.1),
+          transparent 30rem
+        ),
+        radial-gradient(
+          circle at top right,
+          rgba(114, 87, 217, 0.08),
+          transparent 25rem
         ),
         var(--background);
       color: var(--text);
@@ -343,7 +1488,7 @@ function taskAppDateToMillis_(value) {
       align-items: flex-start;
       justify-content: space-between;
       gap: 24px;
-      margin-bottom: 26px;
+      margin-bottom: 25px;
     }
 
     .brand {
@@ -354,11 +1499,11 @@ function taskAppDateToMillis_(value) {
 
     .brand-icon {
       display: grid;
+      width: 56px;
+      height: 56px;
       flex: 0 0 auto;
-      width: 54px;
-      height: 54px;
       place-items: center;
-      border-radius: 17px;
+      border-radius: 18px;
       background:
         linear-gradient(
           145deg,
@@ -367,13 +1512,14 @@ function taskAppDateToMillis_(value) {
         );
       color: white;
       box-shadow:
-        0 13px 28px rgba(37, 99, 235, 0.25);
-      font-size: 26px;
+        0 14px 30px rgba(37, 99, 235, 0.25);
+      font-size: 27px;
+      font-weight: 900;
     }
 
     h1 {
       margin: 0;
-      font-size: clamp(26px, 4vw, 38px);
+      font-size: clamp(27px, 4vw, 39px);
       line-height: 1.1;
       letter-spacing: -0.04em;
     }
@@ -382,6 +1528,7 @@ function taskAppDateToMillis_(value) {
       margin: 7px 0 0;
       color: var(--muted);
       font-size: 14px;
+      line-height: 1.5;
     }
 
     .sync-area {
@@ -392,18 +1539,18 @@ function taskAppDateToMillis_(value) {
 
     .sync-button {
       display: inline-flex;
-      min-height: 44px;
+      min-height: 46px;
       align-items: center;
       justify-content: center;
       gap: 9px;
       border: 0;
       border-radius: 13px;
-      padding: 0 17px;
+      padding: 0 18px;
       background: var(--primary);
       color: white;
-      font-weight: 700;
+      font-weight: 750;
       box-shadow:
-        0 9px 22px rgba(37, 99, 235, 0.21);
+        0 9px 22px rgba(37, 99, 235, 0.22);
       transition:
         transform 160ms ease,
         background 160ms ease,
@@ -423,18 +1570,55 @@ function taskAppDateToMillis_(value) {
 
     .sync-icon {
       display: inline-block;
-      font-size: 18px;
+      font-size: 19px;
       line-height: 1;
     }
 
     .sync-button.loading .sync-icon {
-      animation: spin 900ms linear infinite;
+      animation: spin 850ms linear infinite;
     }
 
     @keyframes spin {
       to {
         transform: rotate(360deg);
       }
+    }
+
+    .sync-banner {
+      display: none;
+      align-items: center;
+      justify-content: space-between;
+      gap: 15px;
+      border: 1px solid rgba(37, 99, 235, 0.18);
+      border-radius: 14px;
+      padding: 12px 15px;
+      margin-bottom: 18px;
+      background: rgba(239, 246, 255, 0.96);
+      color: #1e4e98;
+      font-size: 13px;
+      font-weight: 650;
+      box-shadow: var(--small-shadow);
+    }
+
+    .sync-banner.visible {
+      display: flex;
+    }
+
+    .sync-banner-message {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+    }
+
+    .mini-spinner {
+      display: inline-block;
+      width: 17px;
+      height: 17px;
+      flex: 0 0 auto;
+      border: 2px solid rgba(37, 99, 235, 0.22);
+      border-top-color: var(--primary);
+      border-radius: 50%;
+      animation: spin 750ms linear infinite;
     }
 
     .stats {
@@ -450,8 +1634,7 @@ function taskAppDateToMillis_(value) {
       border: 1px solid var(--border);
       border-radius: var(--radius);
       padding: 18px;
-      background:
-        rgba(255, 255, 255, 0.93);
+      background: rgba(255, 255, 255, 0.94);
       box-shadow: var(--small-shadow);
     }
 
@@ -462,39 +1645,31 @@ function taskAppDateToMillis_(value) {
       margin-bottom: 9px;
       color: var(--muted);
       font-size: 13px;
-      font-weight: 700;
+      font-weight: 750;
     }
 
     .stat-number {
       font-size: 29px;
-      font-weight: 800;
+      font-weight: 850;
       line-height: 1;
       letter-spacing: -0.04em;
     }
 
     .control-panel {
       position: sticky;
-      top: 10px;
+      top: 8px;
       z-index: 10;
-      border: 1px solid rgba(227, 232, 239, 0.9);
+      border: 1px solid rgba(226, 232, 240, 0.92);
       border-radius: var(--radius);
       padding: 15px;
       margin-bottom: 25px;
-      background:
-        rgba(255, 255, 255, 0.93);
+      background: rgba(255, 255, 255, 0.93);
       box-shadow: var(--shadow);
       backdrop-filter: blur(18px);
     }
 
-    .search-row {
-      display: flex;
-      align-items: center;
-      gap: 12px;
-    }
-
     .search-box {
       position: relative;
-      flex: 1;
     }
 
     .search-icon {
@@ -508,7 +1683,7 @@ function taskAppDateToMillis_(value) {
 
     .search-input {
       width: 100%;
-      min-height: 46px;
+      min-height: 47px;
       border: 1px solid var(--border);
       border-radius: 13px;
       padding: 0 16px 0 43px;
@@ -540,10 +1715,10 @@ function taskAppDateToMillis_(value) {
 
     .filter-button {
       flex: 0 0 auto;
-      min-height: 36px;
+      min-height: 37px;
       border: 1px solid transparent;
       border-radius: 10px;
-      padding: 0 13px;
+      padding: 0 14px;
       background: transparent;
       color: var(--muted);
       font-size: 13px;
@@ -573,7 +1748,7 @@ function taskAppDateToMillis_(value) {
 
     .list-title {
       margin: 0;
-      font-size: 20px;
+      font-size: 21px;
       letter-spacing: -0.025em;
     }
 
@@ -593,7 +1768,7 @@ function taskAppDateToMillis_(value) {
       margin: 0 0 12px;
       color: var(--muted);
       font-size: 13px;
-      font-weight: 800;
+      font-weight: 850;
       letter-spacing: 0.05em;
       text-transform: uppercase;
     }
@@ -630,7 +1805,7 @@ function taskAppDateToMillis_(value) {
     }
 
     .task-card.completed {
-      background: rgba(248, 250, 252, 0.88);
+      background: rgba(248, 250, 252, 0.9);
       opacity: 0.72;
     }
 
@@ -643,7 +1818,6 @@ function taskAppDateToMillis_(value) {
       display: grid;
       width: 25px;
       height: 25px;
-      flex: 0 0 auto;
       place-items: center;
       margin-top: 1px;
     }
@@ -696,7 +1870,7 @@ function taskAppDateToMillis_(value) {
       margin: 0;
       overflow-wrap: anywhere;
       font-size: 17px;
-      font-weight: 800;
+      font-weight: 830;
       line-height: 1.35;
       letter-spacing: -0.015em;
     }
@@ -808,7 +1982,7 @@ function taskAppDateToMillis_(value) {
     }
 
     .time-panel {
-      min-width: 92px;
+      min-width: 95px;
       border-left: 1px solid var(--border);
       padding-left: 15px;
       text-align: right;
@@ -825,16 +1999,16 @@ function taskAppDateToMillis_(value) {
       font-size: 11px;
     }
 
+    .loading-state,
     .empty-state,
-    .error-state,
-    .loading-state {
+    .error-state {
       display: grid;
-      min-height: 280px;
+      min-height: 285px;
       place-items: center;
       border: 1px dashed #cbd4df;
       border-radius: var(--radius);
       padding: 35px;
-      background: rgba(255, 255, 255, 0.65);
+      background: rgba(255, 255, 255, 0.68);
       text-align: center;
     }
 
@@ -849,11 +2023,15 @@ function taskAppDateToMillis_(value) {
     }
 
     .state-message {
-      max-width: 520px;
+      max-width: 540px;
       margin: 0;
       color: var(--muted);
       font-size: 14px;
       line-height: 1.6;
+    }
+
+    .loading-dots {
+      margin-bottom: 13px;
     }
 
     .loading-dot {
@@ -888,6 +2066,17 @@ function taskAppDateToMillis_(value) {
       }
     }
 
+    .retry-button {
+      min-height: 41px;
+      border: 0;
+      border-radius: 11px;
+      padding: 0 16px;
+      margin-top: 17px;
+      background: var(--primary);
+      color: white;
+      font-weight: 750;
+    }
+
     .footer-note {
       margin-top: 27px;
       color: var(--muted);
@@ -901,7 +2090,7 @@ function taskAppDateToMillis_(value) {
       right: 20px;
       bottom: 20px;
       z-index: 100;
-      max-width: min(360px, calc(100% - 40px));
+      max-width: min(380px, calc(100% - 40px));
       border-radius: 13px;
       padding: 13px 16px;
       background: #172033;
@@ -950,9 +2139,9 @@ function taskAppDateToMillis_(value) {
 
     @media (max-width: 560px) {
       .brand-icon {
-        width: 47px;
-        height: 47px;
-        border-radius: 14px;
+        width: 48px;
+        height: 48px;
+        border-radius: 15px;
       }
 
       .stats {
@@ -967,8 +2156,13 @@ function taskAppDateToMillis_(value) {
         font-size: 25px;
       }
 
+      .sync-banner {
+        align-items: flex-start;
+      }
+
       .task-card {
-        grid-template-columns: auto minmax(0, 1fr);
+        grid-template-columns:
+          auto minmax(0, 1fr);
         gap: 12px;
         padding: 15px;
       }
@@ -998,13 +2192,18 @@ function taskAppDateToMillis_(value) {
   <main class="page">
     <header class="topbar">
       <div class="brand">
-        <div class="brand-icon">✓</div>
+        <div class="brand-icon">
+          ✓
+        </div>
 
         <div>
           <h1>Calendar Tasks</h1>
 
-          <p class="subtitle" id="lastUpdated">
-            Loading your calendar events...
+          <p
+            class="subtitle"
+            id="lastUpdated"
+          >
+            Loading tasks from Sheet2...
           </p>
         </div>
       </div>
@@ -1016,12 +2215,27 @@ function taskAppDateToMillis_(value) {
           type="button"
         >
           <span class="sync-icon">↻</span>
+
           <span id="syncButtonText">
             Sync calendar
           </span>
         </button>
       </div>
     </header>
+
+    <div
+      class="sync-banner"
+      id="syncBanner"
+    >
+      <div class="sync-banner-message">
+        <span class="mini-spinner"></span>
+
+        <span>
+          Calendar Feed is updating in the background.
+          Current tasks from Sheet2 will remain visible.
+        </span>
+      </div>
+    </div>
 
     <section class="stats">
       <article class="stat-card">
@@ -1030,7 +2244,10 @@ function taskAppDateToMillis_(value) {
           Today
         </div>
 
-        <div class="stat-number" id="todayCount">
+        <div
+          class="stat-number"
+          id="todayCount"
+        >
           0
         </div>
       </article>
@@ -1041,7 +2258,10 @@ function taskAppDateToMillis_(value) {
           Upcoming
         </div>
 
-        <div class="stat-number" id="upcomingCount">
+        <div
+          class="stat-number"
+          id="upcomingCount"
+        >
           0
         </div>
       </article>
@@ -1052,7 +2272,10 @@ function taskAppDateToMillis_(value) {
           Completed
         </div>
 
-        <div class="stat-number" id="completedCount">
+        <div
+          class="stat-number"
+          id="completedCount"
+        >
           0
         </div>
       </article>
@@ -1063,28 +2286,32 @@ function taskAppDateToMillis_(value) {
           Total events
         </div>
 
-        <div class="stat-number" id="totalCount">
+        <div
+          class="stat-number"
+          id="totalCount"
+        >
           0
         </div>
       </article>
     </section>
 
     <section class="control-panel">
-      <div class="search-row">
-        <div class="search-box">
-          <span class="search-icon">⌕</span>
+      <div class="search-box">
+        <span class="search-icon">⌕</span>
 
-          <input
-            class="search-input"
-            id="searchInput"
-            type="search"
-            placeholder="Search tasks, calendars, locations or descriptions..."
-            autocomplete="off"
-          >
-        </div>
+        <input
+          class="search-input"
+          id="searchInput"
+          type="search"
+          placeholder="Search tasks, calendars, locations or descriptions..."
+          autocomplete="off"
+        >
       </div>
 
-      <nav class="filters" aria-label="Task filters">
+      <nav
+        class="filters"
+        aria-label="Task filters"
+      >
         <button
           class="filter-button active"
           type="button"
@@ -1129,11 +2356,17 @@ function taskAppDateToMillis_(value) {
 
     <section>
       <div class="list-header">
-        <h2 class="list-title" id="listTitle">
+        <h2
+          class="list-title"
+          id="listTitle"
+        >
           All tasks
         </h2>
 
-        <div class="result-count" id="resultCount">
+        <div
+          class="result-count"
+          id="resultCount"
+        >
           0 events
         </div>
       </div>
@@ -1141,18 +2374,18 @@ function taskAppDateToMillis_(value) {
       <div id="taskList">
         <div class="loading-state">
           <div>
-            <div>
+            <div class="loading-dots">
               <span class="loading-dot"></span>
               <span class="loading-dot"></span>
               <span class="loading-dot"></span>
             </div>
 
             <h3 class="state-title">
-              Loading events
+              Loading tasks
             </h3>
 
             <p class="state-message">
-              Reading events from your Calendar Feed sheet.
+              Reading stable calendar data from Sheet2.
             </p>
           </div>
         </div>
@@ -1160,23 +2393,31 @@ function taskAppDateToMillis_(value) {
     </section>
 
     <p class="footer-note">
-      Calendar events come from the Calendar Feed sheet.
+      Tasks are displayed from Sheet2. Calendar Feed can
+      update in the background without removing the task list.
       Completed checkboxes are saved in this browser.
     </p>
   </main>
 
-  <div class="toast" id="toast"></div>
+  <div
+    class="toast"
+    id="toast"
+  ></div>
 
   <script>
     const STORAGE_KEY =
-      "calendarTaskCompletionStatusV1";
+      "calendarTaskCompletionStatusV2";
+
+    const AUTO_RELOAD_INTERVAL =
+      5 * 60 * 1000;
 
     const state = {
       tasks: [],
       filter: "all",
       search: "",
       completed: loadCompletedTasks(),
-      loading: false
+      loading: false,
+      firstLoadCompleted: false
     };
 
     const filterNames = {
@@ -1187,6 +2428,7 @@ function taskAppDateToMillis_(value) {
       completed: "Completed"
     };
 
+
     document.addEventListener(
       "DOMContentLoaded",
       initializeApp
@@ -1196,18 +2438,26 @@ function taskAppDateToMillis_(value) {
     function initializeApp() {
       document
         .getElementById("syncButton")
-        .addEventListener("click", function() {
-          loadTasks(true);
-        });
+        .addEventListener(
+          "click",
+          function() {
+            loadTasks(true, false);
+          }
+        );
 
       document
         .getElementById("searchInput")
-        .addEventListener("input", function(event) {
-          state.search =
-            event.target.value.trim().toLowerCase();
+        .addEventListener(
+          "input",
+          function(event) {
+            state.search =
+              event.target.value
+                .trim()
+                .toLowerCase();
 
-          renderTasks();
-        });
+            renderTasks();
+          }
+        );
 
       document
         .querySelectorAll(".filter-button")
@@ -1215,7 +2465,9 @@ function taskAppDateToMillis_(value) {
           button.addEventListener(
             "click",
             function() {
-              setFilter(button.dataset.filter);
+              setFilter(
+                button.dataset.filter
+              );
             }
           );
         });
@@ -1227,17 +2479,51 @@ function taskAppDateToMillis_(value) {
           handleTaskCheckbox
         );
 
-      loadTasks(false);
+      document
+        .getElementById("taskList")
+        .addEventListener(
+          "click",
+          function(event) {
+            if (
+              event.target &&
+              event.target.id === "retryButton"
+            ) {
+              loadTasks(false, false);
+            }
+          }
+        );
 
-      // Reload information from the sheet every five minutes.
-      window.setInterval(function() {
-        if (!state.loading) {
-          loadTasks(false, true);
-        }
-      }, 5 * 60 * 1000);
+      /*
+       * Initial page load:
+       * Read directly from Sheet2.
+       */
+      loadTasks(false, false);
+
+      /*
+       * Every five minutes, reload Sheet2 only.
+       * This does not start Calendar synchronization.
+       */
+      window.setInterval(
+        function() {
+          if (!state.loading) {
+            loadTasks(false, true);
+          }
+        },
+        AUTO_RELOAD_INTERVAL
+      );
     }
 
 
+    /**
+     * Loads tasks from Sheet2.
+     *
+     * synchronizeCalendar = true:
+     * Calls refreshTaskEvents(), which updates Calendar Feed
+     * and then returns Sheet2.
+     *
+     * synchronizeCalendar = false:
+     * Calls getTaskEvents(), which immediately reads Sheet2.
+     */
     function loadTasks(
       synchronizeCalendar,
       silent
@@ -1247,46 +2533,92 @@ function taskAppDateToMillis_(value) {
       }
 
       state.loading = true;
+
       setSyncButtonLoading(true);
 
-      if (!silent) {
+      if (synchronizeCalendar) {
+        setSyncBannerVisible(true);
+      }
+
+      /*
+       * Only replace the webpage with a loading screen
+       * when there are no tasks already displayed.
+       */
+      if (
+        state.tasks.length === 0 &&
+        !silent
+      ) {
         showLoadingState(
           synchronizeCalendar
-            ? "Synchronizing Google Calendar..."
-            : "Loading calendar events..."
+            ? "Synchronizing Calendar Feed while Sheet2 remains available..."
+            : "Loading tasks from Sheet2..."
         );
       }
 
-      const request = google.script.run
-        .withSuccessHandler(function(result) {
-          state.loading = false;
-          setSyncButtonLoading(false);
+      const request =
+        google.script.run
+          .withSuccessHandler(
+            function(result) {
+              state.loading = false;
+              state.firstLoadCompleted = true;
 
-          state.tasks = Array.isArray(result.tasks)
-            ? result.tasks
-            : [];
+              setSyncButtonLoading(false);
+              setSyncBannerVisible(false);
 
-          updateLastLoaded(result);
-          updateStatistics();
-          renderTasks();
+              state.tasks =
+                result &&
+                Array.isArray(result.tasks)
+                  ? result.tasks
+                  : [];
 
-          if (synchronizeCalendar) {
-            showToast(
-              state.tasks.length +
-              " calendar events loaded."
-            );
-          }
-        })
-        .withFailureHandler(function(error) {
-          state.loading = false;
-          setSyncButtonLoading(false);
+              removeMissingCompletionRecords();
 
-          showErrorState(
-            error && error.message
-              ? error.message
-              : String(error)
+              updateLastLoaded(result || {});
+              updateStatistics();
+              renderTasks();
+
+              if (
+                synchronizeCalendar
+              ) {
+                showToast(
+                  state.tasks.length +
+                  " tasks loaded from Sheet2."
+                );
+              }
+            }
+          )
+          .withFailureHandler(
+            function(error) {
+              state.loading = false;
+
+              setSyncButtonLoading(false);
+              setSyncBannerVisible(false);
+
+              const message =
+                error &&
+                error.message
+                  ? error.message
+                  : String(error);
+
+              console.error(message);
+
+              /*
+               * Do not remove existing tasks when a
+               * Calendar synchronization fails.
+               */
+              if (
+                state.tasks.length > 0
+              ) {
+                showToast(
+                  "The calendar update failed. Existing Sheet2 tasks are still available."
+                );
+
+                return;
+              }
+
+              showErrorState(message);
+            }
           );
-        });
 
       if (synchronizeCalendar) {
         request.refreshTaskEvents();
@@ -1311,7 +2643,8 @@ function taskAppDateToMillis_(value) {
       document.getElementById(
         "listTitle"
       ).textContent =
-        filterNames[filter] || "Tasks";
+        filterNames[filter] ||
+        "Tasks";
 
       renderTasks();
     }
@@ -1319,7 +2652,9 @@ function taskAppDateToMillis_(value) {
 
     function renderTasks() {
       const taskList =
-        document.getElementById("taskList");
+        document.getElementById(
+          "taskList"
+        );
 
       const filteredTasks =
         getFilteredTasks();
@@ -1334,19 +2669,23 @@ function taskAppDateToMillis_(value) {
             : " events"
         );
 
-      if (filteredTasks.length === 0) {
+      if (
+        filteredTasks.length === 0
+      ) {
         taskList.innerHTML = `
           <div class="empty-state">
             <div>
-              <div class="state-icon">🗓️</div>
+              <div class="state-icon">
+                🗓️
+              </div>
 
               <h3 class="state-title">
                 No events found
               </h3>
 
               <p class="state-message">
-                There are no calendar events matching
-                this filter or search.
+                There are no events matching the
+                selected filter or search.
               </p>
             </div>
           </div>
@@ -1355,33 +2694,45 @@ function taskAppDateToMillis_(value) {
         return;
       }
 
-      const groups = groupTasksByDate(
-        filteredTasks
-      );
+      const groups =
+        groupTasksByDate(
+          filteredTasks
+        );
 
       let html = "";
 
-      Object.keys(groups).forEach(function(dateKey) {
-        const group = groups[dateKey];
+      Object.keys(groups)
+        .sort()
+        .forEach(function(dateKey) {
+          const group =
+            groups[dateKey];
 
-        html += `
-          <section class="date-section">
-            <h3 class="date-heading">
-              ${escapeHtml(group.label)}
-            </h3>
+          html += `
+            <section class="date-section">
+              <h3 class="date-heading">
+                ${escapeHtml(group.label)}
+              </h3>
 
-            ${group.tasks.map(createTaskCard).join("")}
-          </section>
-        `;
-      });
+              ${
+                group.tasks
+                  .map(createTaskCard)
+                  .join("")
+              }
+            </section>
+          `;
+        });
 
       taskList.innerHTML = html;
     }
 
 
     function getFilteredTasks() {
-      const now = new Date();
-      const todayStart = startOfDay(now);
+      const now =
+        new Date();
+
+      const todayStart =
+        startOfDay(now);
+
       const tomorrowStart =
         new Date(todayStart);
 
@@ -1392,35 +2743,50 @@ function taskAppDateToMillis_(value) {
       return state.tasks
         .filter(function(task) {
           const completed =
-            Boolean(state.completed[task.id]);
+            Boolean(
+              state.completed[task.id]
+            );
 
-          const start = new Date(task.start);
-          const end = new Date(
-            task.end || task.start
-          );
+          const start =
+            new Date(task.start);
+
+          const end =
+            new Date(
+              task.end ||
+              task.start
+            );
 
           let matchesFilter = true;
 
-          if (state.filter === "today") {
+          if (
+            state.filter === "today"
+          ) {
             matchesFilter =
               end >= todayStart &&
               start < tomorrowStart;
           }
 
-          if (state.filter === "upcoming") {
+          if (
+            state.filter === "upcoming"
+          ) {
             matchesFilter =
               start >= tomorrowStart &&
               !completed;
           }
 
-          if (state.filter === "past") {
+          if (
+            state.filter === "past"
+          ) {
             matchesFilter =
               end < now &&
               !completed;
           }
 
-          if (state.filter === "completed") {
-            matchesFilter = completed;
+          if (
+            state.filter === "completed"
+          ) {
+            matchesFilter =
+              completed;
           }
 
           if (!matchesFilter) {
@@ -1437,7 +2803,8 @@ function taskAppDateToMillis_(value) {
             task.location,
             task.description,
             task.guests,
-            task.createdBy
+            task.createdBy,
+            task.myStatus
           ]
             .join(" ")
             .toLowerCase();
@@ -1446,21 +2813,39 @@ function taskAppDateToMillis_(value) {
             state.search
           );
         })
-        .sort(function(firstTask, secondTask) {
+        .sort(function(
+          firstTask,
+          secondTask
+        ) {
           const firstCompleted =
-            Boolean(state.completed[firstTask.id]);
+            Boolean(
+              state.completed[
+                firstTask.id
+              ]
+            );
 
           const secondCompleted =
-            Boolean(state.completed[secondTask.id]);
+            Boolean(
+              state.completed[
+                secondTask.id
+              ]
+            );
 
           if (
-            firstCompleted !== secondCompleted &&
-            state.filter !== "completed"
+            firstCompleted !==
+              secondCompleted &&
+            state.filter !==
+              "completed"
           ) {
-            return firstCompleted ? 1 : -1;
+            return firstCompleted
+              ? 1
+              : -1;
           }
 
-          return firstTask.start - secondTask.start;
+          return (
+            firstTask.start -
+            secondTask.start
+          );
         });
     }
 
@@ -1468,19 +2853,27 @@ function taskAppDateToMillis_(value) {
     function groupTasksByDate(tasks) {
       const groups = {};
 
-      tasks.forEach(function(task) {
-        const date = new Date(task.start);
-        const key = localDateKey(date);
+      tasks.forEach(
+        function(task) {
+          const date =
+            new Date(task.start);
 
-        if (!groups[key]) {
-          groups[key] = {
-            label: getDateHeading(date),
-            tasks: []
-          };
+          const key =
+            localDateKey(date);
+
+          if (!groups[key]) {
+            groups[key] = {
+              label:
+                getDateHeading(date),
+              tasks: []
+            };
+          }
+
+          groups[key].tasks.push(
+            task
+          );
         }
-
-        groups[key].tasks.push(task);
-      });
+      );
 
       return groups;
     }
@@ -1488,105 +2881,143 @@ function taskAppDateToMillis_(value) {
 
     function createTaskCard(task) {
       const completed =
-        Boolean(state.completed[task.id]);
+        Boolean(
+          state.completed[task.id]
+        );
 
-      const status = getTaskStatus(
-        task,
-        completed
-      );
+      const status =
+        getTaskStatus(
+          task,
+          completed
+        );
 
       const encodedId =
         encodeURIComponent(task.id);
 
-      const locationHtml = task.location
-        ? `
-          <span class="meta-item">
-            <span>📍</span>
+      const locationHtml =
+        task.location
+          ? `
+            <span class="meta-item">
+              <span>📍</span>
 
-            <a
-              class="location-link"
-              href="https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(task.location)}"
-              target="_blank"
-              rel="noopener noreferrer"
-            >
-              ${escapeHtml(task.location)}
-            </a>
-          </span>
-        `
-        : "";
+              <a
+                class="location-link"
+                href="https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(task.location)}"
+                target="_blank"
+                rel="noopener noreferrer"
+              >
+                ${escapeHtml(task.location)}
+              </a>
+            </span>
+          `
+          : "";
 
       const descriptionHtml =
         task.description
           ? `
-            <p class="task-description">
-              ${escapeHtml(task.description)}
-            </p>
+            <p class="task-description">${
+              escapeHtml(
+                task.description
+              )
+            }</p>
           `
           : "";
 
       const hasDetails =
-        task.guests ||
-        task.createdBy ||
-        task.recurring ||
-        task.myStatus;
+        Boolean(
+          task.guests ||
+          task.createdBy ||
+          task.recurring ||
+          task.myStatus
+        );
 
-      const detailsHtml = hasDetails
-        ? `
-          <details class="details-box">
-            <summary>More details</summary>
+      const detailsHtml =
+        hasDetails
+          ? `
+            <details class="details-box">
+              <summary>
+                More details
+              </summary>
 
-            <div class="details-content">
-              ${
-                task.guests
-                  ? `
-                    <div>
-                      <strong>Guests:</strong>
-                      ${escapeHtml(task.guests)}
-                    </div>
-                  `
-                  : ""
-              }
+              <div class="details-content">
+                ${
+                  task.guests
+                    ? `
+                      <div>
+                        <strong>
+                          Guests:
+                        </strong>
 
-              ${
-                task.createdBy
-                  ? `
-                    <div>
-                      <strong>Created by:</strong>
-                      ${escapeHtml(task.createdBy)}
-                    </div>
-                  `
-                  : ""
-              }
+                        ${
+                          escapeHtml(
+                            task.guests
+                          )
+                        }
+                      </div>
+                    `
+                    : ""
+                }
 
-              ${
-                task.myStatus
-                  ? `
-                    <div>
-                      <strong>Calendar status:</strong>
-                      ${escapeHtml(task.myStatus)}
-                    </div>
-                  `
-                  : ""
-              }
+                ${
+                  task.createdBy
+                    ? `
+                      <div>
+                        <strong>
+                          Created by:
+                        </strong>
 
-              ${
-                task.recurring
-                  ? `
-                    <div>
-                      <strong>Recurring event:</strong>
-                      Yes
-                    </div>
-                  `
-                  : ""
-              }
-            </div>
-          </details>
-        `
-        : "";
+                        ${
+                          escapeHtml(
+                            task.createdBy
+                          )
+                        }
+                      </div>
+                    `
+                    : ""
+                }
+
+                ${
+                  task.myStatus
+                    ? `
+                      <div>
+                        <strong>
+                          Calendar status:
+                        </strong>
+
+                        ${
+                          escapeHtml(
+                            task.myStatus
+                          )
+                        }
+                      </div>
+                    `
+                    : ""
+                }
+
+                ${
+                  task.recurring
+                    ? `
+                      <div>
+                        <strong>
+                          Recurring event:
+                        </strong>
+                        Yes
+                      </div>
+                    `
+                    : ""
+                }
+              </div>
+            </details>
+          `
+          : "";
 
       return `
         <article
-          class="task-card ${completed ? "completed" : ""}"
+          class="task-card ${
+            completed
+              ? "completed"
+              : ""
+          }"
         >
           <label
             class="check-wrapper"
@@ -1596,7 +3027,11 @@ function taskAppDateToMillis_(value) {
               class="task-check"
               type="checkbox"
               data-task-id="${encodedId}"
-              ${completed ? "checked" : ""}
+              ${
+                completed
+                  ? "checked"
+                  : ""
+              }
             >
 
             <span class="custom-check"></span>
@@ -1609,20 +3044,37 @@ function taskAppDateToMillis_(value) {
               </h4>
 
               <span class="calendar-badge">
-                ${escapeHtml(task.calendar)}
+                ${
+                  escapeHtml(
+                    task.calendar
+                  )
+                }
               </span>
 
               <span
-                class="status-badge ${status.className}"
+                class="status-badge ${
+                  status.className
+                }"
               >
-                ${escapeHtml(status.label)}
+                ${
+                  escapeHtml(
+                    status.label
+                  )
+                }
               </span>
             </div>
 
             <div class="task-meta">
               <span class="meta-item">
                 <span>🗓</span>
-                ${escapeHtml(formatFullDate(task.start))}
+
+                ${
+                  escapeHtml(
+                    formatFullDate(
+                      task.start
+                    )
+                  )
+                }
               </span>
 
               ${
@@ -1636,7 +3088,14 @@ function taskAppDateToMillis_(value) {
                   : `
                     <span class="meta-item">
                       <span>⏱</span>
-                      ${escapeHtml(formatDuration(task))}
+
+                      ${
+                        escapeHtml(
+                          formatDuration(
+                            task
+                          )
+                        )
+                      }
                     </span>
                   `
               }
@@ -1653,7 +3112,11 @@ function taskAppDateToMillis_(value) {
               ${
                 task.allDay
                   ? "All day"
-                  : escapeHtml(formatTime(task.start))
+                  : escapeHtml(
+                      formatTime(
+                        task.start
+                      )
+                    )
               }
             </div>
 
@@ -1663,7 +3126,9 @@ function taskAppDateToMillis_(value) {
                   ? ""
                   : "to " +
                     escapeHtml(
-                      formatTime(task.end)
+                      formatTime(
+                        task.end
+                      )
                     )
               }
             </div>
@@ -1673,67 +3138,104 @@ function taskAppDateToMillis_(value) {
     }
 
 
-    function getTaskStatus(task, completed) {
+    function getTaskStatus(
+      task,
+      completed
+    ) {
       if (completed) {
         return {
           label: "Done",
-          className: "status-done"
+          className:
+            "status-done"
         };
       }
 
-      const now = new Date();
-      const start = new Date(task.start);
-      const end = new Date(
-        task.end || task.start
-      );
+      const now =
+        new Date();
 
-      if (now >= start && now <= end) {
+      const start =
+        new Date(task.start);
+
+      const end =
+        new Date(
+          task.end ||
+          task.start
+        );
+
+      if (
+        now >= start &&
+        now <= end
+      ) {
         return {
           label: "In progress",
-          className: "status-current"
+          className:
+            "status-current"
         };
       }
 
       if (end < now) {
         return {
           label: "Past",
-          className: "status-past"
+          className:
+            "status-past"
         };
       }
 
-      if (isSameDay(start, now)) {
+      if (
+        isSameDay(
+          start,
+          now
+        )
+      ) {
         return {
           label: "Today",
-          className: "status-today"
+          className:
+            "status-today"
         };
       }
 
       return {
         label: "Upcoming",
-        className: "status-upcoming"
+        className:
+          "status-upcoming"
       };
     }
 
 
-    function handleTaskCheckbox(event) {
+    function handleTaskCheckbox(
+      event
+    ) {
       if (
-        !event.target.classList.contains(
-          "task-check"
-        )
+        !event.target
+          .classList
+          .contains("task-check")
       ) {
         return;
       }
 
-      const taskId = decodeURIComponent(
-        event.target.dataset.taskId
-      );
+      const taskId =
+        decodeURIComponent(
+          event.target.dataset.taskId
+        );
 
-      if (event.target.checked) {
-        state.completed[taskId] = true;
-        showToast("Task marked as completed.");
+      if (
+        event.target.checked
+      ) {
+        state.completed[
+          taskId
+        ] = true;
+
+        showToast(
+          "Task marked as completed."
+        );
       } else {
-        delete state.completed[taskId];
-        showToast("Task marked as open.");
+        delete state.completed[
+          taskId
+        ];
+
+        showToast(
+          "Task marked as open."
+        );
       }
 
       saveCompletedTasks();
@@ -1743,8 +3245,12 @@ function taskAppDateToMillis_(value) {
 
 
     function updateStatistics() {
-      const now = new Date();
-      const todayStart = startOfDay(now);
+      const now =
+        new Date();
+
+      const todayStart =
+        startOfDay(now);
+
       const tomorrowStart =
         new Date(todayStart);
 
@@ -1753,100 +3259,154 @@ function taskAppDateToMillis_(value) {
       );
 
       const todayCount =
-        state.tasks.filter(function(task) {
-          const start = new Date(task.start);
-          const end = new Date(
-            task.end || task.start
-          );
+        state.tasks.filter(
+          function(task) {
+            const start =
+              new Date(task.start);
 
-          return (
-            end >= todayStart &&
-            start < tomorrowStart
-          );
-        }).length;
+            const end =
+              new Date(
+                task.end ||
+                task.start
+              );
+
+            return (
+              end >= todayStart &&
+              start < tomorrowStart
+            );
+          }
+        ).length;
 
       const upcomingCount =
-        state.tasks.filter(function(task) {
-          return (
-            new Date(task.start) >=
-              tomorrowStart &&
-            !state.completed[task.id]
-          );
-        }).length;
+        state.tasks.filter(
+          function(task) {
+            return (
+              new Date(task.start) >=
+                tomorrowStart &&
+              !state.completed[
+                task.id
+              ]
+            );
+          }
+        ).length;
 
       const completedCount =
-        state.tasks.filter(function(task) {
-          return Boolean(
-            state.completed[task.id]
-          );
-        }).length;
+        state.tasks.filter(
+          function(task) {
+            return Boolean(
+              state.completed[
+                task.id
+              ]
+            );
+          }
+        ).length;
 
       document.getElementById(
         "todayCount"
-      ).textContent = todayCount;
+      ).textContent =
+        todayCount;
 
       document.getElementById(
         "upcomingCount"
-      ).textContent = upcomingCount;
+      ).textContent =
+        upcomingCount;
 
       document.getElementById(
         "completedCount"
-      ).textContent = completedCount;
+      ).textContent =
+        completedCount;
 
       document.getElementById(
         "totalCount"
-      ).textContent = state.tasks.length;
+      ).textContent =
+        state.tasks.length;
     }
 
 
-    function updateLastLoaded(result) {
-      const time = result.serverTime
-        ? new Date(result.serverTime)
-        : new Date();
+    function updateLastLoaded(
+      result
+    ) {
+      const time =
+        result.serverTime
+          ? new Date(
+              result.serverTime
+            )
+          : new Date();
+
+      const sheetName =
+        result.sheetName ||
+        "Sheet2";
 
       document.getElementById(
         "lastUpdated"
       ).textContent =
         "Loaded from " +
-        (result.sheetName || "Calendar Feed") +
+        sheetName +
         " • " +
-        time.toLocaleString([], {
-          month: "short",
-          day: "numeric",
-          hour: "numeric",
-          minute: "2-digit"
-        });
+        time.toLocaleString(
+          [],
+          {
+            month: "short",
+            day: "numeric",
+            hour: "numeric",
+            minute: "2-digit"
+          }
+        );
     }
 
 
-    function setSyncButtonLoading(loading) {
+    function setSyncButtonLoading(
+      loading
+    ) {
       const button =
-        document.getElementById("syncButton");
+        document.getElementById(
+          "syncButton"
+        );
 
       const text =
         document.getElementById(
           "syncButtonText"
         );
 
-      button.disabled = loading;
+      button.disabled =
+        loading;
+
       button.classList.toggle(
         "loading",
         loading
       );
 
-      text.textContent = loading
-        ? "Loading..."
-        : "Sync calendar";
+      text.textContent =
+        loading
+          ? "Syncing..."
+          : "Sync calendar";
     }
 
 
-    function showLoadingState(message) {
+    function setSyncBannerVisible(
+      visible
+    ) {
+      document
+        .getElementById(
+          "syncBanner"
+        )
+        .classList
+        .toggle(
+          "visible",
+          visible
+        );
+    }
+
+
+    function showLoadingState(
+      message
+    ) {
       document.getElementById(
         "taskList"
       ).innerHTML = `
         <div class="loading-state">
           <div>
-            <div>
+            <div class="loading-dots">
               <span class="loading-dot"></span>
               <span class="loading-dot"></span>
               <span class="loading-dot"></span>
@@ -1865,21 +3425,33 @@ function taskAppDateToMillis_(value) {
     }
 
 
-    function showErrorState(message) {
+    function showErrorState(
+      message
+    ) {
       document.getElementById(
         "taskList"
       ).innerHTML = `
         <div class="error-state">
           <div>
-            <div class="state-icon">⚠️</div>
+            <div class="state-icon">
+              ⚠️
+            </div>
 
             <h3 class="state-title">
-              Could not load the calendar
+              Could not load Sheet2
             </h3>
 
             <p class="state-message">
               ${escapeHtml(message)}
             </p>
+
+            <button
+              class="retry-button"
+              id="retryButton"
+              type="button"
+            >
+              Try again
+            </button>
           </div>
         </div>
       `;
@@ -1889,7 +3461,9 @@ function taskAppDateToMillis_(value) {
     function loadCompletedTasks() {
       try {
         const saved =
-          localStorage.getItem(STORAGE_KEY);
+          localStorage.getItem(
+            STORAGE_KEY
+          );
 
         return saved
           ? JSON.parse(saved)
@@ -1904,7 +3478,9 @@ function taskAppDateToMillis_(value) {
       try {
         localStorage.setItem(
           STORAGE_KEY,
-          JSON.stringify(state.completed)
+          JSON.stringify(
+            state.completed
+          )
         );
       } catch (error) {
         console.log(
@@ -1914,16 +3490,59 @@ function taskAppDateToMillis_(value) {
     }
 
 
-    function startOfDay(date) {
-      const result = new Date(date);
+    function removeMissingCompletionRecords() {
+      const validIds =
+        new Set(
+          state.tasks.map(
+            function(task) {
+              return task.id;
+            }
+          )
+        );
 
-      result.setHours(0, 0, 0, 0);
+      let changed = false;
+
+      Object.keys(
+        state.completed
+      ).forEach(
+        function(taskId) {
+          if (
+            !validIds.has(taskId)
+          ) {
+            delete state.completed[
+              taskId
+            ];
+
+            changed = true;
+          }
+        }
+      );
+
+      if (changed) {
+        saveCompletedTasks();
+      }
+    }
+
+
+    function startOfDay(date) {
+      const result =
+        new Date(date);
+
+      result.setHours(
+        0,
+        0,
+        0,
+        0
+      );
 
       return result;
     }
 
 
-    function isSameDay(firstDate, secondDate) {
+    function isSameDay(
+      firstDate,
+      secondDate
+    ) {
       return (
         firstDate.getFullYear() ===
           secondDate.getFullYear() &&
@@ -1949,59 +3568,86 @@ function taskAppDateToMillis_(value) {
 
 
     function getDateHeading(date) {
-      const today = startOfDay(new Date());
-      const taskDate = startOfDay(date);
+      const today =
+        startOfDay(
+          new Date()
+        );
+
+      const taskDate =
+        startOfDay(date);
 
       const difference =
         Math.round(
-          (taskDate - today) /
+          (
+            taskDate -
+            today
+          ) /
           86400000
         );
 
-      if (difference === 0) {
+      if (
+        difference === 0
+      ) {
         return "Today";
       }
 
-      if (difference === 1) {
+      if (
+        difference === 1
+      ) {
         return "Tomorrow";
       }
 
-      if (difference === -1) {
+      if (
+        difference === -1
+      ) {
         return "Yesterday";
       }
 
-      return date.toLocaleDateString([], {
-        weekday: "long",
-        month: "long",
-        day: "numeric",
-        year:
-          date.getFullYear() !==
-          today.getFullYear()
-            ? "numeric"
-            : undefined
-      });
+      return date.toLocaleDateString(
+        [],
+        {
+          weekday: "long",
+          month: "long",
+          day: "numeric",
+          year:
+            date.getFullYear() !==
+            today.getFullYear()
+              ? "numeric"
+              : undefined
+        }
+      );
     }
 
 
-    function formatFullDate(milliseconds) {
+    function formatFullDate(
+      milliseconds
+    ) {
       return new Date(
         milliseconds
-      ).toLocaleDateString([], {
-        weekday: "short",
-        month: "short",
-        day: "numeric",
-        year: "numeric"
-      });
+      ).toLocaleDateString(
+        [],
+        {
+          weekday: "short",
+          month: "short",
+          day: "numeric",
+          year: "numeric"
+        }
+      );
     }
 
 
-    function formatTime(milliseconds) {
+    function formatTime(
+      milliseconds
+    ) {
       return new Date(
         milliseconds
-      ).toLocaleTimeString([], {
-        hour: "numeric",
-        minute: "2-digit"
-      });
+      ).toLocaleTimeString(
+        [],
+        {
+          hour: "numeric",
+          minute: "2-digit"
+        }
+      );
     }
 
 
@@ -2009,60 +3655,113 @@ function taskAppDateToMillis_(value) {
       const difference =
         Math.max(
           0,
-          task.end - task.start
+          task.end -
+          task.start
         );
 
       const totalMinutes =
-        Math.round(difference / 60000);
+        Math.round(
+          difference /
+          60000
+        );
 
-      if (totalMinutes < 60) {
-        return totalMinutes + " min";
-      }
-
-      const hours =
-        Math.floor(totalMinutes / 60);
-
-      const minutes =
-        totalMinutes % 60;
-
-      if (minutes === 0) {
+      if (
+        totalMinutes < 60
+      ) {
         return (
-          hours +
-          (hours === 1 ? " hour" : " hours")
+          totalMinutes +
+          " min"
         );
       }
 
-      return hours + " hr " + minutes + " min";
+      const hours =
+        Math.floor(
+          totalMinutes /
+          60
+        );
+
+      const minutes =
+        totalMinutes %
+        60;
+
+      if (
+        minutes === 0
+      ) {
+        return (
+          hours +
+          (
+            hours === 1
+              ? " hour"
+              : " hours"
+          )
+        );
+      }
+
+      return (
+        hours +
+        " hr " +
+        minutes +
+        " min"
+      );
     }
 
 
     function escapeHtml(value) {
-      return String(value || "")
-        .replaceAll("&", "&amp;")
-        .replaceAll("<", "&lt;")
-        .replaceAll(">", "&gt;")
-        .replaceAll('"', "&quot;")
-        .replaceAll("'", "&#039;");
+      return String(
+        value || ""
+      )
+        .replace(
+          /&/g,
+          "&amp;"
+        )
+        .replace(
+          /</g,
+          "&lt;"
+        )
+        .replace(
+          />/g,
+          "&gt;"
+        )
+        .replace(
+          /"/g,
+          "&quot;"
+        )
+        .replace(
+          /'/g,
+          "&#039;"
+        );
     }
 
 
     let toastTimer;
 
+
     function showToast(message) {
       const toast =
-        document.getElementById("toast");
+        document.getElementById(
+          "toast"
+        );
 
-      toast.textContent = message;
-      toast.classList.add("show");
+      toast.textContent =
+        message;
 
-      window.clearTimeout(toastTimer);
-
-      toastTimer = window.setTimeout(
-        function() {
-          toast.classList.remove("show");
-        },
-        2800
+      toast.classList.add(
+        "show"
       );
+
+      window.clearTimeout(
+        toastTimer
+      );
+
+      toastTimer =
+        window.setTimeout(
+          function() {
+            toast.classList.remove(
+              "show"
+            );
+          },
+          3000
+        );
     }
   </script>
 </body>
