@@ -1,560 +1,183 @@
-const SETTINGS = {
-  SHEET_NAME: "Calendar Feed",
-
-  // How many days to import
-  DAYS_BACK: 30,
-  DAYS_FORWARD: 365,
-
-  /*
-   * false = import all calendars available to your Google account
-   * true  = import only calendars checked/visible in Google Calendar
-   */
-  ONLY_SELECTED_CALENDARS: false,
-
-  /*
-   * Optional: enter specific Calendar IDs below.
-   * Leave empty [] to import all accessible calendars.
-   *
-   * Example:
-   * CALENDAR_IDS: [
-   *   "your-email@gmail.com",
-   *   "calendar-id@group.calendar.google.com"
-   * ]
-   */
-  CALENDAR_IDS: [],
-
-  // Automatic refresh interval
-  REFRESH_EVERY_MINUTES: 15
-};
-
-
 /**
- * Creates the custom menu when the Google Sheet opens.
+ * Opens the calendar task-list webpage.
  */
-function onOpen() {
-  SpreadsheetApp.getUi()
-    .createMenu("Calendar Feed")
-    .addItem("Set up calendar feed", "setupCalendarFeed")
-    .addItem("Sync calendar now", "syncCalendarToSheet")
-    .addSeparator()
-    .addItem("Test calendar access", "testCalendarAccess")
-    .addItem("Remove automatic sync", "removeAutomaticSync")
-    .addToUi();
+function doGet() {
+  return HtmlService
+    .createHtmlOutputFromFile("Index")
+    .setTitle("Calendar Task List")
+    .addMetaTag(
+      "viewport",
+      "width=device-width, initial-scale=1"
+    );
 }
 
 
 /**
- * Run this function first.
+ * Reads events from the Calendar Feed sheet.
  *
- * It:
- * 1. Connects the script to the spreadsheet
- * 2. Imports calendar events
- * 3. Creates an automatic 15-minute trigger
+ * All dates are converted to numbers because HTML Service
+ * cannot directly receive JavaScript Date objects.
  */
-function setupCalendarFeed() {
-  const spreadsheet = SpreadsheetApp.getActiveSpreadsheet();
+function getTaskEvents() {
+  const spreadsheet = taskAppGetSpreadsheet_();
 
-  if (!spreadsheet) {
-    throw new Error(
-      "Open the Google Sheet first, then go to Extensions > Apps Script."
-    );
-  }
-
-  PropertiesService.getScriptProperties().setProperty(
-    "SPREADSHEET_ID",
-    spreadsheet.getId()
-  );
-
-  // Test the connection and import events first.
-  syncCalendarToSheet();
-
-  // Remove old duplicate triggers.
-  removeCalendarTriggers();
-
-  // Create a new automatic trigger.
-  ScriptApp.newTrigger("syncCalendarToSheet")
-    .timeBased()
-    .everyMinutes(SETTINGS.REFRESH_EVERY_MINUTES)
-    .create();
-
-  SpreadsheetApp.getUi().alert(
-    "Calendar Feed setup is complete.\n\n" +
-    "Your calendar will refresh approximately every " +
-    SETTINGS.REFRESH_EVERY_MINUTES +
-    " minutes."
-  );
-}
-
-
-/**
- * Imports Google Calendar events into the Google Sheet.
- */
-function syncCalendarToSheet() {
-  const spreadsheet = getConnectedSpreadsheet();
-  const sheet = getOrCreateSheet(
-    spreadsheet,
+  const sheetName =
+    typeof SETTINGS !== "undefined" &&
     SETTINGS.SHEET_NAME
-  );
+      ? SETTINGS.SHEET_NAME
+      : "Calendar Feed";
 
-  // Prevent two triggers from updating the sheet simultaneously.
-  const lock = LockService.getScriptLock();
+  const sheet = spreadsheet.getSheetByName(sheetName);
 
-  try {
-    lock.waitLock(30000);
-  } catch (error) {
-    console.log(
-      "Another calendar synchronization is already running."
+  if (!sheet) {
+    throw new Error(
+      'The sheet "' +
+      sheetName +
+      '" was not found. Run setupCalendarFeed first.'
     );
-    return;
   }
 
-  try {
-    resetSheet(sheet);
+  const lastRow = sheet.getLastRow();
+  const lastColumn = sheet.getLastColumn();
 
-    sheet.getRange("A1").setValue(
-      "Loading calendar events..."
-    );
+  if (lastRow < 2 || lastColumn < 1) {
+    return {
+      tasks: [],
+      sheetName: sheetName,
+      serverTime: Date.now(),
+      spreadsheetTimeZone:
+        spreadsheet.getSpreadsheetTimeZone()
+    };
+  }
 
-    SpreadsheetApp.flush();
+  const values = sheet
+    .getRange(1, 1, lastRow, lastColumn)
+    .getValues();
 
-    const dateRange = getDateRange();
-    const calendars = getCalendarsToImport();
+  const headers = values[0].map(function(header) {
+    return String(header).trim();
+  });
 
-    if (calendars.length === 0) {
-      throw new Error(
-        "No calendars were found. Run testCalendarAccess to check which calendars this script can access."
-      );
+  const headerMap = {};
+
+  headers.forEach(function(header, index) {
+    headerMap[header] = index;
+  });
+
+  function getValue(row, headerName) {
+    const index = headerMap[headerName];
+
+    if (index === undefined) {
+      return "";
     }
 
-    const rows = [];
-
-    calendars.forEach(calendar => {
-      try {
-        const events = calendar.getEvents(
-          dateRange.startDate,
-          dateRange.endDate
-        );
-
-        events.forEach(event => {
-          rows.push(
-            createEventRow(calendar, event)
-          );
-        });
-      } catch (calendarError) {
-        console.log(
-          "Could not read calendar: " +
-          calendar.getName() +
-          ". Error: " +
-          calendarError.message
-        );
-      }
-    });
-
-    // Sort events by start date and time.
-    rows.sort((firstRow, secondRow) => {
-      return firstRow[4] - secondRow[4];
-    });
-
-    writeCalendarFeed(
-      sheet,
-      rows,
-      calendars.length
-    );
-
-    spreadsheet.toast(
-      rows.length +
-      " calendar events imported from " +
-      calendars.length +
-      " calendar(s).",
-      "Calendar Feed",
-      6
-    );
-
-  } catch (error) {
-    showErrorInSheet(sheet, error);
-    throw error;
-
-  } finally {
-    lock.releaseLock();
+    return row[index];
   }
-}
 
+  const tasks = values
+    .slice(1)
+    .map(function(row) {
+      const title = String(
+        getValue(row, "Event Title") || ""
+      ).trim();
 
-/**
- * Returns the dates that should be searched.
- */
-function getDateRange() {
-  const startDate = new Date();
-  startDate.setDate(
-    startDate.getDate() - SETTINGS.DAYS_BACK
-  );
-  startDate.setHours(0, 0, 0, 0);
+      const startTime = taskAppDateToMillis_(
+        getValue(row, "Start Date and Time")
+      );
 
-  const endDate = new Date();
-  endDate.setDate(
-    endDate.getDate() + SETTINGS.DAYS_FORWARD
-  );
-  endDate.setHours(23, 59, 59, 999);
+      const endTime = taskAppDateToMillis_(
+        getValue(row, "End Date and Time")
+      );
+
+      if (!title || startTime === null) {
+        return null;
+      }
+
+      const eventId = String(
+        getValue(row, "Event ID") || ""
+      );
+
+      let eventKey = String(
+        getValue(row, "Event Key") || ""
+      );
+
+      if (!eventKey) {
+        eventKey = eventId + "|" + startTime;
+      }
+
+      return {
+        id: eventKey,
+        eventId: eventId,
+        calendar: String(
+          getValue(row, "Calendar") || "Calendar"
+        ),
+        title: title,
+        start: startTime,
+        end: endTime || startTime,
+        allDay:
+          String(
+            getValue(row, "All-Day Event")
+          ).toLowerCase() === "yes",
+        location: String(
+          getValue(row, "Location") || ""
+        ),
+        description: String(
+          getValue(row, "Description") || ""
+        ),
+        createdBy: String(
+          getValue(row, "Created By") || ""
+        ),
+        guests: String(
+          getValue(row, "Guests") || ""
+        ),
+        myStatus: String(
+          getValue(row, "My Status") || ""
+        ),
+        recurring:
+          String(
+            getValue(row, "Recurring Event")
+          ).toLowerCase() === "yes",
+        lastUpdated: taskAppDateToMillis_(
+          getValue(row, "Last Updated")
+        )
+      };
+    })
+    .filter(function(task) {
+      return task !== null;
+    });
+
+  tasks.sort(function(firstTask, secondTask) {
+    return firstTask.start - secondTask.start;
+  });
 
   return {
-    startDate: startDate,
-    endDate: endDate
+    tasks: tasks,
+    sheetName: sheetName,
+    serverTime: Date.now(),
+    spreadsheetTimeZone:
+      spreadsheet.getSpreadsheetTimeZone()
   };
 }
 
 
 /**
- * Determines which calendars should be imported.
+ * Synchronizes Google Calendar and then returns the new tasks.
  */
-function getCalendarsToImport() {
-  // Use specific Calendar IDs when provided.
+function refreshTaskEvents() {
   if (
-    Array.isArray(SETTINGS.CALENDAR_IDS) &&
-    SETTINGS.CALENDAR_IDS.length > 0
+    typeof syncCalendarToSheet === "function"
   ) {
-    return SETTINGS.CALENDAR_IDS
-      .map(calendarId => {
-        return CalendarApp.getCalendarById(
-          String(calendarId).trim()
-        );
-      })
-      .filter(calendar => calendar !== null);
+    syncCalendarToSheet();
   }
 
-  let calendars = CalendarApp.getAllCalendars();
-
-  if (SETTINGS.ONLY_SELECTED_CALENDARS) {
-    calendars = calendars.filter(calendar => {
-      return calendar.isSelected();
-    });
-  }
-
-  return calendars;
+  return getTaskEvents();
 }
 
 
 /**
- * Converts one calendar event into a spreadsheet row.
+ * Opens the spreadsheet connected during setupCalendarFeed.
  */
-function createEventRow(calendar, event) {
-  const startTime = event.getStartTime();
-  const endTime = event.getEndTime();
-
-  let guests = "";
-  let creators = "";
-  let myStatus = "";
-  let recurring = "No";
-  let lastUpdated = "";
-
-  try {
-    guests = event
-      .getGuestList()
-      .map(guest => guest.getEmail())
-      .filter(email => email)
-      .join(", ");
-  } catch (error) {
-    guests = "";
-  }
-
-  try {
-    creators = event
-      .getCreators()
-      .filter(creator => creator)
-      .join(", ");
-  } catch (error) {
-    creators = "";
-  }
-
-  try {
-    myStatus = String(event.getMyStatus());
-  } catch (error) {
-    myStatus = "";
-  }
-
-  try {
-    recurring = event.isRecurringEvent()
-      ? "Yes"
-      : "No";
-  } catch (error) {
-    recurring = "No";
-  }
-
-  try {
-    lastUpdated = event.getLastUpdated();
-  } catch (error) {
-    lastUpdated = "";
-  }
-
-  const eventId = event.getId();
-
-  // A recurring event may use the same Event ID for multiple dates.
-  const eventKey =
-    eventId + "|" + startTime.toISOString();
-
-  return [
-    eventKey,
-    eventId,
-    calendar.getName(),
-    event.getTitle() || "(No title)",
-    startTime,
-    endTime,
-    event.isAllDayEvent() ? "Yes" : "No",
-    event.getLocation() || "",
-    event.getDescription() || "",
-    creators,
-    guests,
-    myStatus,
-    recurring,
-    lastUpdated
-  ];
-}
-
-
-/**
- * Writes all calendar events into the sheet.
- */
-function writeCalendarFeed(
-  sheet,
-  rows,
-  calendarCount
-) {
-  resetSheet(sheet);
-
-  const headers = [
-    "Event Key",
-    "Event ID",
-    "Calendar",
-    "Event Title",
-    "Start Date and Time",
-    "End Date and Time",
-    "All-Day Event",
-    "Location",
-    "Description",
-    "Created By",
-    "Guests",
-    "My Status",
-    "Recurring Event",
-    "Last Updated"
-  ];
-
-  sheet
-    .getRange(1, 1, 1, headers.length)
-    .setValues([headers])
-    .setFontWeight("bold")
-    .setBackground("#1a73e8")
-    .setFontColor("#ffffff")
-    .setHorizontalAlignment("center");
-
-  if (rows.length > 0) {
-    sheet
-      .getRange(
-        2,
-        1,
-        rows.length,
-        headers.length
-      )
-      .setValues(rows);
-
-    // Start and end date columns.
-    sheet
-      .getRange(2, 5, rows.length, 2)
-      .setNumberFormat(
-        "MM/dd/yyyy hh:mm AM/PM"
-      );
-
-    // Last updated column.
-    sheet
-      .getRange(2, 14, rows.length, 1)
-      .setNumberFormat(
-        "MM/dd/yyyy hh:mm AM/PM"
-      );
-
-    sheet
-      .getRange(
-        1,
-        1,
-        rows.length + 1,
-        headers.length
-      )
-      .createFilter();
-
-    sheet
-      .getRange(
-        2,
-        1,
-        rows.length,
-        headers.length
-      )
-      .setVerticalAlignment("middle");
-
-    sheet
-      .getRange(2, 8, rows.length, 4)
-      .setWrap(true);
-
-  } else {
-    sheet
-      .getRange("A2")
-      .setValue(
-        "The calendar connection worked, but no events were found within the selected date range."
-      );
-
-    sheet
-      .getRange("A2:N2")
-      .merge()
-      .setWrap(true);
-  }
-
-  sheet.setFrozenRows(1);
-  sheet.setFrozenColumns(1);
-
-  setColumnWidths(sheet);
-
-  // Synchronization information.
-  sheet.getRange("P1").setValue(
-    "Last synchronized"
-  );
-  sheet.getRange("P1").setFontWeight("bold");
-
-  sheet.getRange("P2").setValue(new Date());
-  sheet
-    .getRange("P2")
-    .setNumberFormat(
-      "MM/dd/yyyy hh:mm:ss AM/PM"
-    );
-
-  sheet.getRange("P4").setValue(
-    "Calendars checked"
-  );
-  sheet.getRange("P4").setFontWeight("bold");
-  sheet.getRange("P5").setValue(calendarCount);
-
-  sheet.getRange("P7").setValue(
-    "Events found"
-  );
-  sheet.getRange("P7").setFontWeight("bold");
-  sheet.getRange("P8").setValue(rows.length);
-
-  sheet.getRange("P10").setValue(
-    "Date range"
-  );
-  sheet.getRange("P10").setFontWeight("bold");
-
-  sheet.getRange("P11").setValue(
-    SETTINGS.DAYS_BACK +
-    " days back through " +
-    SETTINGS.DAYS_FORWARD +
-    " days forward"
-  );
-
-  sheet.setColumnWidth(16, 210);
-}
-
-
-/**
- * Sets the width of each calendar column.
- */
-function setColumnWidths(sheet) {
-  sheet.setColumnWidth(1, 290);
-  sheet.setColumnWidth(2, 250);
-  sheet.setColumnWidth(3, 180);
-  sheet.setColumnWidth(4, 260);
-  sheet.setColumnWidth(5, 180);
-  sheet.setColumnWidth(6, 180);
-  sheet.setColumnWidth(7, 110);
-  sheet.setColumnWidth(8, 220);
-  sheet.setColumnWidth(9, 350);
-  sheet.setColumnWidth(10, 220);
-  sheet.setColumnWidth(11, 300);
-  sheet.setColumnWidth(12, 130);
-  sheet.setColumnWidth(13, 130);
-  sheet.setColumnWidth(14, 180);
-}
-
-
-/**
- * Shows every calendar that the script can access.
- */
-function testCalendarAccess() {
-  const spreadsheet = getConnectedSpreadsheet();
-  const sheet = getOrCreateSheet(
-    spreadsheet,
-    "Calendar Test"
-  );
-
-  resetSheet(sheet);
-
-  const calendars = CalendarApp.getAllCalendars();
-
-  const headers = [
-    "Calendar Name",
-    "Calendar ID",
-    "Selected",
-    "Hidden",
-    "Owned By Me",
-    "Description"
-  ];
-
-  const rows = calendars.map(calendar => {
-    let description = "";
-
-    try {
-      description = calendar.getDescription() || "";
-    } catch (error) {
-      description = "";
-    }
-
-    return [
-      calendar.getName(),
-      calendar.getId(),
-      calendar.isSelected() ? "Yes" : "No",
-      calendar.isHidden() ? "Yes" : "No",
-      calendar.isOwnedByMe() ? "Yes" : "No",
-      description
-    ];
-  });
-
-  sheet
-    .getRange(1, 1, 1, headers.length)
-    .setValues([headers])
-    .setFontWeight("bold")
-    .setBackground("#1a73e8")
-    .setFontColor("#ffffff");
-
-  if (rows.length > 0) {
-    sheet
-      .getRange(2, 1, rows.length, headers.length)
-      .setValues(rows);
-
-    sheet
-      .getRange(1, 1, rows.length + 1, headers.length)
-      .createFilter();
-  } else {
-    sheet.getRange("A2").setValue(
-      "No calendars are accessible with this Google account."
-    );
-  }
-
-  sheet.setFrozenRows(1);
-  sheet.setColumnWidth(1, 230);
-  sheet.setColumnWidth(2, 420);
-  sheet.setColumnWidth(3, 100);
-  sheet.setColumnWidth(4, 100);
-  sheet.setColumnWidth(5, 120);
-  sheet.setColumnWidth(6, 350);
-
-  spreadsheet.toast(
-    calendars.length +
-    " accessible calendar(s) found.",
-    "Calendar Test",
-    5
-  );
-}
-
-
-/**
- * Opens the correct spreadsheet during automatic trigger runs.
- */
-function getConnectedSpreadsheet() {
+function taskAppGetSpreadsheet_() {
   const spreadsheetId =
     PropertiesService
       .getScriptProperties()
@@ -566,132 +189,1881 @@ function getConnectedSpreadsheet() {
     );
   }
 
-  const activeSpreadsheet =
+  const spreadsheet =
     SpreadsheetApp.getActiveSpreadsheet();
 
-  if (!activeSpreadsheet) {
+  if (!spreadsheet) {
     throw new Error(
-      "The spreadsheet is not connected. Run setupCalendarFeed first."
+      "The spreadsheet is not connected. Open the Google Sheet and run setupCalendarFeed first."
     );
   }
 
-  PropertiesService.getScriptProperties()
+  PropertiesService
+    .getScriptProperties()
     .setProperty(
       "SPREADSHEET_ID",
-      activeSpreadsheet.getId()
+      spreadsheet.getId()
     );
 
-  return activeSpreadsheet;
+  return spreadsheet;
 }
 
 
 /**
- * Gets an existing sheet or creates a new one.
+ * Converts a spreadsheet date into milliseconds.
  */
-function getOrCreateSheet(
-  spreadsheet,
-  sheetName
-) {
-  let sheet =
-    spreadsheet.getSheetByName(sheetName);
-
-  if (!sheet) {
-    sheet = spreadsheet.insertSheet(
-      sheetName
-    );
+function taskAppDateToMillis_(value) {
+  if (
+    value instanceof Date &&
+    !isNaN(value.getTime())
+  ) {
+    return value.getTime();
   }
 
-  return sheet;
+  if (
+    value === "" ||
+    value === null ||
+    value === undefined
+  ) {
+    return null;
+  }
+
+  const parsedDate = new Date(value);
+
+  if (isNaN(parsedDate.getTime())) {
+    return null;
+  }
+
+  return parsedDate.getTime();
 }
 
 
-/**
- * Removes the filter and clears the sheet.
- *
- * This fixes:
- * "You can't create a filter in a sheet that already has a filter."
- */
-function resetSheet(sheet) {
-  const filter = sheet.getFilter();
-
-  if (filter) {
-    filter.remove();
-  }
-
-  const fullRange = sheet.getDataRange();
-
-  try {
-    fullRange.breakApart();
-  } catch (error) {
-    console.log(
-      "No merged cells needed to be separated."
-    );
-  }
-
-  sheet.clear();
-}
 
 
-/**
- * Displays errors directly inside the Calendar Feed sheet.
- */
-function showErrorInSheet(sheet, error) {
-  try {
-    resetSheet(sheet);
-
-    sheet.getRange("A1").setValue(
-      "CALENDAR ERROR"
-    );
-
-    sheet
-      .getRange("A1")
-      .setFontWeight("bold")
-      .setBackground("#d93025")
-      .setFontColor("#ffffff");
-
-    sheet.getRange("A2").setValue(
-      error.message ||
-      String(error)
-    );
-
-    sheet.getRange("A4").setValue(
-      "Open Apps Script > Executions to see the complete error."
-    );
-
-    sheet.setColumnWidth(1, 650);
-    sheet.getRange("A1:A4").setWrap(true);
-
-  } catch (displayError) {
-    console.log(displayError);
-  }
-}
 
 
-/**
- * Removes existing calendar synchronization triggers.
- */
-function removeCalendarTriggers() {
-  const triggers =
-    ScriptApp.getProjectTriggers();
 
-  triggers.forEach(trigger => {
-    if (
-      trigger.getHandlerFunction() ===
-      "syncCalendarToSheet"
-    ) {
-      ScriptApp.deleteTrigger(trigger);
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+    <!DOCTYPE html>
+<html lang="en">
+<head>
+  <base target="_top">
+
+  <meta charset="UTF-8">
+
+  <meta
+    name="viewport"
+    content="width=device-width, initial-scale=1"
+  >
+
+  <title>Calendar Task List</title>
+
+  <style>
+    :root {
+      --background: #f4f7fb;
+      --surface: #ffffff;
+      --surface-soft: #f8fafc;
+      --text: #172033;
+      --muted: #667085;
+      --border: #e3e8ef;
+      --primary: #2563eb;
+      --primary-dark: #1d4ed8;
+      --success: #16845b;
+      --warning: #c16a0b;
+      --danger: #c43d4b;
+      --purple: #7257d9;
+      --shadow: 0 15px 45px rgba(31, 45, 71, 0.09);
+      --small-shadow: 0 6px 20px rgba(31, 45, 71, 0.07);
+      --radius: 18px;
     }
-  });
-}
+
+    * {
+      box-sizing: border-box;
+    }
+
+    html {
+      scroll-behavior: smooth;
+    }
+
+    body {
+      margin: 0;
+      min-height: 100vh;
+      background:
+        radial-gradient(
+          circle at top left,
+          rgba(37, 99, 235, 0.09),
+          transparent 27rem
+        ),
+        var(--background);
+      color: var(--text);
+      font-family:
+        Inter,
+        ui-sans-serif,
+        system-ui,
+        -apple-system,
+        BlinkMacSystemFont,
+        "Segoe UI",
+        sans-serif;
+    }
+
+    button,
+    input {
+      font: inherit;
+    }
+
+    button {
+      cursor: pointer;
+    }
+
+    .page {
+      width: min(1180px, calc(100% - 32px));
+      margin: 0 auto;
+      padding: 34px 0 70px;
+    }
+
+    .topbar {
+      display: flex;
+      align-items: flex-start;
+      justify-content: space-between;
+      gap: 24px;
+      margin-bottom: 26px;
+    }
+
+    .brand {
+      display: flex;
+      align-items: center;
+      gap: 15px;
+    }
+
+    .brand-icon {
+      display: grid;
+      flex: 0 0 auto;
+      width: 54px;
+      height: 54px;
+      place-items: center;
+      border-radius: 17px;
+      background:
+        linear-gradient(
+          145deg,
+          var(--primary),
+          var(--purple)
+        );
+      color: white;
+      box-shadow:
+        0 13px 28px rgba(37, 99, 235, 0.25);
+      font-size: 26px;
+    }
+
+    h1 {
+      margin: 0;
+      font-size: clamp(26px, 4vw, 38px);
+      line-height: 1.1;
+      letter-spacing: -0.04em;
+    }
+
+    .subtitle {
+      margin: 7px 0 0;
+      color: var(--muted);
+      font-size: 14px;
+    }
+
+    .sync-area {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+    }
+
+    .sync-button {
+      display: inline-flex;
+      min-height: 44px;
+      align-items: center;
+      justify-content: center;
+      gap: 9px;
+      border: 0;
+      border-radius: 13px;
+      padding: 0 17px;
+      background: var(--primary);
+      color: white;
+      font-weight: 700;
+      box-shadow:
+        0 9px 22px rgba(37, 99, 235, 0.21);
+      transition:
+        transform 160ms ease,
+        background 160ms ease,
+        opacity 160ms ease;
+    }
+
+    .sync-button:hover {
+      background: var(--primary-dark);
+      transform: translateY(-1px);
+    }
+
+    .sync-button:disabled {
+      cursor: wait;
+      opacity: 0.65;
+      transform: none;
+    }
+
+    .sync-icon {
+      display: inline-block;
+      font-size: 18px;
+      line-height: 1;
+    }
+
+    .sync-button.loading .sync-icon {
+      animation: spin 900ms linear infinite;
+    }
+
+    @keyframes spin {
+      to {
+        transform: rotate(360deg);
+      }
+    }
+
+    .stats {
+      display: grid;
+      grid-template-columns:
+        repeat(4, minmax(0, 1fr));
+      gap: 15px;
+      margin-bottom: 20px;
+    }
+
+    .stat-card {
+      min-width: 0;
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      padding: 18px;
+      background:
+        rgba(255, 255, 255, 0.93);
+      box-shadow: var(--small-shadow);
+    }
+
+    .stat-label {
+      display: flex;
+      align-items: center;
+      gap: 7px;
+      margin-bottom: 9px;
+      color: var(--muted);
+      font-size: 13px;
+      font-weight: 700;
+    }
+
+    .stat-number {
+      font-size: 29px;
+      font-weight: 800;
+      line-height: 1;
+      letter-spacing: -0.04em;
+    }
+
+    .control-panel {
+      position: sticky;
+      top: 10px;
+      z-index: 10;
+      border: 1px solid rgba(227, 232, 239, 0.9);
+      border-radius: var(--radius);
+      padding: 15px;
+      margin-bottom: 25px;
+      background:
+        rgba(255, 255, 255, 0.93);
+      box-shadow: var(--shadow);
+      backdrop-filter: blur(18px);
+    }
+
+    .search-row {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+    }
+
+    .search-box {
+      position: relative;
+      flex: 1;
+    }
+
+    .search-icon {
+      position: absolute;
+      top: 50%;
+      left: 15px;
+      color: var(--muted);
+      transform: translateY(-50%);
+      pointer-events: none;
+    }
+
+    .search-input {
+      width: 100%;
+      min-height: 46px;
+      border: 1px solid var(--border);
+      border-radius: 13px;
+      padding: 0 16px 0 43px;
+      outline: none;
+      background: var(--surface-soft);
+      color: var(--text);
+      transition:
+        border-color 150ms ease,
+        box-shadow 150ms ease;
+    }
+
+    .search-input:focus {
+      border-color: var(--primary);
+      box-shadow:
+        0 0 0 4px rgba(37, 99, 235, 0.1);
+    }
+
+    .filters {
+      display: flex;
+      gap: 7px;
+      margin-top: 13px;
+      overflow-x: auto;
+      scrollbar-width: none;
+    }
+
+    .filters::-webkit-scrollbar {
+      display: none;
+    }
+
+    .filter-button {
+      flex: 0 0 auto;
+      min-height: 36px;
+      border: 1px solid transparent;
+      border-radius: 10px;
+      padding: 0 13px;
+      background: transparent;
+      color: var(--muted);
+      font-size: 13px;
+      font-weight: 750;
+      transition:
+        background 150ms ease,
+        color 150ms ease;
+    }
+
+    .filter-button:hover {
+      background: var(--surface-soft);
+      color: var(--text);
+    }
+
+    .filter-button.active {
+      background: rgba(37, 99, 235, 0.1);
+      color: var(--primary);
+    }
+
+    .list-header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 15px;
+      margin-bottom: 15px;
+    }
+
+    .list-title {
+      margin: 0;
+      font-size: 20px;
+      letter-spacing: -0.025em;
+    }
+
+    .result-count {
+      color: var(--muted);
+      font-size: 13px;
+    }
+
+    .date-section {
+      margin-bottom: 28px;
+    }
+
+    .date-heading {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      margin: 0 0 12px;
+      color: var(--muted);
+      font-size: 13px;
+      font-weight: 800;
+      letter-spacing: 0.05em;
+      text-transform: uppercase;
+    }
+
+    .date-heading::after {
+      height: 1px;
+      flex: 1;
+      background: var(--border);
+      content: "";
+    }
+
+    .task-card {
+      display: grid;
+      grid-template-columns: auto minmax(0, 1fr) auto;
+      gap: 15px;
+      align-items: flex-start;
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      padding: 18px;
+      margin-bottom: 11px;
+      background: var(--surface);
+      box-shadow: var(--small-shadow);
+      transition:
+        transform 160ms ease,
+        box-shadow 160ms ease,
+        border-color 160ms ease;
+    }
+
+    .task-card:hover {
+      border-color: rgba(37, 99, 235, 0.25);
+      box-shadow:
+        0 13px 35px rgba(31, 45, 71, 0.11);
+      transform: translateY(-1px);
+    }
+
+    .task-card.completed {
+      background: rgba(248, 250, 252, 0.88);
+      opacity: 0.72;
+    }
+
+    .task-card.completed .task-title {
+      text-decoration: line-through;
+    }
+
+    .check-wrapper {
+      position: relative;
+      display: grid;
+      width: 25px;
+      height: 25px;
+      flex: 0 0 auto;
+      place-items: center;
+      margin-top: 1px;
+    }
+
+    .task-check {
+      position: absolute;
+      width: 1px;
+      height: 1px;
+      opacity: 0;
+      pointer-events: none;
+    }
+
+    .custom-check {
+      display: grid;
+      width: 23px;
+      height: 23px;
+      place-items: center;
+      border: 2px solid #c5ced9;
+      border-radius: 8px;
+      background: white;
+      color: white;
+      transition:
+        background 150ms ease,
+        border-color 150ms ease;
+    }
+
+    .task-check:checked + .custom-check {
+      border-color: var(--success);
+      background: var(--success);
+    }
+
+    .task-check:checked + .custom-check::after {
+      content: "✓";
+      font-size: 14px;
+      font-weight: 900;
+    }
+
+    .task-content {
+      min-width: 0;
+    }
+
+    .task-title-row {
+      display: flex;
+      flex-wrap: wrap;
+      align-items: center;
+      gap: 8px;
+    }
+
+    .task-title {
+      margin: 0;
+      overflow-wrap: anywhere;
+      font-size: 17px;
+      font-weight: 800;
+      line-height: 1.35;
+      letter-spacing: -0.015em;
+    }
+
+    .calendar-badge,
+    .status-badge {
+      display: inline-flex;
+      min-height: 24px;
+      align-items: center;
+      border-radius: 999px;
+      padding: 2px 9px;
+      font-size: 11px;
+      font-weight: 800;
+    }
+
+    .calendar-badge {
+      max-width: 220px;
+      overflow: hidden;
+      background: rgba(114, 87, 217, 0.1);
+      color: var(--purple);
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+
+    .status-badge {
+      white-space: nowrap;
+    }
+
+    .status-today {
+      background: rgba(37, 99, 235, 0.1);
+      color: var(--primary);
+    }
+
+    .status-current {
+      background: rgba(22, 132, 91, 0.12);
+      color: var(--success);
+    }
+
+    .status-upcoming {
+      background: rgba(114, 87, 217, 0.1);
+      color: var(--purple);
+    }
+
+    .status-past {
+      background: rgba(102, 112, 133, 0.12);
+      color: var(--muted);
+    }
+
+    .status-done {
+      background: rgba(22, 132, 91, 0.12);
+      color: var(--success);
+    }
+
+    .task-meta {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 8px 17px;
+      margin-top: 10px;
+      color: var(--muted);
+      font-size: 13px;
+    }
+
+    .meta-item {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      min-width: 0;
+    }
+
+    .location-link {
+      color: var(--primary);
+      text-decoration: none;
+    }
+
+    .location-link:hover {
+      text-decoration: underline;
+    }
+
+    .task-description {
+      margin: 12px 0 0;
+      color: #4d596b;
+      font-size: 13px;
+      line-height: 1.65;
+      white-space: pre-wrap;
+    }
+
+    .details-box {
+      margin-top: 12px;
+      border-top: 1px solid var(--border);
+      padding-top: 11px;
+    }
+
+    .details-box summary {
+      width: fit-content;
+      cursor: pointer;
+      color: var(--primary);
+      font-size: 12px;
+      font-weight: 800;
+      user-select: none;
+    }
+
+    .details-content {
+      display: grid;
+      gap: 8px;
+      margin-top: 11px;
+      color: var(--muted);
+      font-size: 12px;
+      line-height: 1.55;
+    }
+
+    .time-panel {
+      min-width: 92px;
+      border-left: 1px solid var(--border);
+      padding-left: 15px;
+      text-align: right;
+    }
+
+    .time-main {
+      font-size: 14px;
+      font-weight: 850;
+    }
+
+    .time-end {
+      margin-top: 4px;
+      color: var(--muted);
+      font-size: 11px;
+    }
+
+    .empty-state,
+    .error-state,
+    .loading-state {
+      display: grid;
+      min-height: 280px;
+      place-items: center;
+      border: 1px dashed #cbd4df;
+      border-radius: var(--radius);
+      padding: 35px;
+      background: rgba(255, 255, 255, 0.65);
+      text-align: center;
+    }
+
+    .state-icon {
+      margin-bottom: 13px;
+      font-size: 44px;
+    }
+
+    .state-title {
+      margin: 0 0 8px;
+      font-size: 19px;
+    }
+
+    .state-message {
+      max-width: 520px;
+      margin: 0;
+      color: var(--muted);
+      font-size: 14px;
+      line-height: 1.6;
+    }
+
+    .loading-dot {
+      display: inline-block;
+      width: 10px;
+      height: 10px;
+      margin: 3px;
+      border-radius: 50%;
+      background: var(--primary);
+      animation: pulse 1.1s infinite ease-in-out;
+    }
+
+    .loading-dot:nth-child(2) {
+      animation-delay: 0.15s;
+    }
+
+    .loading-dot:nth-child(3) {
+      animation-delay: 0.3s;
+    }
+
+    @keyframes pulse {
+      0%,
+      80%,
+      100% {
+        opacity: 0.3;
+        transform: scale(0.75);
+      }
+
+      40% {
+        opacity: 1;
+        transform: scale(1);
+      }
+    }
+
+    .footer-note {
+      margin-top: 27px;
+      color: var(--muted);
+      text-align: center;
+      font-size: 11px;
+      line-height: 1.6;
+    }
+
+    .toast {
+      position: fixed;
+      right: 20px;
+      bottom: 20px;
+      z-index: 100;
+      max-width: min(360px, calc(100% - 40px));
+      border-radius: 13px;
+      padding: 13px 16px;
+      background: #172033;
+      color: white;
+      box-shadow:
+        0 17px 45px rgba(23, 32, 51, 0.25);
+      font-size: 13px;
+      font-weight: 700;
+      opacity: 0;
+      pointer-events: none;
+      transform: translateY(15px);
+      transition:
+        opacity 180ms ease,
+        transform 180ms ease;
+    }
+
+    .toast.show {
+      opacity: 1;
+      transform: translateY(0);
+    }
+
+    @media (max-width: 800px) {
+      .page {
+        width: min(100% - 22px, 1180px);
+        padding-top: 22px;
+      }
+
+      .topbar {
+        align-items: stretch;
+        flex-direction: column;
+      }
+
+      .sync-button {
+        width: 100%;
+      }
+
+      .stats {
+        grid-template-columns:
+          repeat(2, minmax(0, 1fr));
+      }
+
+      .control-panel {
+        top: 5px;
+      }
+    }
+
+    @media (max-width: 560px) {
+      .brand-icon {
+        width: 47px;
+        height: 47px;
+        border-radius: 14px;
+      }
+
+      .stats {
+        gap: 9px;
+      }
+
+      .stat-card {
+        padding: 14px;
+      }
+
+      .stat-number {
+        font-size: 25px;
+      }
+
+      .task-card {
+        grid-template-columns: auto minmax(0, 1fr);
+        gap: 12px;
+        padding: 15px;
+      }
+
+      .time-panel {
+        grid-column: 2;
+        border-top: 1px solid var(--border);
+        border-left: 0;
+        padding-top: 10px;
+        padding-left: 0;
+        text-align: left;
+      }
+
+      .time-main,
+      .time-end {
+        display: inline;
+      }
+
+      .time-end {
+        margin-left: 7px;
+      }
+    }
+  </style>
+</head>
+
+<body>
+  <main class="page">
+    <header class="topbar">
+      <div class="brand">
+        <div class="brand-icon">✓</div>
+
+        <div>
+          <h1>Calendar Tasks</h1>
+
+          <p class="subtitle" id="lastUpdated">
+            Loading your calendar events...
+          </p>
+        </div>
+      </div>
+
+      <div class="sync-area">
+        <button
+          class="sync-button"
+          id="syncButton"
+          type="button"
+        >
+          <span class="sync-icon">↻</span>
+          <span id="syncButtonText">
+            Sync calendar
+          </span>
+        </button>
+      </div>
+    </header>
+
+    <section class="stats">
+      <article class="stat-card">
+        <div class="stat-label">
+          <span>📅</span>
+          Today
+        </div>
+
+        <div class="stat-number" id="todayCount">
+          0
+        </div>
+      </article>
+
+      <article class="stat-card">
+        <div class="stat-label">
+          <span>⏭</span>
+          Upcoming
+        </div>
+
+        <div class="stat-number" id="upcomingCount">
+          0
+        </div>
+      </article>
+
+      <article class="stat-card">
+        <div class="stat-label">
+          <span>✓</span>
+          Completed
+        </div>
+
+        <div class="stat-number" id="completedCount">
+          0
+        </div>
+      </article>
+
+      <article class="stat-card">
+        <div class="stat-label">
+          <span>☰</span>
+          Total events
+        </div>
+
+        <div class="stat-number" id="totalCount">
+          0
+        </div>
+      </article>
+    </section>
+
+    <section class="control-panel">
+      <div class="search-row">
+        <div class="search-box">
+          <span class="search-icon">⌕</span>
+
+          <input
+            class="search-input"
+            id="searchInput"
+            type="search"
+            placeholder="Search tasks, calendars, locations or descriptions..."
+            autocomplete="off"
+          >
+        </div>
+      </div>
+
+      <nav class="filters" aria-label="Task filters">
+        <button
+          class="filter-button active"
+          type="button"
+          data-filter="all"
+        >
+          All
+        </button>
+
+        <button
+          class="filter-button"
+          type="button"
+          data-filter="today"
+        >
+          Today
+        </button>
+
+        <button
+          class="filter-button"
+          type="button"
+          data-filter="upcoming"
+        >
+          Upcoming
+        </button>
+
+        <button
+          class="filter-button"
+          type="button"
+          data-filter="past"
+        >
+          Past
+        </button>
+
+        <button
+          class="filter-button"
+          type="button"
+          data-filter="completed"
+        >
+          Completed
+        </button>
+      </nav>
+    </section>
+
+    <section>
+      <div class="list-header">
+        <h2 class="list-title" id="listTitle">
+          All tasks
+        </h2>
+
+        <div class="result-count" id="resultCount">
+          0 events
+        </div>
+      </div>
+
+      <div id="taskList">
+        <div class="loading-state">
+          <div>
+            <div>
+              <span class="loading-dot"></span>
+              <span class="loading-dot"></span>
+              <span class="loading-dot"></span>
+            </div>
+
+            <h3 class="state-title">
+              Loading events
+            </h3>
+
+            <p class="state-message">
+              Reading events from your Calendar Feed sheet.
+            </p>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <p class="footer-note">
+      Calendar events come from the Calendar Feed sheet.
+      Completed checkboxes are saved in this browser.
+    </p>
+  </main>
+
+  <div class="toast" id="toast"></div>
+
+  <script>
+    const STORAGE_KEY =
+      "calendarTaskCompletionStatusV1";
+
+    const state = {
+      tasks: [],
+      filter: "all",
+      search: "",
+      completed: loadCompletedTasks(),
+      loading: false
+    };
+
+    const filterNames = {
+      all: "All tasks",
+      today: "Today",
+      upcoming: "Upcoming",
+      past: "Past",
+      completed: "Completed"
+    };
+
+    document.addEventListener(
+      "DOMContentLoaded",
+      initializeApp
+    );
 
 
-/**
- * Removes automatic synchronization.
- */
-function removeAutomaticSync() {
-  removeCalendarTriggers();
+    function initializeApp() {
+      document
+        .getElementById("syncButton")
+        .addEventListener("click", function() {
+          loadTasks(true);
+        });
 
-  SpreadsheetApp.getUi().alert(
-    "Automatic Calendar Feed synchronization has been removed."
-  );
-}
+      document
+        .getElementById("searchInput")
+        .addEventListener("input", function(event) {
+          state.search =
+            event.target.value.trim().toLowerCase();
+
+          renderTasks();
+        });
+
+      document
+        .querySelectorAll(".filter-button")
+        .forEach(function(button) {
+          button.addEventListener(
+            "click",
+            function() {
+              setFilter(button.dataset.filter);
+            }
+          );
+        });
+
+      document
+        .getElementById("taskList")
+        .addEventListener(
+          "change",
+          handleTaskCheckbox
+        );
+
+      loadTasks(false);
+
+      // Reload information from the sheet every five minutes.
+      window.setInterval(function() {
+        if (!state.loading) {
+          loadTasks(false, true);
+        }
+      }, 5 * 60 * 1000);
+    }
+
+
+    function loadTasks(
+      synchronizeCalendar,
+      silent
+    ) {
+      if (state.loading) {
+        return;
+      }
+
+      state.loading = true;
+      setSyncButtonLoading(true);
+
+      if (!silent) {
+        showLoadingState(
+          synchronizeCalendar
+            ? "Synchronizing Google Calendar..."
+            : "Loading calendar events..."
+        );
+      }
+
+      const request = google.script.run
+        .withSuccessHandler(function(result) {
+          state.loading = false;
+          setSyncButtonLoading(false);
+
+          state.tasks = Array.isArray(result.tasks)
+            ? result.tasks
+            : [];
+
+          updateLastLoaded(result);
+          updateStatistics();
+          renderTasks();
+
+          if (synchronizeCalendar) {
+            showToast(
+              state.tasks.length +
+              " calendar events loaded."
+            );
+          }
+        })
+        .withFailureHandler(function(error) {
+          state.loading = false;
+          setSyncButtonLoading(false);
+
+          showErrorState(
+            error && error.message
+              ? error.message
+              : String(error)
+          );
+        });
+
+      if (synchronizeCalendar) {
+        request.refreshTaskEvents();
+      } else {
+        request.getTaskEvents();
+      }
+    }
+
+
+    function setFilter(filter) {
+      state.filter = filter;
+
+      document
+        .querySelectorAll(".filter-button")
+        .forEach(function(button) {
+          button.classList.toggle(
+            "active",
+            button.dataset.filter === filter
+          );
+        });
+
+      document.getElementById(
+        "listTitle"
+      ).textContent =
+        filterNames[filter] || "Tasks";
+
+      renderTasks();
+    }
+
+
+    function renderTasks() {
+      const taskList =
+        document.getElementById("taskList");
+
+      const filteredTasks =
+        getFilteredTasks();
+
+      document.getElementById(
+        "resultCount"
+      ).textContent =
+        filteredTasks.length +
+        (
+          filteredTasks.length === 1
+            ? " event"
+            : " events"
+        );
+
+      if (filteredTasks.length === 0) {
+        taskList.innerHTML = `
+          <div class="empty-state">
+            <div>
+              <div class="state-icon">🗓️</div>
+
+              <h3 class="state-title">
+                No events found
+              </h3>
+
+              <p class="state-message">
+                There are no calendar events matching
+                this filter or search.
+              </p>
+            </div>
+          </div>
+        `;
+
+        return;
+      }
+
+      const groups = groupTasksByDate(
+        filteredTasks
+      );
+
+      let html = "";
+
+      Object.keys(groups).forEach(function(dateKey) {
+        const group = groups[dateKey];
+
+        html += `
+          <section class="date-section">
+            <h3 class="date-heading">
+              ${escapeHtml(group.label)}
+            </h3>
+
+            ${group.tasks.map(createTaskCard).join("")}
+          </section>
+        `;
+      });
+
+      taskList.innerHTML = html;
+    }
+
+
+    function getFilteredTasks() {
+      const now = new Date();
+      const todayStart = startOfDay(now);
+      const tomorrowStart =
+        new Date(todayStart);
+
+      tomorrowStart.setDate(
+        tomorrowStart.getDate() + 1
+      );
+
+      return state.tasks
+        .filter(function(task) {
+          const completed =
+            Boolean(state.completed[task.id]);
+
+          const start = new Date(task.start);
+          const end = new Date(
+            task.end || task.start
+          );
+
+          let matchesFilter = true;
+
+          if (state.filter === "today") {
+            matchesFilter =
+              end >= todayStart &&
+              start < tomorrowStart;
+          }
+
+          if (state.filter === "upcoming") {
+            matchesFilter =
+              start >= tomorrowStart &&
+              !completed;
+          }
+
+          if (state.filter === "past") {
+            matchesFilter =
+              end < now &&
+              !completed;
+          }
+
+          if (state.filter === "completed") {
+            matchesFilter = completed;
+          }
+
+          if (!matchesFilter) {
+            return false;
+          }
+
+          if (!state.search) {
+            return true;
+          }
+
+          const searchableText = [
+            task.title,
+            task.calendar,
+            task.location,
+            task.description,
+            task.guests,
+            task.createdBy
+          ]
+            .join(" ")
+            .toLowerCase();
+
+          return searchableText.includes(
+            state.search
+          );
+        })
+        .sort(function(firstTask, secondTask) {
+          const firstCompleted =
+            Boolean(state.completed[firstTask.id]);
+
+          const secondCompleted =
+            Boolean(state.completed[secondTask.id]);
+
+          if (
+            firstCompleted !== secondCompleted &&
+            state.filter !== "completed"
+          ) {
+            return firstCompleted ? 1 : -1;
+          }
+
+          return firstTask.start - secondTask.start;
+        });
+    }
+
+
+    function groupTasksByDate(tasks) {
+      const groups = {};
+
+      tasks.forEach(function(task) {
+        const date = new Date(task.start);
+        const key = localDateKey(date);
+
+        if (!groups[key]) {
+          groups[key] = {
+            label: getDateHeading(date),
+            tasks: []
+          };
+        }
+
+        groups[key].tasks.push(task);
+      });
+
+      return groups;
+    }
+
+
+    function createTaskCard(task) {
+      const completed =
+        Boolean(state.completed[task.id]);
+
+      const status = getTaskStatus(
+        task,
+        completed
+      );
+
+      const encodedId =
+        encodeURIComponent(task.id);
+
+      const locationHtml = task.location
+        ? `
+          <span class="meta-item">
+            <span>📍</span>
+
+            <a
+              class="location-link"
+              href="https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(task.location)}"
+              target="_blank"
+              rel="noopener noreferrer"
+            >
+              ${escapeHtml(task.location)}
+            </a>
+          </span>
+        `
+        : "";
+
+      const descriptionHtml =
+        task.description
+          ? `
+            <p class="task-description">
+              ${escapeHtml(task.description)}
+            </p>
+          `
+          : "";
+
+      const hasDetails =
+        task.guests ||
+        task.createdBy ||
+        task.recurring ||
+        task.myStatus;
+
+      const detailsHtml = hasDetails
+        ? `
+          <details class="details-box">
+            <summary>More details</summary>
+
+            <div class="details-content">
+              ${
+                task.guests
+                  ? `
+                    <div>
+                      <strong>Guests:</strong>
+                      ${escapeHtml(task.guests)}
+                    </div>
+                  `
+                  : ""
+              }
+
+              ${
+                task.createdBy
+                  ? `
+                    <div>
+                      <strong>Created by:</strong>
+                      ${escapeHtml(task.createdBy)}
+                    </div>
+                  `
+                  : ""
+              }
+
+              ${
+                task.myStatus
+                  ? `
+                    <div>
+                      <strong>Calendar status:</strong>
+                      ${escapeHtml(task.myStatus)}
+                    </div>
+                  `
+                  : ""
+              }
+
+              ${
+                task.recurring
+                  ? `
+                    <div>
+                      <strong>Recurring event:</strong>
+                      Yes
+                    </div>
+                  `
+                  : ""
+              }
+            </div>
+          </details>
+        `
+        : "";
+
+      return `
+        <article
+          class="task-card ${completed ? "completed" : ""}"
+        >
+          <label
+            class="check-wrapper"
+            title="Mark as completed"
+          >
+            <input
+              class="task-check"
+              type="checkbox"
+              data-task-id="${encodedId}"
+              ${completed ? "checked" : ""}
+            >
+
+            <span class="custom-check"></span>
+          </label>
+
+          <div class="task-content">
+            <div class="task-title-row">
+              <h4 class="task-title">
+                ${escapeHtml(task.title)}
+              </h4>
+
+              <span class="calendar-badge">
+                ${escapeHtml(task.calendar)}
+              </span>
+
+              <span
+                class="status-badge ${status.className}"
+              >
+                ${escapeHtml(status.label)}
+              </span>
+            </div>
+
+            <div class="task-meta">
+              <span class="meta-item">
+                <span>🗓</span>
+                ${escapeHtml(formatFullDate(task.start))}
+              </span>
+
+              ${
+                task.allDay
+                  ? `
+                    <span class="meta-item">
+                      <span>☀</span>
+                      All-day event
+                    </span>
+                  `
+                  : `
+                    <span class="meta-item">
+                      <span>⏱</span>
+                      ${escapeHtml(formatDuration(task))}
+                    </span>
+                  `
+              }
+
+              ${locationHtml}
+            </div>
+
+            ${descriptionHtml}
+            ${detailsHtml}
+          </div>
+
+          <div class="time-panel">
+            <div class="time-main">
+              ${
+                task.allDay
+                  ? "All day"
+                  : escapeHtml(formatTime(task.start))
+              }
+            </div>
+
+            <div class="time-end">
+              ${
+                task.allDay
+                  ? ""
+                  : "to " +
+                    escapeHtml(
+                      formatTime(task.end)
+                    )
+              }
+            </div>
+          </div>
+        </article>
+      `;
+    }
+
+
+    function getTaskStatus(task, completed) {
+      if (completed) {
+        return {
+          label: "Done",
+          className: "status-done"
+        };
+      }
+
+      const now = new Date();
+      const start = new Date(task.start);
+      const end = new Date(
+        task.end || task.start
+      );
+
+      if (now >= start && now <= end) {
+        return {
+          label: "In progress",
+          className: "status-current"
+        };
+      }
+
+      if (end < now) {
+        return {
+          label: "Past",
+          className: "status-past"
+        };
+      }
+
+      if (isSameDay(start, now)) {
+        return {
+          label: "Today",
+          className: "status-today"
+        };
+      }
+
+      return {
+        label: "Upcoming",
+        className: "status-upcoming"
+      };
+    }
+
+
+    function handleTaskCheckbox(event) {
+      if (
+        !event.target.classList.contains(
+          "task-check"
+        )
+      ) {
+        return;
+      }
+
+      const taskId = decodeURIComponent(
+        event.target.dataset.taskId
+      );
+
+      if (event.target.checked) {
+        state.completed[taskId] = true;
+        showToast("Task marked as completed.");
+      } else {
+        delete state.completed[taskId];
+        showToast("Task marked as open.");
+      }
+
+      saveCompletedTasks();
+      updateStatistics();
+      renderTasks();
+    }
+
+
+    function updateStatistics() {
+      const now = new Date();
+      const todayStart = startOfDay(now);
+      const tomorrowStart =
+        new Date(todayStart);
+
+      tomorrowStart.setDate(
+        tomorrowStart.getDate() + 1
+      );
+
+      const todayCount =
+        state.tasks.filter(function(task) {
+          const start = new Date(task.start);
+          const end = new Date(
+            task.end || task.start
+          );
+
+          return (
+            end >= todayStart &&
+            start < tomorrowStart
+          );
+        }).length;
+
+      const upcomingCount =
+        state.tasks.filter(function(task) {
+          return (
+            new Date(task.start) >=
+              tomorrowStart &&
+            !state.completed[task.id]
+          );
+        }).length;
+
+      const completedCount =
+        state.tasks.filter(function(task) {
+          return Boolean(
+            state.completed[task.id]
+          );
+        }).length;
+
+      document.getElementById(
+        "todayCount"
+      ).textContent = todayCount;
+
+      document.getElementById(
+        "upcomingCount"
+      ).textContent = upcomingCount;
+
+      document.getElementById(
+        "completedCount"
+      ).textContent = completedCount;
+
+      document.getElementById(
+        "totalCount"
+      ).textContent = state.tasks.length;
+    }
+
+
+    function updateLastLoaded(result) {
+      const time = result.serverTime
+        ? new Date(result.serverTime)
+        : new Date();
+
+      document.getElementById(
+        "lastUpdated"
+      ).textContent =
+        "Loaded from " +
+        (result.sheetName || "Calendar Feed") +
+        " • " +
+        time.toLocaleString([], {
+          month: "short",
+          day: "numeric",
+          hour: "numeric",
+          minute: "2-digit"
+        });
+    }
+
+
+    function setSyncButtonLoading(loading) {
+      const button =
+        document.getElementById("syncButton");
+
+      const text =
+        document.getElementById(
+          "syncButtonText"
+        );
+
+      button.disabled = loading;
+      button.classList.toggle(
+        "loading",
+        loading
+      );
+
+      text.textContent = loading
+        ? "Loading..."
+        : "Sync calendar";
+    }
+
+
+    function showLoadingState(message) {
+      document.getElementById(
+        "taskList"
+      ).innerHTML = `
+        <div class="loading-state">
+          <div>
+            <div>
+              <span class="loading-dot"></span>
+              <span class="loading-dot"></span>
+              <span class="loading-dot"></span>
+            </div>
+
+            <h3 class="state-title">
+              Please wait
+            </h3>
+
+            <p class="state-message">
+              ${escapeHtml(message)}
+            </p>
+          </div>
+        </div>
+      `;
+    }
+
+
+    function showErrorState(message) {
+      document.getElementById(
+        "taskList"
+      ).innerHTML = `
+        <div class="error-state">
+          <div>
+            <div class="state-icon">⚠️</div>
+
+            <h3 class="state-title">
+              Could not load the calendar
+            </h3>
+
+            <p class="state-message">
+              ${escapeHtml(message)}
+            </p>
+          </div>
+        </div>
+      `;
+    }
+
+
+    function loadCompletedTasks() {
+      try {
+        const saved =
+          localStorage.getItem(STORAGE_KEY);
+
+        return saved
+          ? JSON.parse(saved)
+          : {};
+      } catch (error) {
+        return {};
+      }
+    }
+
+
+    function saveCompletedTasks() {
+      try {
+        localStorage.setItem(
+          STORAGE_KEY,
+          JSON.stringify(state.completed)
+        );
+      } catch (error) {
+        console.log(
+          "Completion status could not be saved."
+        );
+      }
+    }
+
+
+    function startOfDay(date) {
+      const result = new Date(date);
+
+      result.setHours(0, 0, 0, 0);
+
+      return result;
+    }
+
+
+    function isSameDay(firstDate, secondDate) {
+      return (
+        firstDate.getFullYear() ===
+          secondDate.getFullYear() &&
+        firstDate.getMonth() ===
+          secondDate.getMonth() &&
+        firstDate.getDate() ===
+          secondDate.getDate()
+      );
+    }
+
+
+    function localDateKey(date) {
+      return [
+        date.getFullYear(),
+        String(
+          date.getMonth() + 1
+        ).padStart(2, "0"),
+        String(
+          date.getDate()
+        ).padStart(2, "0")
+      ].join("-");
+    }
+
+
+    function getDateHeading(date) {
+      const today = startOfDay(new Date());
+      const taskDate = startOfDay(date);
+
+      const difference =
+        Math.round(
+          (taskDate - today) /
+          86400000
+        );
+
+      if (difference === 0) {
+        return "Today";
+      }
+
+      if (difference === 1) {
+        return "Tomorrow";
+      }
+
+      if (difference === -1) {
+        return "Yesterday";
+      }
+
+      return date.toLocaleDateString([], {
+        weekday: "long",
+        month: "long",
+        day: "numeric",
+        year:
+          date.getFullYear() !==
+          today.getFullYear()
+            ? "numeric"
+            : undefined
+      });
+    }
+
+
+    function formatFullDate(milliseconds) {
+      return new Date(
+        milliseconds
+      ).toLocaleDateString([], {
+        weekday: "short",
+        month: "short",
+        day: "numeric",
+        year: "numeric"
+      });
+    }
+
+
+    function formatTime(milliseconds) {
+      return new Date(
+        milliseconds
+      ).toLocaleTimeString([], {
+        hour: "numeric",
+        minute: "2-digit"
+      });
+    }
+
+
+    function formatDuration(task) {
+      const difference =
+        Math.max(
+          0,
+          task.end - task.start
+        );
+
+      const totalMinutes =
+        Math.round(difference / 60000);
+
+      if (totalMinutes < 60) {
+        return totalMinutes + " min";
+      }
+
+      const hours =
+        Math.floor(totalMinutes / 60);
+
+      const minutes =
+        totalMinutes % 60;
+
+      if (minutes === 0) {
+        return (
+          hours +
+          (hours === 1 ? " hour" : " hours")
+        );
+      }
+
+      return hours + " hr " + minutes + " min";
+    }
+
+
+    function escapeHtml(value) {
+      return String(value || "")
+        .replaceAll("&", "&amp;")
+        .replaceAll("<", "&lt;")
+        .replaceAll(">", "&gt;")
+        .replaceAll('"', "&quot;")
+        .replaceAll("'", "&#039;");
+    }
+
+
+    let toastTimer;
+
+    function showToast(message) {
+      const toast =
+        document.getElementById("toast");
+
+      toast.textContent = message;
+      toast.classList.add("show");
+
+      window.clearTimeout(toastTimer);
+
+      toastTimer = window.setTimeout(
+        function() {
+          toast.classList.remove("show");
+        },
+        2800
+      );
+    }
+  </script>
+</body>
+</html>
