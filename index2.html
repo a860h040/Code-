@@ -1,186 +1,32 @@
 const SETTINGS = {
   SHEET_NAME: "Calendar Feed",
+  DAYS_BACK: 30,
+  DAYS_FORWARD: 365,
 
-  // Leave blank to use your primary Google Calendar.
-  // For another calendar, enter its Calendar ID.
-  CALENDAR_ID: "",
-
-  // Events included in the feed.
-  DAYS_IN_THE_PAST: 30,
-  DAYS_IN_THE_FUTURE: 365
+  // true = import calendars checked/visible in Google Calendar
+  // false = import every calendar you own or subscribe to
+  ONLY_SELECTED_CALENDARS: true
 };
 
 
 /**
- * Adds a Calendar Feed menu when the spreadsheet opens.
+ * Run this function FIRST.
  */
-function onOpen() {
-  SpreadsheetApp.getUi()
-    .createMenu("Calendar Feed")
-    .addItem("Sync calendar now", "syncCalendarToSheet")
-    .addSeparator()
-    .addItem("Install automatic sync", "installAutomaticSync")
-    .addItem("Remove automatic sync", "removeAutomaticSync")
-    .addToUi();
-}
-
-
-/**
- * Reads calendar events and writes them into the Google Sheet.
- */
-function syncCalendarToSheet() {
+function setupCalendarFeed() {
   const spreadsheet = SpreadsheetApp.getActiveSpreadsheet();
 
-  let sheet = spreadsheet.getSheetByName(SETTINGS.SHEET_NAME);
-
-  if (!sheet) {
-    sheet = spreadsheet.insertSheet(SETTINGS.SHEET_NAME);
-  }
-
-  const calendar = SETTINGS.CALENDAR_ID.trim()
-    ? CalendarApp.getCalendarById(SETTINGS.CALENDAR_ID.trim())
-    : CalendarApp.getDefaultCalendar();
-
-  if (!calendar) {
+  if (!spreadsheet) {
     throw new Error(
-      "Calendar not found. Check the Calendar ID and confirm that you have access."
+      "Open this script from Google Sheets using Extensions > Apps Script."
     );
   }
 
-  const startDate = new Date();
-  startDate.setDate(startDate.getDate() - SETTINGS.DAYS_IN_THE_PAST);
-  startDate.setHours(0, 0, 0, 0);
-
-  const endDate = new Date();
-  endDate.setDate(endDate.getDate() + SETTINGS.DAYS_IN_THE_FUTURE);
-  endDate.setHours(23, 59, 59, 999);
-
-  const events = calendar
-    .getEvents(startDate, endDate)
-    .sort((a, b) => a.getStartTime() - b.getStartTime());
-
-  const headers = [
-    "Event Key",
-    "Event ID",
-    "Calendar",
-    "Event Title",
-    "Start Date and Time",
-    "End Date and Time",
-    "All-Day Event",
-    "Location",
-    "Description",
-    "Created By",
-    "Guests",
-    "My Status",
-    "Recurring Event",
-    "Last Updated"
-  ];
-
-  const rows = events.map(event => {
-    const startTime = event.getStartTime();
-
-    const eventKey =
-      event.getId() + "|" + startTime.toISOString();
-
-    const guests = event
-      .getGuestList()
-      .map(guest => guest.getEmail())
-      .filter(email => email)
-      .join(", ");
-
-    return [
-      eventKey,
-      event.getId(),
-      calendar.getName(),
-      event.getTitle(),
-      startTime,
-      event.getEndTime(),
-      event.isAllDayEvent() ? "Yes" : "No",
-      event.getLocation() || "",
-      event.getDescription() || "",
-      event.getCreators().join(", "),
-      guests,
-      event.getMyStatus().toString(),
-      event.isRecurringEvent() ? "Yes" : "No",
-      event.getLastUpdated()
-    ];
-  });
-
-  // Remove the existing filter before replacing the data.
-  const existingFilter = sheet.getFilter();
-
-  if (existingFilter) {
-    existingFilter.remove();
-  }
-
-  sheet.clearContents();
-
-  sheet
-    .getRange(1, 1, 1, headers.length)
-    .setValues([headers])
-    .setFontWeight("bold")
-    .setBackground("#1a73e8")
-    .setFontColor("#ffffff");
-
-  if (rows.length > 0) {
-    sheet
-      .getRange(2, 1, rows.length, headers.length)
-      .setValues(rows);
-
-    // Start and end dates.
-    sheet
-      .getRange(2, 5, rows.length, 2)
-      .setNumberFormat("mm/dd/yyyy hh:mm AM/PM");
-
-    // Last updated date.
-    sheet
-      .getRange(2, 14, rows.length, 1)
-      .setNumberFormat("mm/dd/yyyy hh:mm AM/PM");
-
-    sheet
-      .getRange(1, 1, rows.length + 1, headers.length)
-      .createFilter();
-  }
-
-  sheet.setFrozenRows(1);
-  sheet.setFrozenColumns(1);
-
-  sheet.setColumnWidth(1, 290);
-  sheet.setColumnWidth(2, 250);
-  sheet.setColumnWidth(3, 170);
-  sheet.setColumnWidth(4, 250);
-  sheet.setColumnWidth(5, 170);
-  sheet.setColumnWidth(6, 170);
-  sheet.setColumnWidth(7, 110);
-  sheet.setColumnWidth(8, 220);
-  sheet.setColumnWidth(9, 350);
-  sheet.setColumnWidth(10, 220);
-  sheet.setColumnWidth(11, 300);
-  sheet.setColumnWidth(12, 120);
-  sheet.setColumnWidth(13, 120);
-  sheet.setColumnWidth(14, 170);
-
-  sheet
-    .getDataRange()
-    .setVerticalAlignment("middle");
-
-  sheet
-    .getRange(2, 8, Math.max(rows.length, 1), 4)
-    .setWrap(true);
-
-  spreadsheet.toast(
-    rows.length + " calendar events imported.",
-    "Calendar Feed",
-    5
+  PropertiesService.getScriptProperties().setProperty(
+    "SPREADSHEET_ID",
+    spreadsheet.getId()
   );
-}
 
-
-/**
- * Creates a trigger that refreshes the calendar feed every 15 minutes.
- */
-function installAutomaticSync() {
-  removeAutomaticSync(false);
+  removeCalendarTriggers();
 
   ScriptApp.newTrigger("syncCalendarToSheet")
     .timeBased()
@@ -190,27 +36,235 @@ function installAutomaticSync() {
   syncCalendarToSheet();
 
   SpreadsheetApp.getUi().alert(
-    "Automatic calendar synchronization has been installed. " +
-    "The sheet will refresh approximately every 15 minutes."
+    "Calendar connection completed. Open the Calendar Feed tab."
   );
 }
 
 
 /**
- * Removes the automatic Calendar Feed triggers.
+ * Pulls events from Google Calendar into the sheet.
  */
-function removeAutomaticSync(showMessage = true) {
-  const triggers = ScriptApp.getProjectTriggers();
+function syncCalendarToSheet() {
+  const spreadsheet = getSpreadsheet();
 
-  triggers.forEach(trigger => {
+  let sheet = spreadsheet.getSheetByName(SETTINGS.SHEET_NAME);
+
+  if (!sheet) {
+    sheet = spreadsheet.insertSheet(SETTINGS.SHEET_NAME);
+  }
+
+  sheet.clear();
+
+  sheet.getRange("A1").setValue("Loading calendar events...");
+  SpreadsheetApp.flush();
+
+  try {
+    const startDate = new Date();
+    startDate.setDate(startDate.getDate() - SETTINGS.DAYS_BACK);
+    startDate.setHours(0, 0, 0, 0);
+
+    const endDate = new Date();
+    endDate.setDate(endDate.getDate() + SETTINGS.DAYS_FORWARD);
+    endDate.setHours(23, 59, 59, 999);
+
+    let calendars = CalendarApp.getAllCalendars();
+
+    if (SETTINGS.ONLY_SELECTED_CALENDARS) {
+      calendars = calendars.filter(calendar => calendar.isSelected());
+    }
+
+    if (calendars.length === 0) {
+      throw new Error(
+        "No selected calendars were found. Open Google Calendar and check the calendar boxes on the left."
+      );
+    }
+
+    const rows = [];
+
+    calendars.forEach(calendar => {
+      const events = calendar.getEvents(startDate, endDate);
+
+      events.forEach(event => {
+        let guests = "";
+
+        try {
+          guests = event
+            .getGuestList()
+            .map(guest => guest.getEmail())
+            .filter(Boolean)
+            .join(", ");
+        } catch (guestError) {
+          guests = "";
+        }
+
+        rows.push([
+          calendar.getName(),
+          event.getTitle() || "(No title)",
+          event.getStartTime(),
+          event.getEndTime(),
+          event.isAllDayEvent() ? "Yes" : "No",
+          event.getLocation() || "",
+          event.getDescription() || "",
+          guests,
+          event.getId()
+        ]);
+      });
+    });
+
+    rows.sort((a, b) => a[2] - b[2]);
+
+    const headers = [
+      "Calendar",
+      "Event",
+      "Start",
+      "End",
+      "All Day",
+      "Location",
+      "Description",
+      "Guests",
+      "Event ID"
+    ];
+
+    sheet.clear();
+
+    sheet
+      .getRange(1, 1, 1, headers.length)
+      .setValues([headers])
+      .setFontWeight("bold")
+      .setBackground("#1a73e8")
+      .setFontColor("#ffffff");
+
+    if (rows.length > 0) {
+      sheet
+        .getRange(2, 1, rows.length, headers.length)
+        .setValues(rows);
+
+      sheet
+        .getRange(2, 3, rows.length, 2)
+        .setNumberFormat("MM/dd/yyyy hh:mm AM/PM");
+
+      sheet
+        .getRange(1, 1, rows.length + 1, headers.length)
+        .createFilter();
+    } else {
+      sheet.getRange("A2").setValue(
+        "The connection worked, but no events were found within the selected date range."
+      );
+    }
+
+    sheet.setFrozenRows(1);
+    sheet.autoResizeColumns(1, headers.length);
+    sheet.setColumnWidth(2, 250);
+    sheet.setColumnWidth(6, 220);
+    sheet.setColumnWidth(7, 350);
+    sheet.setColumnWidth(8, 280);
+
+    if (rows.length > 0) {
+      sheet
+        .getRange(2, 6, rows.length, 3)
+        .setWrap(true);
+    }
+
+    sheet.getRange("K1").setValue("Last synchronized");
+    sheet.getRange("K2").setValue(new Date());
+    sheet.getRange("K2").setNumberFormat(
+      "MM/dd/yyyy hh:mm:ss AM/PM"
+    );
+
+    sheet.getRange("K4").setValue("Calendars checked");
+    sheet.getRange("K5").setValue(calendars.length);
+
+    sheet.getRange("K7").setValue("Events found");
+    sheet.getRange("K8").setValue(rows.length);
+
+  } catch (error) {
+    sheet.clear();
+
+    sheet.getRange("A1").setValue("CALENDAR ERROR");
+    sheet.getRange("A1").setFontWeight("bold");
+    sheet.getRange("A2").setValue(error.message);
+    sheet.getRange("A4").setValue(
+      "Open Apps Script > Executions to view the complete error."
+    );
+
+    throw error;
+  }
+}
+
+
+/**
+ * Shows every calendar the script can access.
+ */
+function testCalendarAccess() {
+  const spreadsheet = getSpreadsheet();
+
+  let sheet = spreadsheet.getSheetByName("Calendar Test");
+
+  if (!sheet) {
+    sheet = spreadsheet.insertSheet("Calendar Test");
+  }
+
+  const calendars = CalendarApp.getAllCalendars();
+
+  const rows = calendars.map(calendar => [
+    calendar.getName(),
+    calendar.getId(),
+    calendar.isSelected() ? "Yes" : "No",
+    calendar.isHidden() ? "Yes" : "No",
+    calendar.isOwnedByMe() ? "Yes" : "No"
+  ]);
+
+  sheet.clear();
+
+  sheet.getRange(1, 1, 1, 5).setValues([[
+    "Calendar Name",
+    "Calendar ID",
+    "Selected",
+    "Hidden",
+    "Owned By Me"
+  ]]);
+
+  if (rows.length > 0) {
+    sheet.getRange(2, 1, rows.length, 5).setValues(rows);
+  }
+
+  sheet.setFrozenRows(1);
+  sheet.autoResizeColumns(1, 5);
+}
+
+
+/**
+ * Opens the correct spreadsheet during automatic trigger runs.
+ */
+function getSpreadsheet() {
+  const spreadsheetId =
+    PropertiesService.getScriptProperties()
+      .getProperty("SPREADSHEET_ID");
+
+  if (spreadsheetId) {
+    return SpreadsheetApp.openById(spreadsheetId);
+  }
+
+  const activeSpreadsheet =
+    SpreadsheetApp.getActiveSpreadsheet();
+
+  if (!activeSpreadsheet) {
+    throw new Error(
+      "Spreadsheet connection is missing. Run setupCalendarFeed first."
+    );
+  }
+
+  return activeSpreadsheet;
+}
+
+
+/**
+ * Removes existing synchronization triggers.
+ */
+function removeCalendarTriggers() {
+  ScriptApp.getProjectTriggers().forEach(trigger => {
     if (trigger.getHandlerFunction() === "syncCalendarToSheet") {
       ScriptApp.deleteTrigger(trigger);
     }
   });
-
-  if (showMessage) {
-    SpreadsheetApp.getUi().alert(
-      "Automatic calendar synchronization has been removed."
-    );
-  }
 }
