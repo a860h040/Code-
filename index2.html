@@ -1,489 +1,560 @@
-/**
- * Apixaban Post-Orthopedic Surgery MUE Data Collection
- * Google Apps Script backend
- *5
- * Recommended setup:
- * 1. Open the Google Sheet.
- * 2. Go to Extensions > Apps Script.
- * 3. Paste this file into Code.gs.
- * 4. Add an HTML file named index and paste index.html into it.
- * 5. Run setupSheet() once and authorize the script.
- * 6. Deploy as a Web app.
- */
+/* ==========================================================================
+ * ORTHO → SHEET1 AUTOFILL
+ * Paste this entire section at the BOTTOM of Code.gs
+ * ========================================================================== */
 
-const CONFIG = Object.freeze({
-  // Leave blank when this Apps Script project is bound to the destination Sheet.
-  // For a standalone Apps Script project, paste the Google Sheet ID here.
-  SPREADSHEET_ID: '',
-  SHEET_NAME: 'Sheet2',
-  HEADER_ROW: 1,
-  DATA_START_ROW: 2
-});
+function runOrthoAutofill() {
+  const result = orthoAutofillAllRows_();
 
-// These headers match the uploaded workbook exactly, including separator columns.
-const HEADERS = Object.freeze([
-  'FIN',
-  'Date',
-  'Age',
-  'Gender',
-  'Height (cm)',
-  'ABW (kg)',
-  'BMI (kg/m2)',
-  'IBW (kg)',
-  'ABW/IBW',
-  'AdjBW',
-  'Relevant history of bleeding',
-  'Previous VTE',
-  'Cancer',
-  'Renal disease',
-  'Liver disease',
-  '',
-  'Type of surgery',
-  'Date and time of surgery',
-  'Primary versus revision procedure',
-  'Elective versus urgent procedure',
-  'Surgeon',
-  'Length of stay',
-  'Discharge destination',
-  '',
-  'Indication documented',
-  'First-dose date and time',
-  'Time from surgery completion to first dose',
-  'Inpatient dose',
-  'Inpatient frequency',
-  'Number of inpatient doses received',
-  'Discharge dose',
-  'Discharge frequency',
-  'Prescription quantity',
-  'Number of refills',
-  'Intended stop date',
-  'Number of outpatient days supplied',
-  'Calculated total treatment duration',
-  'Missed or held inpatient doses',
-  'Reason for any nonstandard regimen',
-  '',
-  'Baseline serum creatinine',
-  'Creatinine clearance',
-  'Hemoglobin before surgery',
-  'Hemoglobin at discharge',
-  'Platelet count',
-  'Relevant liver function tests',
-  '',
-  'Aspirin',
-  'Clopidogrel or other antiplatelets',
-  'NSAIDs',
-  'Other anticoagulants',
-  'Heparin or enoxaparin',
-  'Strong combined CYP3A4 and P-gp inhibitors',
-  'Strong CYP3A4 and P-gp inducers'
-]);
+  const message =
+    'Ortho autofill completed.\n\n' +
+    'Sheet1 rows checked: ' + result.rowsChecked + '\n' +
+    'FINs matched: ' + result.finsMatched + '\n' +
+    'Rows updated: ' + result.rowsUpdated + '\n' +
+    'Cells filled: ' + result.cellsFilled + '\n' +
+    'FINs not found: ' + result.notFound.length + '\n' +
+    'Duplicate FINs skipped: ' + result.duplicates.length + '\n' +
+    'Blank FIN rows skipped: ' + result.blankFinRows.length;
 
-/** Serves the web app. */
-function doGet() {
-  return HtmlService.createTemplateFromFile('index')
-    .evaluate()
-    .setTitle('MUE Data Collection')
-    .setXFrameOptionsMode(HtmlService.XFrameOptionsMode.ALLOWALL)
-    .addMetaTag('viewport', 'width=device-width, initial-scale=1');
-}
-
-/**
- * Run once from the Apps Script editor.
- * Creates/verifies the header row and applies practical formatting.
- */
-function setupSheet() {
-  const sheet = getSheet_();
-  const headerRange = sheet.getRange(CONFIG.HEADER_ROW, 1, 1, HEADERS.length);
-  const currentHeaders = headerRange.getDisplayValues()[0];
-  const isHeaderEmpty = currentHeaders.every(value => !String(value).trim());
-
-  if (isHeaderEmpty) {
-    headerRange.setValues([HEADERS]);
-  } else {
-    verifyHeaders_(currentHeaders);
-  }
-
-  styleSheet_(sheet);
-  return `Sheet “${sheet.getName()}” is ready.`;
-}
-
-/**
- * Saves one completed form submission into the next available row.
- * @param {Object} data Form payload sent by index.html.
- * @return {Object} Result shown to the reviewer.
- */
-function saveMueRecord(data) {
-  if (!data || typeof data !== 'object') {
-    throw new Error('No form data was received.');
-  }
-
-  validateRequired_(data);
-
-  const lock = LockService.getScriptLock();
-  lock.waitLock(30000);
+  console.log(message);
+  console.log(JSON.stringify(result, null, 2));
 
   try {
-    const sheet = getSheet_();
-    ensureHeaders_(sheet);
-
-    const row = buildRow_(data);
-    const nextRow = Math.max(sheet.getLastRow() + 1, CONFIG.DATA_START_ROW);
-    const target = sheet.getRange(nextRow, 1, 1, HEADERS.length);
-    target.setValues([row]);
-    applyRowFormats_(sheet, nextRow);
-
-    SpreadsheetApp.flush();
-
-    return {
-      ok: true,
-      rowNumber: nextRow,
-      fin: cleanText_(data.fin),
-      message: `Record saved successfully in row ${nextRow}.`
-    };
+    SpreadsheetApp.getActiveSpreadsheet().toast(
+      message,
+      'Ortho Autofill',
+      10
+    );
   } catch (error) {
-    console.error(error);
-    throw new Error(error && error.message ? error.message : 'The record could not be saved.');
-  } finally {
-    lock.releaseLock();
+    console.log('Toast could not be displayed: ' + error.message);
   }
+
+  return result;
 }
 
-/** Returns a small status payload used when the web app loads. */
-function getAppStatus() {
-  const sheet = getSheet_();
-  ensureHeaders_(sheet);
 
-  return {
-    sheetName: sheet.getName(),
-    recordCount: Math.max(sheet.getLastRow() - CONFIG.HEADER_ROW, 0),
-    timeZone: Session.getScriptTimeZone()
-  };
-}
+function orthoAutofillAllRows_() {
+  const spreadsheet = orthoGetSpreadsheet_();
 
-/** Opens the configured spreadsheet and sheet. */
-function getSheet_() {
-  const spreadsheet = CONFIG.SPREADSHEET_ID.trim()
-    ? SpreadsheetApp.openById(CONFIG.SPREADSHEET_ID.trim())
-    : SpreadsheetApp.getActiveSpreadsheet();
+  const sourceSheet = spreadsheet.getSheetByName('Ortho');
+  const destinationSheet = spreadsheet.getSheetByName('Sheet1');
 
-  if (!spreadsheet) {
+  if (!sourceSheet) {
     throw new Error(
-      'No spreadsheet is connected. Bind this script to the Google Sheet or add the Sheet ID in CONFIG.SPREADSHEET_ID.'
+      'The source sheet named "Ortho" was not found. ' +
+      'Confirm that the tab name is exactly Ortho.'
     );
   }
 
-  let sheet = spreadsheet.getSheetByName(CONFIG.SHEET_NAME);
-  if (!sheet) {
-    sheet = spreadsheet.insertSheet(CONFIG.SHEET_NAME);
-  }
-  return sheet;
-}
-
-/** Ensures the sheet has the exact expected header structure. */
-function ensureHeaders_(sheet) {
-  const headerRange = sheet.getRange(CONFIG.HEADER_ROW, 1, 1, HEADERS.length);
-  const currentHeaders = headerRange.getDisplayValues()[0];
-  const isHeaderEmpty = currentHeaders.every(value => !String(value).trim());
-
-  if (isHeaderEmpty) {
-    headerRange.setValues([HEADERS]);
-    styleSheet_(sheet);
-    return;
+  if (!destinationSheet) {
+    throw new Error(
+      'The destination sheet named "Sheet1" was not found. ' +
+      'Confirm that the tab name is exactly Sheet1.'
+    );
   }
 
-  verifyHeaders_(currentHeaders);
-}
+  if (sourceSheet.getLastRow() < 2) {
+    throw new Error('The Ortho sheet does not contain any patient data.');
+  }
 
-/** Compares nonblank headers so data cannot silently shift into the wrong columns. */
-function verifyHeaders_(currentHeaders) {
-  const mismatches = [];
+  if (destinationSheet.getLastRow() < 2) {
+    throw new Error(
+      'Sheet1 does not contain any patient rows. ' +
+      'Enter FIN numbers in Sheet1 before running the autofill.'
+    );
+  }
 
-  HEADERS.forEach((expected, index) => {
-    if (!expected) return; // Blank columns are intentional section separators.
-    const actual = String(currentHeaders[index] || '').trim();
-    if (actual !== expected) {
-      mismatches.push(`${columnLetter_(index + 1)}: expected “${expected}”, found “${actual || '(blank)'}”`);
+  const sourceLastColumn = sourceSheet.getLastColumn();
+  const destinationLastColumn = destinationSheet.getLastColumn();
+
+  const sourceHeaders = sourceSheet
+    .getRange(1, 1, 1, sourceLastColumn)
+    .getDisplayValues()[0];
+
+  const destinationHeaders = destinationSheet
+    .getRange(1, 1, 1, destinationLastColumn)
+    .getDisplayValues()[0];
+
+  const sourceHeaderMap = orthoCreateHeaderMap_(sourceHeaders, 'Ortho');
+  const destinationHeaderMap = orthoCreateHeaderMap_(
+    destinationHeaders,
+    'Sheet1'
+  );
+
+  const requiredOrthoHeaders = [
+    'PATIENT',
+    'FIN',
+    'ORD_ID',
+    'DOB',
+    'AGE',
+    'GENDER',
+    'ORIG_ORDER_DT_TM',
+    'O_DEPT_STATUS_DISP',
+    'O_CATALOG_DISP',
+    'ORDERED_AS_MNEMONIC',
+    'CLINICAL_DISPLAY_LINE',
+    'PROVIDER',
+    'ORDER_DC',
+    'ORDER_DC_TYPE',
+    'E_ENCNTR_TYPE_DISP',
+    'ENC_ARRIVE_DT_TM',
+    'ENC_DISCH_DT_TM',
+    'E_LOC_FACILITY_DISP',
+    'E_LOC_NURSE_UNIT_DISP',
+    'ORTHO Hip Procedures Post-Op',
+    'PERSON_ID',
+    'ENCNTR_ID'
+  ];
+
+  const missingOrthoHeaders = requiredOrthoHeaders.filter(function (header) {
+    return sourceHeaderMap[orthoNormalizeHeader_(header)] === undefined;
+  });
+
+  if (missingOrthoHeaders.length > 0) {
+    throw new Error(
+      'The following required headers are missing from Ortho:\n' +
+      missingOrthoHeaders.join(', ')
+    );
+  }
+
+  const sourceFinColumn =
+    sourceHeaderMap[orthoNormalizeHeader_('FIN')];
+
+  const destinationFinColumn =
+    destinationHeaderMap[orthoNormalizeHeader_('FIN')];
+
+  if (destinationFinColumn === undefined) {
+    throw new Error(
+      'The FIN header was not found in row 1 of Sheet1.'
+    );
+  }
+
+  const sourceRowCount = sourceSheet.getLastRow() - 1;
+  const destinationRowCount = destinationSheet.getLastRow() - 1;
+
+  const sourceValues = sourceSheet
+    .getRange(2, 1, sourceRowCount, sourceLastColumn)
+    .getValues();
+
+  const sourceDisplayValues = sourceSheet
+    .getRange(2, 1, sourceRowCount, sourceLastColumn)
+    .getDisplayValues();
+
+  const destinationRange = destinationSheet.getRange(
+    2,
+    1,
+    destinationRowCount,
+    destinationLastColumn
+  );
+
+  const destinationValues = destinationRange.getValues();
+  const destinationDisplayValues = destinationRange.getDisplayValues();
+  const destinationFormulas = destinationRange.getFormulas();
+
+  const sourceRecordsByFin = {};
+  const duplicateFinSet = {};
+  const blankSourceFinRows = [];
+
+  sourceValues.forEach(function (row, rowIndex) {
+    const displayedFin =
+      sourceDisplayValues[rowIndex][sourceFinColumn];
+
+    const fin = orthoNormalizeFin_(displayedFin);
+
+    if (!fin) {
+      blankSourceFinRows.push(rowIndex + 2);
+      return;
+    }
+
+    if (sourceRecordsByFin[fin]) {
+      duplicateFinSet[fin] = true;
+      return;
+    }
+
+    sourceRecordsByFin[fin] = {
+      values: row,
+      displayValues: sourceDisplayValues[rowIndex],
+      sourceRow: rowIndex + 2
+    };
+  });
+
+  Object.keys(duplicateFinSet).forEach(function (fin) {
+    delete sourceRecordsByFin[fin];
+  });
+
+  const assignments = orthoBuildAssignments_(
+    sourceHeaderMap,
+    destinationHeaderMap
+  );
+
+  if (assignments.length === 0) {
+    throw new Error(
+      'No matching destination columns were found between Ortho and Sheet1.'
+    );
+  }
+
+  let rowsUpdated = 0;
+  let cellsFilled = 0;
+  let finsMatched = 0;
+
+  const notFound = [];
+  const duplicates = [];
+  const blankFinRows = [];
+
+  destinationValues.forEach(function (destinationRow, rowIndex) {
+    const displayedDestinationFin =
+      destinationDisplayValues[rowIndex][destinationFinColumn];
+
+    const fin = orthoNormalizeFin_(displayedDestinationFin);
+    const sheetRowNumber = rowIndex + 2;
+
+    if (!fin) {
+      blankFinRows.push(sheetRowNumber);
+      return;
+    }
+
+    if (duplicateFinSet[fin]) {
+      duplicates.push({
+        row: sheetRowNumber,
+        fin: fin
+      });
+      return;
+    }
+
+    const sourceRecord = sourceRecordsByFin[fin];
+
+    if (!sourceRecord) {
+      notFound.push({
+        row: sheetRowNumber,
+        fin: fin
+      });
+      return;
+    }
+
+    finsMatched++;
+
+    let rowChanged = false;
+
+    assignments.forEach(function (assignment) {
+      const destinationColumn = assignment.destinationColumn;
+
+      const existingValue = destinationRow[destinationColumn];
+      const existingDisplayValue =
+        destinationDisplayValues[rowIndex][destinationColumn];
+      const existingFormula =
+        destinationFormulas[rowIndex][destinationColumn];
+
+      // Never overwrite formulas.
+      if (existingFormula) {
+        return;
+      }
+
+      // Fill only truly empty cells.
+      if (
+        existingValue !== '' &&
+        existingValue !== null &&
+        existingValue !== undefined
+      ) {
+        return;
+      }
+
+      if (String(existingDisplayValue || '').trim() !== '') {
+        return;
+      }
+
+      let sourceValue;
+
+      if (assignment.type === 'lengthOfStay') {
+        sourceValue = orthoCalculateLengthOfStay_(
+          sourceRecord.values,
+          sourceHeaderMap
+        );
+      } else {
+        sourceValue =
+          sourceRecord.values[assignment.sourceColumn];
+      }
+
+      if (
+        sourceValue === '' ||
+        sourceValue === null ||
+        sourceValue === undefined
+      ) {
+        return;
+      }
+
+      destinationRow[destinationColumn] = sourceValue;
+      rowChanged = true;
+      cellsFilled++;
+    });
+
+    if (rowChanged) {
+      rowsUpdated++;
     }
   });
 
-  if (mismatches.length) {
-    throw new Error(
-      'The sheet headers do not match the MUE template. Correct these columns before submitting:\n' +
-      mismatches.slice(0, 8).join('\n') +
-      (mismatches.length > 8 ? `\n…and ${mismatches.length - 8} more.` : '')
-    );
-  }
+  destinationRange.setValues(destinationValues);
+
+  SpreadsheetApp.flush();
+
+  return {
+    success: true,
+    rowsChecked: destinationRowCount,
+    finsMatched: finsMatched,
+    rowsUpdated: rowsUpdated,
+    cellsFilled: cellsFilled,
+    blankFinRows: blankFinRows,
+    blankSourceFinRows: blankSourceFinRows,
+    notFound: notFound,
+    duplicates: duplicates,
+    mappedColumns: assignments.map(function (assignment) {
+      return assignment.sourceHeader +
+        ' → ' +
+        assignment.destinationHeader;
+    })
+  };
 }
 
-/** Builds the 54-column row in the exact workbook order. */
-function buildRow_(data) {
-  const age = cleanNumber_(data.age);
-  const heightCm = cleanNumber_(data.heightCm);
-  const abwKg = cleanNumber_(data.abwKg);
-  const bmi = calculateBmi_(heightCm, abwKg);
-  const ibw = calculateIbw_(data.gender, heightCm);
-  const abwIbw = calculateRatio_(abwKg, ibw);
-  const adjBw = calculateAdjBw_(abwKg, ibw);
 
-  const surgeryDateTime = parseLocalDateTime_(data.surgeryDateTime);
-  const firstDoseDateTime = parseLocalDateTime_(data.firstDoseDateTime);
-  const intendedStopDate = parseLocalDate_(data.intendedStopDate);
+function orthoBuildAssignments_(
+  sourceHeaderMap,
+  destinationHeaderMap
+) {
+  const assignments = [];
+  const usedDestinationColumns = {};
 
-  const timeToFirstDoseHours = hoursBetween_(surgeryDateTime, firstDoseDateTime);
-  const outpatientDays = calculateOutpatientDays_(
-    data.prescriptionQuantity,
-    data.dischargeFrequency
-  );
-  const totalTreatmentDays = calculateTreatmentDays_(firstDoseDateTime, intendedStopDate);
+  // Copy columns having the same header name.
+  Object.keys(destinationHeaderMap).forEach(function (
+    normalizedDestinationHeader
+  ) {
+    if (normalizedDestinationHeader === orthoNormalizeHeader_('FIN')) {
+      return;
+    }
 
-  return [
-    cleanText_(data.fin),
-    parseLocalDate_(data.collectionDate),
-    age,
-    cleanText_(data.gender),
-    heightCm,
-    abwKg,
-    firstDefinedNumber_(data.bmiKgM2, bmi),
-    firstDefinedNumber_(data.ibwKg, ibw),
-    firstDefinedNumber_(data.abwIbwRatio, abwIbw),
-    firstDefinedNumber_(data.adjustedBodyWeightKg, adjBw),
-    cleanText_(data.bleedingHistory),
-    cleanText_(data.previousVte),
-    cleanText_(data.cancer),
-    cleanText_(data.renalDisease),
-    cleanText_(data.liverDisease),
-    '',
-    cleanText_(data.surgeryType),
-    surgeryDateTime,
-    cleanText_(data.procedureType),
-    cleanText_(data.procedureUrgency),
-    cleanText_(data.surgeon),
-    cleanNumber_(data.lengthOfStay),
-    cleanText_(data.dischargeDestination),
-    '',
-    cleanText_(data.indicationDocumented),
-    firstDoseDateTime,
-    firstDefinedNumber_(data.timeToFirstDoseHours, timeToFirstDoseHours),
-    cleanText_(data.inpatientDose),
-    cleanText_(data.inpatientFrequency),
-    cleanNumber_(data.inpatientDoseCount),
-    cleanText_(data.dischargeDose),
-    cleanText_(data.dischargeFrequency),
-    cleanNumber_(data.prescriptionQuantity),
-    cleanNumber_(data.refillCount),
-    intendedStopDate,
-    firstDefinedNumber_(data.outpatientDaysSupplied, outpatientDays),
-    firstDefinedNumber_(data.totalTreatmentDuration, totalTreatmentDays),
-    cleanText_(data.missedHeldDoses),
-    cleanText_(data.nonstandardRegimenReason),
-    '',
-    cleanNumber_(data.baselineSerumCreatinine),
-    cleanNumber_(data.creatinineClearance),
-    cleanNumber_(data.hemoglobinBeforeSurgery),
-    cleanNumber_(data.hemoglobinAtDischarge),
-    cleanNumber_(data.plateletCount),
-    cleanText_(data.liverFunctionTests),
-    '',
-    cleanText_(data.aspirin),
-    cleanText_(data.clopidogrel),
-    cleanText_(data.nsaids),
-    cleanText_(data.otherAnticoagulants),
-    cleanText_(data.heparinEnoxaparin),
-    cleanText_(data.strongInhibitors),
-    cleanText_(data.strongInducers)
-  ];
-}
+    if (
+      sourceHeaderMap[normalizedDestinationHeader] !== undefined
+    ) {
+      const sourceColumn =
+        sourceHeaderMap[normalizedDestinationHeader];
+      const destinationColumn =
+        destinationHeaderMap[normalizedDestinationHeader];
 
-/** Minimal required validation; chart-review fields may legitimately be undocumented. */
-function validateRequired_(data) {
-  const missing = [];
-  if (!cleanText_(data.fin)) missing.push('FIN');
-  if (!cleanText_(data.collectionDate)) missing.push('Date');
-  if (!cleanText_(data.surgeryType)) missing.push('Type of surgery');
+      assignments.push({
+        type: 'direct',
+        sourceColumn: sourceColumn,
+        destinationColumn: destinationColumn,
+        sourceHeader: normalizedDestinationHeader,
+        destinationHeader: normalizedDestinationHeader
+      });
 
-  if (missing.length) {
-    throw new Error(`Complete the following required field${missing.length > 1 ? 's' : ''}: ${missing.join(', ')}.`);
-  }
-
-  const age = cleanNumber_(data.age);
-  if (age !== '' && (age < 0 || age > 120)) {
-    throw new Error('Age must be between 0 and 120.');
-  }
-}
-
-/** Header and worksheet styling. */
-function styleSheet_(sheet) {
-  sheet.setFrozenRows(1);
-
-  const headerRange = sheet.getRange(1, 1, 1, HEADERS.length);
-  headerRange
-    .setFontWeight('bold')
-    .setFontColor('#FFFFFF')
-    .setBackground('#123B5D')
-    .setWrap(true)
-    .setVerticalAlignment('middle')
-    .setHorizontalAlignment('center');
-  sheet.setRowHeight(1, 56);
-
-  // Color the clinical sections so the wide sheet remains readable.
-  sheet.getRange(1, 1, 1, 15).setBackground('#123B5D');
-  sheet.getRange(1, 17, 1, 7).setBackground('#1F6F78');
-  sheet.getRange(1, 25, 1, 15).setBackground('#335C81');
-  sheet.getRange(1, 41, 1, 6).setBackground('#6A4C77');
-  sheet.getRange(1, 48, 1, 7).setBackground('#7A5C2E');
-
-  [16, 24, 40, 47].forEach(column => {
-    sheet.setColumnWidth(column, 18);
-    sheet.getRange(1, column, Math.max(sheet.getMaxRows(), 2), 1).setBackground('#E8EEF3');
+      usedDestinationColumns[destinationColumn] = true;
+    }
   });
 
-  // Practical default widths.
-  sheet.setColumnWidth(1, 105);
-  sheet.setColumnWidth(2, 95);
-  sheet.setColumnWidths(3, 8, 95);
-  sheet.setColumnWidths(11, 5, 125);
-  sheet.setColumnWidths(17, 7, 145);
-  sheet.setColumnWidths(25, 15, 155);
-  sheet.setColumnWidths(41, 6, 145);
-  sheet.setColumnWidths(48, 7, 155);
+  const aliases = [
+    {
+      source: 'AGE',
+      destination: 'Age'
+    },
+    {
+      source: 'GENDER',
+      destination: 'Gender'
+    },
+    {
+      source: 'ORTHO Hip Procedures Post-Op',
+      destination: 'Type of surgery'
+    },
+    {
+      source: 'ORIG_ORDER_DT_TM',
+      destination: 'Date and time of surgery'
+    },
+    {
+      source: 'PROVIDER',
+      destination: 'Surgeon'
+    }
+  ];
 
-  if (!sheet.getFilter()) {
-    const lastRow = Math.max(sheet.getLastRow(), 2);
-    sheet.getRange(1, 1, lastRow, HEADERS.length).createFilter();
+  aliases.forEach(function (alias) {
+    const sourceKey = orthoNormalizeHeader_(alias.source);
+    const destinationKey =
+      orthoNormalizeHeader_(alias.destination);
+
+    const sourceColumn = sourceHeaderMap[sourceKey];
+    const destinationColumn =
+      destinationHeaderMap[destinationKey];
+
+    if (
+      sourceColumn === undefined ||
+      destinationColumn === undefined ||
+      usedDestinationColumns[destinationColumn]
+    ) {
+      return;
+    }
+
+    assignments.push({
+      type: 'direct',
+      sourceColumn: sourceColumn,
+      destinationColumn: destinationColumn,
+      sourceHeader: alias.source,
+      destinationHeader: alias.destination
+    });
+
+    usedDestinationColumns[destinationColumn] = true;
+  });
+
+  const lengthOfStayColumn =
+    destinationHeaderMap[
+      orthoNormalizeHeader_('Length of stay')
+    ];
+
+  if (
+    lengthOfStayColumn !== undefined &&
+    !usedDestinationColumns[lengthOfStayColumn]
+  ) {
+    assignments.push({
+      type: 'lengthOfStay',
+      sourceColumn: null,
+      destinationColumn: lengthOfStayColumn,
+      sourceHeader:
+        'ENC_ARRIVE_DT_TM and ENC_DISCH_DT_TM',
+      destinationHeader: 'Length of stay'
+    });
   }
+
+  return assignments;
 }
 
-/** Applies number/date formats to each newly inserted record. */
-function applyRowFormats_(sheet, rowNumber) {
-  sheet.getRange(rowNumber, 2).setNumberFormat('MM/dd/yyyy');
-  sheet.getRange(rowNumber, 18).setNumberFormat('MM/dd/yyyy HH:mm');
-  sheet.getRange(rowNumber, 26).setNumberFormat('MM/dd/yyyy HH:mm');
-  sheet.getRange(rowNumber, 35).setNumberFormat('MM/dd/yyyy');
 
-  sheet.getRange(rowNumber, 3).setNumberFormat('0');
-  sheet.getRange(rowNumber, 5, 1, 6).setNumberFormat('0.00');
-  sheet.getRange(rowNumber, 22).setNumberFormat('0.0');
-  sheet.getRange(rowNumber, 27).setNumberFormat('0.00');
-  sheet.getRange(rowNumber, 30).setNumberFormat('0');
-  sheet.getRange(rowNumber, 33, 1, 5).setNumberFormat('0.00');
-  sheet.getRange(rowNumber, 41, 1, 5).setNumberFormat('0.00');
-  sheet.getRange(rowNumber, 1, 1, HEADERS.length).setVerticalAlignment('top').setWrap(true);
-}
+function orthoCalculateLengthOfStay_(
+  sourceRow,
+  sourceHeaderMap
+) {
+  const arrivalColumn =
+    sourceHeaderMap[
+      orthoNormalizeHeader_('ENC_ARRIVE_DT_TM')
+    ];
 
-function cleanText_(value) {
-  if (value === null || value === undefined) return '';
-  return String(value).trim();
-}
+  const dischargeColumn =
+    sourceHeaderMap[
+      orthoNormalizeHeader_('ENC_DISCH_DT_TM')
+    ];
 
-function cleanNumber_(value) {
-  if (value === null || value === undefined || value === '') return '';
-  const number = Number(value);
-  return Number.isFinite(number) ? number : '';
-}
+  if (
+    arrivalColumn === undefined ||
+    dischargeColumn === undefined
+  ) {
+    return '';
+  }
 
-function firstDefinedNumber_(submittedValue, calculatedValue) {
-  const submitted = cleanNumber_(submittedValue);
-  if (submitted !== '') return submitted;
-  return calculatedValue === '' || calculatedValue === null || calculatedValue === undefined
-    ? ''
-    : calculatedValue;
-}
-
-function parseLocalDate_(value) {
-  const text = cleanText_(value);
-  if (!text) return '';
-  const match = /^(\d{4})-(\d{2})-(\d{2})$/.exec(text);
-  if (!match) return text;
-  return new Date(Number(match[1]), Number(match[2]) - 1, Number(match[3]));
-}
-
-function parseLocalDateTime_(value) {
-  const text = cleanText_(value);
-  if (!text) return '';
-  const match = /^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2})/.exec(text);
-  if (!match) return text;
-  return new Date(
-    Number(match[1]),
-    Number(match[2]) - 1,
-    Number(match[3]),
-    Number(match[4]),
-    Number(match[5])
+  const arrival = orthoConvertToDate_(
+    sourceRow[arrivalColumn]
   );
-}
 
-function calculateBmi_(heightCm, weightKg) {
-  if (!heightCm || !weightKg) return '';
-  const meters = heightCm / 100;
-  return round_(weightKg / (meters * meters), 2);
-}
-
-// Devine IBW formula. Confirm that this matches the institution's approved method.
-function calculateIbw_(gender, heightCm) {
-  if (!heightCm) return '';
-  const normalizedGender = cleanText_(gender).toLowerCase();
-  if (normalizedGender !== 'male' && normalizedGender !== 'female') return '';
-  const inches = heightCm / 2.54;
-  const base = normalizedGender === 'male' ? 50 : 45.5;
-  return round_(Math.max(base + 2.3 * (inches - 60), 0), 2);
-}
-
-function calculateRatio_(abwKg, ibwKg) {
-  if (!abwKg || !ibwKg) return '';
-  return round_(abwKg / ibwKg, 3);
-}
-
-// Standard AdjBW equation. Confirm that the 0.4 correction factor matches local policy.
-function calculateAdjBw_(abwKg, ibwKg) {
-  if (!abwKg || !ibwKg) return '';
-  return round_(ibwKg + 0.4 * (abwKg - ibwKg), 2);
-}
-
-function hoursBetween_(start, end) {
-  if (!(start instanceof Date) || !(end instanceof Date)) return '';
-  const hours = (end.getTime() - start.getTime()) / 3600000;
-  return hours >= 0 ? round_(hours, 2) : '';
-}
-
-function calculateOutpatientDays_(quantityValue, frequencyValue) {
-  const quantity = cleanNumber_(quantityValue);
-  if (quantity === '') return '';
-  const frequency = cleanText_(frequencyValue).toLowerCase();
-  let dosesPerDay = '';
-
-  if (frequency.includes('twice') || frequency.includes('bid')) {
-    dosesPerDay = 2;
-  } else if (frequency.includes('once') || frequency.includes('daily')) {
-    dosesPerDay = 1;
-  }
-
-  if (!dosesPerDay) return '';
-  return round_(quantity / dosesPerDay, 2);
-}
-
-function calculateTreatmentDays_(firstDoseDateTime, stopDate) {
-  if (!(firstDoseDateTime instanceof Date) || !(stopDate instanceof Date)) return '';
-  const firstDoseDay = new Date(
-    firstDoseDateTime.getFullYear(),
-    firstDoseDateTime.getMonth(),
-    firstDoseDateTime.getDate()
+  const discharge = orthoConvertToDate_(
+    sourceRow[dischargeColumn]
   );
-  const stopDay = new Date(stopDate.getFullYear(), stopDate.getMonth(), stopDate.getDate());
-  const dayDifference = Math.round((stopDay.getTime() - firstDoseDay.getTime()) / 86400000);
-  return dayDifference >= 0 ? dayDifference + 1 : '';
-}
 
-function round_(value, digits) {
-  const factor = Math.pow(10, digits || 0);
-  return Math.round((value + Number.EPSILON) * factor) / factor;
-}
-
-function columnLetter_(columnNumber) {
-  let result = '';
-  let number = columnNumber;
-  while (number > 0) {
-    number--;
-    result = String.fromCharCode(65 + (number % 26)) + result;
-    number = Math.floor(number / 26);
+  if (!arrival || !discharge) {
+    return '';
   }
-  return result;
+
+  const milliseconds = discharge.getTime() - arrival.getTime();
+
+  if (milliseconds < 0) {
+    return '';
+  }
+
+  const days = milliseconds / (1000 * 60 * 60 * 24);
+
+  return Math.round(days * 100) / 100;
+}
+
+
+function orthoConvertToDate_(value) {
+  if (value instanceof Date && !isNaN(value.getTime())) {
+    return value;
+  }
+
+  if (!value) {
+    return null;
+  }
+
+  const converted = new Date(value);
+
+  if (isNaN(converted.getTime())) {
+    return null;
+  }
+
+  return converted;
+}
+
+
+function orthoCreateHeaderMap_(headers, sheetName) {
+  const map = {};
+  const duplicates = [];
+
+  headers.forEach(function (header, columnIndex) {
+    const normalizedHeader = orthoNormalizeHeader_(header);
+
+    if (!normalizedHeader) {
+      return;
+    }
+
+    if (map[normalizedHeader] !== undefined) {
+      duplicates.push(String(header));
+      return;
+    }
+
+    map[normalizedHeader] = columnIndex;
+  });
+
+  if (duplicates.length > 0) {
+    throw new Error(
+      'Duplicate column headers were found in ' +
+      sheetName +
+      ': ' +
+      duplicates.join(', ')
+    );
+  }
+
+  return map;
+}
+
+
+function orthoNormalizeHeader_(value) {
+  return String(value || '')
+    .trim()
+    .replace(/\s+/g, ' ')
+    .toUpperCase();
+}
+
+
+function orthoNormalizeFin_(value) {
+  return String(value || '')
+    .trim()
+    .replace(/\s+/g, '');
+}
+
+
+function orthoGetSpreadsheet_() {
+  const activeSpreadsheet =
+    SpreadsheetApp.getActiveSpreadsheet();
+
+  if (activeSpreadsheet) {
+    return activeSpreadsheet;
+  }
+
+  if (
+    typeof CONFIG !== 'undefined' &&
+    CONFIG.SPREADSHEET_ID
+  ) {
+    return SpreadsheetApp.openById(
+      CONFIG.SPREADSHEET_ID
+    );
+  }
+
+  throw new Error(
+    'The Apps Script project is not connected to a Google Sheet. ' +
+    'Open the MUE spreadsheet and select Extensions → Apps Script, ' +
+    'or enter the spreadsheet ID in CONFIG.SPREADSHEET_ID.'
+  );
 }
