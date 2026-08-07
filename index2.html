@@ -1,6 +1,592 @@
+/**
+ * Apixaban Post-Orthopedic Surgery MUE Data Collection
+ * Complete Google Apps Script backend
+ *
+ * Main workflow:
+ * - Sheet1 is the MUE patient data sheet.
+ * - FIN is used as the patient encounter identifier.
+ * - The HTML reviews one Sheet1 patient at a time and shows only missing fields.
+ * - Existing Sheet1 values are never overwritten by the missing-data workflow.
+ * - Ortho data can be used to autofill empty Sheet1 cells.
+ */
+
+const CONFIG = Object.freeze({
+  SPREADSHEET_ID: '', // Leave blank when this script is bound to the Google Sheet.
+  SHEET1_NAME: 'Sheet1',
+  ORTHO_SHEET_NAME: 'Ortho',
+  HEADER_ROW: 1,
+  DATA_START_ROW: 2,
+  CLIENT_TIMEOUT_MS: 45000
+});
+
+const YES_NO_UNKNOWN = Object.freeze(['Yes', 'No', 'Unknown']);
+const DOCUMENTED_OPTIONS = Object.freeze(['Yes', 'No', 'Unclear']);
+const FREQUENCY_OPTIONS = Object.freeze([
+  'Twice daily (BID)',
+  'Once daily',
+  'Other',
+  'Not documented'
+]);
+const DOSE_OPTIONS = Object.freeze([
+  '2.5 mg',
+  '5 mg',
+  '10 mg',
+  'Other',
+  'Not documented'
+]);
+
+/**
+ * Template used only when Sheet1 is empty.
+ * Existing populated Sheet1 sheets are NOT reordered.
+ */
+const TEMPLATE_HEADERS = Object.freeze([
+  'FIN',
+  'Patient Name',
+  'DOB',
+  'Date',
+  'Age',
+  'Gender',
+  'Height (cm)',
+  'ABW (kg)',
+  'BMI (kg/m2)',
+  'IBW (kg)',
+  'ABW/IBW',
+  'AdjBW',
+  'Relevant history of bleeding',
+  'Previous VTE',
+  'Cancer',
+  'Renal disease',
+  'Liver disease',
+  '',
+  'Type of surgery',
+  'Date and time of surgery',
+  'Primary versus revision procedure',
+  'Elective versus urgent procedure',
+  'Surgeon',
+  'Length of stay',
+  'Discharge destination',
+  '',
+  'Indication documented',
+  'First-dose date and time',
+  'Time from surgery completion to first dose',
+  'Inpatient dose',
+  'Inpatient frequency',
+  'Number of inpatient doses received',
+  'Discharge dose',
+  'Discharge frequency',
+  'Prescription quantity',
+  'Number of refills',
+  'Intended stop date',
+  'Number of outpatient days supplied',
+  'Calculated total treatment duration',
+  'Missed or held inpatient doses',
+  'Reason for any nonstandard regimen',
+  '',
+  'Baseline serum creatinine',
+  'Creatinine clearance',
+  'Hemoglobin before surgery',
+  'Hemoglobin at discharge',
+  'Platelet count',
+  'Relevant liver function tests',
+  '',
+  'Aspirin',
+  'Clopidogrel or other antiplatelets',
+  'NSAIDs',
+  'Other anticoagulants',
+  'Heparin or enoxaparin',
+  'Strong combined CYP3A4 and P-gp inhibitors',
+  'Strong CYP3A4 and P-gp inducers'
+]);
+
+/**
+ * All MUE fields used by both the legacy new-record function and the
+ * missing-data review workflow.
+ *
+ * review: true means the field is considered part of the review workflow.
+ * calculated: true means the reviewer is not asked to type it; the backend
+ * calculates it when the needed source fields are available.
+ */
+const FIELD_DEFINITIONS = Object.freeze([
+  field_('collectionDate', 'Date', 'Date', 'patient', 'Patient characteristics', 'date'),
+  field_('age', 'Age', 'Age', 'patient', 'Patient characteristics', 'number', { min: 0, max: 120, step: 1, suffix: 'years' }),
+  field_('gender', 'Gender', 'Sex/Gender documented', 'patient', 'Patient characteristics', 'choice', { options: ['Male', 'Female', 'Other', 'Unknown'] }),
+  field_('heightCm', 'Height (cm)', 'Height', 'patient', 'Patient characteristics', 'number', { min: 0, step: 0.1, suffix: 'cm' }),
+  field_('abwKg', 'ABW (kg)', 'Actual body weight (ABW)', 'patient', 'Patient characteristics', 'number', { min: 0, step: 0.01, suffix: 'kg' }),
+  field_('bmiKgM2', 'BMI (kg/m2)', 'BMI', 'patient', 'Patient characteristics', 'calculated', { calculated: true, suffix: 'kg/m²' }),
+  field_('ibwKg', 'IBW (kg)', 'Ideal body weight (IBW)', 'patient', 'Patient characteristics', 'calculated', { calculated: true, suffix: 'kg' }),
+  field_('abwIbwRatio', 'ABW/IBW', 'ABW/IBW', 'patient', 'Patient characteristics', 'calculated', { calculated: true }),
+  field_('adjustedBodyWeightKg', 'AdjBW', 'Adjusted body weight', 'patient', 'Patient characteristics', 'calculated', { calculated: true, suffix: 'kg', aliases: ['AdjBW (kg)'] }),
+  field_('bleedingHistory', 'Relevant history of bleeding', 'Relevant history of bleeding', 'patient', 'Patient characteristics', 'choice', { options: YES_NO_UNKNOWN, comment: true }),
+  field_('previousVte', 'Previous VTE', 'Previous VTE', 'patient', 'Patient characteristics', 'choice', { options: YES_NO_UNKNOWN, comment: true }),
+  field_('cancer', 'Cancer', 'Cancer', 'patient', 'Patient characteristics', 'choice', { options: YES_NO_UNKNOWN, comment: true }),
+  field_('renalDisease', 'Renal disease', 'Renal disease', 'patient', 'Patient characteristics', 'choice', { options: YES_NO_UNKNOWN, comment: true }),
+  field_('liverDisease', 'Liver disease', 'Liver disease', 'patient', 'Patient characteristics', 'choice', { options: YES_NO_UNKNOWN, comment: true }),
+
+  field_('surgeryType', 'Type of surgery', 'Type of surgery', 'surgery', 'Surgery and hospitalization', 'select', {
+    options: ['Total hip arthroplasty', 'Total knee arthroplasty', 'Hip fracture repair', 'Other orthopedic surgery', 'Not documented']
+  }),
+  field_('surgeryDateTime', 'Date and time of surgery', 'Surgery completion date and time', 'surgery', 'Surgery and hospitalization', 'datetime'),
+  field_('procedureType', 'Primary versus revision procedure', 'Primary versus revision procedure', 'surgery', 'Surgery and hospitalization', 'choice', {
+    options: ['Primary', 'Revision', 'Unknown']
+  }),
+  field_('procedureUrgency', 'Elective versus urgent procedure', 'Elective versus urgent procedure', 'surgery', 'Surgery and hospitalization', 'choice', {
+    options: ['Elective', 'Urgent/Emergent', 'Unknown']
+  }),
+  field_('surgeon', 'Surgeon', 'Surgeon', 'surgery', 'Surgery and hospitalization', 'text', { placeholder: 'Name or service' }),
+  field_('lengthOfStay', 'Length of stay', 'Length of stay', 'surgery', 'Surgery and hospitalization', 'number', { min: 0, step: 0.1, suffix: 'days' }),
+  field_('dischargeDestination', 'Discharge destination', 'Discharge destination', 'surgery', 'Surgery and hospitalization', 'select', {
+    options: ['Home', 'Home with home health', 'Skilled nursing facility', 'Inpatient rehabilitation', 'Long-term care', 'Other', 'Not documented']
+  }),
+
+  field_('indicationDocumented', 'Indication documented', 'Indication documented', 'regimen', 'Apixaban regimen', 'choice', {
+    options: DOCUMENTED_OPTIONS, comment: true
+  }),
+  field_('firstDoseDateTime', 'First-dose date and time', 'First-dose date and time', 'regimen', 'Apixaban regimen', 'datetime'),
+  field_('timeToFirstDoseHours', 'Time from surgery completion to first dose', 'Time from surgery completion to first dose', 'regimen', 'Apixaban regimen', 'calculated', {
+    calculated: true, suffix: 'hours'
+  }),
+  field_('inpatientDose', 'Inpatient dose', 'Inpatient dose', 'regimen', 'Apixaban regimen', 'select', { options: DOSE_OPTIONS }),
+  field_('inpatientFrequency', 'Inpatient frequency', 'Inpatient frequency', 'regimen', 'Apixaban regimen', 'select', { options: FREQUENCY_OPTIONS }),
+  field_('inpatientDoseCount', 'Number of inpatient doses received', 'Number of inpatient doses received', 'regimen', 'Apixaban regimen', 'number', {
+    min: 0, step: 1
+  }),
+  field_('dischargeDose', 'Discharge dose', 'Discharge dose', 'regimen', 'Apixaban regimen', 'select', { options: DOSE_OPTIONS }),
+  field_('dischargeFrequency', 'Discharge frequency', 'Discharge frequency', 'regimen', 'Apixaban regimen', 'select', { options: FREQUENCY_OPTIONS }),
+  field_('prescriptionQuantity', 'Prescription quantity', 'Prescription quantity', 'regimen', 'Apixaban regimen', 'number', {
+    min: 0, step: 1, suffix: 'tablets'
+  }),
+  field_('refillCount', 'Number of refills', 'Number of refills', 'regimen', 'Apixaban regimen', 'number', { min: 0, step: 1 }),
+  field_('intendedStopDate', 'Intended stop date', 'Intended stop date', 'regimen', 'Apixaban regimen', 'date'),
+  field_('outpatientDaysSupplied', 'Number of outpatient days supplied', 'Number of outpatient days supplied', 'regimen', 'Apixaban regimen', 'calculated', {
+    calculated: true, suffix: 'days'
+  }),
+  field_('totalTreatmentDuration', 'Calculated total treatment duration', 'Calculated total treatment duration', 'regimen', 'Apixaban regimen', 'calculated', {
+    calculated: true, suffix: 'days'
+  }),
+  field_('missedHeldDoses', 'Missed or held inpatient doses', 'Missed or held inpatient doses', 'regimen', 'Apixaban regimen', 'choice', {
+    options: YES_NO_UNKNOWN, comment: true
+  }),
+  field_('nonstandardRegimenReason', 'Reason for any nonstandard regimen', 'Reason for any nonstandard regimen', 'regimen', 'Apixaban regimen', 'textarea', {
+    placeholder: 'Add the charted reason, clinical explanation, dose change, delay, or other relevant comment.'
+  }),
+
+  field_('baselineSerumCreatinine', 'Baseline serum creatinine', 'Baseline serum creatinine', 'labs', 'Laboratory data', 'number', {
+    min: 0, step: 0.01, suffix: 'mg/dL'
+  }),
+  field_('creatinineClearance', 'Creatinine clearance', 'Creatinine clearance', 'labs', 'Laboratory data', 'number', {
+    min: 0, step: 0.01, suffix: 'mL/min'
+  }),
+  field_('hemoglobinBeforeSurgery', 'Hemoglobin before surgery', 'Hemoglobin before surgery', 'labs', 'Laboratory data', 'number', {
+    min: 0, step: 0.01, suffix: 'g/dL'
+  }),
+  field_('hemoglobinAtDischarge', 'Hemoglobin at discharge', 'Hemoglobin at discharge', 'labs', 'Laboratory data', 'number', {
+    min: 0, step: 0.01, suffix: 'g/dL'
+  }),
+  field_('plateletCount', 'Platelet count', 'Platelet count', 'labs', 'Laboratory data', 'number', {
+    min: 0, step: 1, suffix: '×10³/µL'
+  }),
+  field_('liverFunctionTests', 'Relevant liver function tests', 'Relevant liver function tests', 'labs', 'Laboratory data', 'textarea', {
+    placeholder: 'Example: AST, ALT, alkaline phosphatase, total bilirubin, albumin, INR, and date.'
+  }),
+
+  field_('aspirin', 'Aspirin', 'Aspirin', 'medications', 'Concomitant medications', 'choice', {
+    options: YES_NO_UNKNOWN, comment: true
+  }),
+  field_('clopidogrel', 'Clopidogrel or other antiplatelets', 'Clopidogrel or other antiplatelets', 'medications', 'Concomitant medications', 'choice', {
+    options: YES_NO_UNKNOWN, comment: true
+  }),
+  field_('nsaids', 'NSAIDs', 'NSAIDs', 'medications', 'Concomitant medications', 'choice', {
+    options: YES_NO_UNKNOWN, comment: true
+  }),
+  field_('otherAnticoagulants', 'Other anticoagulants', 'Other anticoagulants', 'medications', 'Concomitant medications', 'choice', {
+    options: YES_NO_UNKNOWN, comment: true
+  }),
+  field_('heparinEnoxaparin', 'Heparin or enoxaparin', 'Heparin or enoxaparin', 'medications', 'Concomitant medications', 'choice', {
+    options: YES_NO_UNKNOWN, comment: true
+  }),
+  field_('strongInhibitors', 'Strong combined CYP3A4 and P-gp inhibitors', 'Strong combined CYP3A4 and P-gp inhibitors', 'medications', 'Concomitant medications', 'choice', {
+    options: YES_NO_UNKNOWN, comment: true
+  }),
+  field_('strongInducers', 'Strong CYP3A4 and P-gp inducers', 'Strong CYP3A4 and P-gp inducers', 'medications', 'Concomitant medications', 'choice', {
+    options: YES_NO_UNKNOWN, comment: true
+  })
+]);
+
+const FIELD_BY_ID = Object.freeze(
+  FIELD_DEFINITIONS.reduce(function (map, field) {
+    map[field.id] = field;
+    return map;
+  }, {})
+);
+
+const SECTION_ORDER = Object.freeze([
+  { id: 'patient', title: 'Patient characteristics' },
+  { id: 'surgery', title: 'Surgery and hospitalization' },
+  { id: 'regimen', title: 'Apixaban regimen' },
+  { id: 'labs', title: 'Laboratory data' },
+  { id: 'medications', title: 'Concomitant medications' }
+]);
+
+const IDENTITY_ALIASES = Object.freeze({
+  fin: ['FIN', 'PATIENT_FIN', 'Patient FIN'],
+  patientName: ['Patient Name', 'PATIENT', 'Patient', 'Name'],
+  dob: ['DOB', 'Date of Birth', 'Date of birth', 'Birth Date']
+});
+
+/* ==========================================================================
+ * WEB APP / MENUS
+ * ========================================================================== */
+
+function doGet() {
+  return HtmlService.createTemplateFromFile('index')
+    .evaluate()
+    .setTitle('MUE Data Collection')
+    .setXFrameOptionsMode(HtmlService.XFrameOptionsMode.ALLOWALL)
+    .addMetaTag('viewport', 'width=device-width, initial-scale=1');
+}
+
+function onOpen() {
+  try {
+    SpreadsheetApp.getUi()
+      .createMenu('MUE Tools')
+      .addItem('Run Ortho Autofill', 'runOrthoAutofill')
+      .addItem('Check Ortho Setup', 'checkOrthoAutofillSetup')
+      .addSeparator()
+      .addItem('Format / Check Sheet1', 'setupSheet')
+      .addToUi();
+  } catch (error) {
+    console.log('Menu could not be created: ' + error.message);
+  }
+}
+
+/* ==========================================================================
+ * SETUP / STATUS
+ * ========================================================================== */
+
+function setupSheet() {
+  const sheet = getSheet1_();
+
+  if (sheet.getLastColumn() === 0 || isHeaderRowEmpty_(sheet)) {
+    sheet.getRange(CONFIG.HEADER_ROW, 1, 1, TEMPLATE_HEADERS.length)
+      .setValues([TEMPLATE_HEADERS]);
+  }
+
+  const context = readSheetContext_(sheet);
+  const missingHeaders = getMissingExpectedHeaders_(context.headerMap);
+  styleSheet_(sheet, context);
+
+  const message = missingHeaders.length
+    ? 'Sheet1 is ready, but these MUE headers are missing: ' + missingHeaders.join(', ')
+    : 'Sheet1 is ready.';
+
+  try {
+    SpreadsheetApp.getActiveSpreadsheet().toast(message, 'MUE Setup', 8);
+  } catch (error) {
+    console.log(message);
+  }
+
+  return {
+    ok: true,
+    sheetName: sheet.getName(),
+    missingHeaders: missingHeaders,
+    message: message
+  };
+}
+
+function getAppStatus() {
+  const sheet = getSheet1_();
+  const context = readSheetContext_(sheet);
+  const queueResult = buildReviewQueue_(context);
+
+  return {
+    ok: true,
+    sheetName: sheet.getName(),
+    recordCount: context.dataValues.length,
+    reviewCount: queueResult.queue.length,
+    duplicateSheet1Fins: queueResult.duplicateFins,
+    missingHeaders: getMissingExpectedHeaders_(context.headerMap),
+    timeZone: Session.getScriptTimeZone()
+  };
+}
+
+/* ==========================================================================
+ * MISSING-DATA PATIENT WORKFLOW
+ * ========================================================================== */
+
+/**
+ * Initial page payload. It returns only patients that currently have one or
+ * more reviewable missing fields. Complete patients are omitted automatically.
+ */
+function getReviewBootstrap() {
+  try {
+    const sheet = getSheet1_();
+    const context = readSheetContext_(sheet);
+    const orthoIndex = buildOrthoIndexSafe_();
+    const queueResult = buildReviewQueue_(context, orthoIndex);
+
+    let firstPatient = null;
+    if (queueResult.queue.length) {
+      firstPatient = buildPatientReviewData_(
+        context,
+        queueResult.queue[0].rowIndex,
+        orthoIndex
+      );
+    }
+
+    return {
+      ok: true,
+      sheetName: sheet.getName(),
+      totalRows: context.dataValues.length,
+      queue: queueResult.queue,
+      reviewCount: queueResult.queue.length,
+      duplicateSheet1Fins: queueResult.duplicateFins,
+      blankFinRows: queueResult.blankFinRows,
+      missingHeaders: getMissingExpectedHeaders_(context.headerMap),
+      firstPatient: firstPatient
+    };
+  } catch (error) {
+    console.error(error);
+    throw new Error(errorMessage_(error, 'The patient review list could not be loaded.'));
+  }
+}
+
+/**
+ * Loads the current values for one FIN.
+ */
+function getPatientReviewData(fin) {
+  try {
+    const sheet = getSheet1_();
+    const context = readSheetContext_(sheet);
+    const match = findUniqueSheet1RowByFin_(context, fin);
+
+    if (!match.found) {
+      throw new Error('FIN "' + cleanText_(fin) + '" was not found in Sheet1.');
+    }
+
+    if (match.duplicate) {
+      throw new Error(
+        'FIN "' + cleanText_(fin) + '" appears more than once in Sheet1. ' +
+        'Correct the duplicate rows before reviewing this patient.'
+      );
+    }
+
+    return buildPatientReviewData_(
+      context,
+      match.rowIndex,
+      buildOrthoIndexSafe_()
+    );
+  } catch (error) {
+    console.error(error);
+    throw new Error(errorMessage_(error, 'The patient record could not be loaded.'));
+  }
+}
+
+/**
+ * Saves only submitted fields that are still blank in Sheet1.
+ * Existing values and formulas are never overwritten.
+ */
+function savePatientMissingData(payload) {
+  if (!payload || typeof payload !== 'object') {
+    throw new Error('No patient data was received.');
+  }
+
+  const fin = cleanText_(payload.fin);
+  const updates = payload.values && typeof payload.values === 'object'
+    ? payload.values
+    : {};
+
+  if (!fin) {
+    throw new Error('FIN is required.');
+  }
+
+  const lock = LockService.getScriptLock();
+  lock.waitLock(30000);
+
+  let saveResult;
+
+  try {
+    const sheet = getSheet1_();
+    let context = readSheetContext_(sheet);
+    const match = findUniqueSheet1RowByFin_(context, fin);
+
+    if (!match.found) {
+      throw new Error('FIN "' + fin + '" was not found in Sheet1.');
+    }
+
+    if (match.duplicate) {
+      throw new Error(
+        'FIN "' + fin + '" appears more than once in Sheet1. ' +
+        'Nothing was saved because the patient row is ambiguous.'
+      );
+    }
+
+    const sheetRow = match.rowIndex + CONFIG.DATA_START_ROW;
+    const rowValues = context.dataValues[match.rowIndex].slice();
+    const rowDisplayValues = context.dataDisplayValues[match.rowIndex];
+    const rowFormulas = context.dataFormulas[match.rowIndex];
+
+    const changed = [];
+    const skippedExisting = [];
+    const skippedMissingHeaders = [];
+
+    Object.keys(updates).forEach(function (fieldId) {
+      const field = FIELD_BY_ID[fieldId];
+      if (!field || field.calculated) return;
+
+      const submitted = updates[fieldId];
+      if (isBlankValue_(submitted)) return;
+
+      const columnIndex = findFieldColumnIndex_(context.headerMap, field);
+      if (columnIndex === -1) {
+        skippedMissingHeaders.push(field.header);
+        return;
+      }
+
+      if (!isCellEmpty_(rowValues[columnIndex], rowDisplayValues[columnIndex], rowFormulas[columnIndex])) {
+        skippedExisting.push(field.header);
+        return;
+      }
+
+      const normalizedValue = normalizeSubmittedFieldValue_(field, submitted);
+      if (isBlankValue_(normalizedValue)) return;
+
+      sheet.getRange(sheetRow, columnIndex + 1).setValue(normalizedValue);
+      rowValues[columnIndex] = normalizedValue;
+      changed.push(field.header);
+    });
+
+    // Fill derived fields after the reviewer-supplied values have been written.
+    const calculatedChanged = fillCalculatedFieldsForRow_(
+      sheet,
+      sheetRow,
+      context.headerMap,
+      rowValues,
+      rowDisplayValues,
+      rowFormulas
+    );
+
+    SpreadsheetApp.flush();
+    applyRowFormatsByHeaders_(sheet, sheetRow, context.headerMap);
+
+    // Re-read so the response always reflects the actual Sheet1 state.
+    context = readSheetContext_(sheet);
+    const refreshedMatch = findUniqueSheet1RowByFin_(context, fin);
+    const patient = buildPatientReviewData_(
+      context,
+      refreshedMatch.rowIndex,
+      buildOrthoIndexSafe_()
+    );
+
+    saveResult = {
+      ok: true,
+      fin: patient.fin,
+      updatedCount: changed.length + calculatedChanged.length,
+      updatedFields: changed,
+      calculatedFieldsUpdated: calculatedChanged,
+      skippedExisting: unique_(skippedExisting),
+      skippedMissingHeaders: unique_(skippedMissingHeaders),
+      patient: patient,
+      message: changed.length || calculatedChanged.length
+        ? 'Patient data saved.'
+        : 'No new values were saved.'
+    };
+  } catch (error) {
+    console.error(error);
+    throw new Error(errorMessage_(error, 'The patient data could not be saved.'));
+  } finally {
+    lock.releaseLock();
+  }
+
+  return saveResult;
+}
+
+/* ==========================================================================
+ * LEGACY NEW-RECORD FUNCTION
+ * Kept so existing integrations that call saveMueRecord() still work.
+ * It now writes by header name instead of fixed column number.
+ * ========================================================================== */
+
+function saveMueRecord(data) {
+  if (!data || typeof data !== 'object') {
+    throw new Error('No form data was received.');
+  }
+
+  validateRequired_(data);
+
+  const lock = LockService.getScriptLock();
+  lock.waitLock(30000);
+
+  try {
+    const sheet = getSheet1_();
+    let context = readSheetContext_(sheet);
+
+    const fin = cleanText_(data.fin);
+    const existing = findUniqueSheet1RowByFin_(context, fin);
+
+    if (existing.found) {
+      throw new Error(
+        'FIN "' + fin + '" already exists in Sheet1. ' +
+        'Use the missing-data patient workflow instead of creating a duplicate row.'
+      );
+    }
+
+    const finColumn = findHeaderIndexByAliases_(context.headerMap, IDENTITY_ALIASES.fin);
+    if (finColumn === -1) {
+      throw new Error('Sheet1 does not contain a FIN header.');
+    }
+
+    const nextRow = Math.max(sheet.getLastRow() + 1, CONFIG.DATA_START_ROW);
+    sheet.getRange(nextRow, finColumn + 1).setValue(fin);
+
+    FIELD_DEFINITIONS.forEach(function (field) {
+      if (field.calculated) return;
+      const submitted = data[field.id];
+      if (isBlankValue_(submitted)) return;
+
+      const columnIndex = findFieldColumnIndex_(context.headerMap, field);
+      if (columnIndex === -1) return;
+
+      sheet.getRange(nextRow, columnIndex + 1)
+        .setValue(normalizeSubmittedFieldValue_(field, submitted));
+    });
+
+    SpreadsheetApp.flush();
+
+    context = readSheetContext_(sheet);
+    const rowIndex = nextRow - CONFIG.DATA_START_ROW;
+    const rowValues = context.dataValues[rowIndex].slice();
+    const rowDisplayValues = context.dataDisplayValues[rowIndex];
+    const rowFormulas = context.dataFormulas[rowIndex];
+
+    const calculatedChanged = fillCalculatedFieldsForRow_(
+      sheet,
+      nextRow,
+      context.headerMap,
+      rowValues,
+      rowDisplayValues,
+      rowFormulas
+    );
+
+    applyRowFormatsByHeaders_(sheet, nextRow, context.headerMap);
+    SpreadsheetApp.flush();
+
+    return {
+      ok: true,
+      rowNumber: nextRow,
+      fin: fin,
+      calculatedFieldsUpdated: calculatedChanged,
+      message: 'Record saved successfully in row ' + nextRow + '.'
+    };
+  } catch (error) {
+    console.error(error);
+    throw new Error(errorMessage_(error, 'The record could not be saved.'));
+  } finally {
+    lock.releaseLock();
+  }
+}
+
 /* ==========================================================================
  * ORTHO → SHEET1 AUTOFILL
- * Paste this entire section at the BOTTOM of Code.gs
  * ========================================================================== */
 
 function runOrthoAutofill() {
@@ -13,18 +599,14 @@ function runOrthoAutofill() {
     'Rows updated: ' + result.rowsUpdated + '\n' +
     'Cells filled: ' + result.cellsFilled + '\n' +
     'FINs not found: ' + result.notFound.length + '\n' +
-    'Duplicate FINs skipped: ' + result.duplicates.length + '\n' +
-    'Blank FIN rows skipped: ' + result.blankFinRows.length;
+    'Duplicate Ortho FIN groups merged: ' + result.duplicateOrthoFinCount + '\n' +
+    'Blank Sheet1 FIN rows skipped: ' + result.blankFinRows.length;
 
   console.log(message);
   console.log(JSON.stringify(result, null, 2));
 
   try {
-    SpreadsheetApp.getActiveSpreadsheet().toast(
-      message,
-      'Ortho Autofill',
-      10
-    );
+    SpreadsheetApp.getActiveSpreadsheet().toast(message, 'Ortho Autofill', 10);
   } catch (error) {
     console.log('Toast could not be displayed: ' + error.message);
   }
@@ -32,165 +614,102 @@ function runOrthoAutofill() {
   return result;
 }
 
+function checkOrthoAutofillSetup() {
+  const spreadsheet = getSpreadsheet_();
+  const sourceSheet = spreadsheet.getSheetByName(CONFIG.ORTHO_SHEET_NAME);
+  const destinationSheet = spreadsheet.getSheetByName(CONFIG.SHEET1_NAME);
+
+  const problems = [];
+  const warnings = [];
+
+  if (!sourceSheet) problems.push('Missing sheet: ' + CONFIG.ORTHO_SHEET_NAME);
+  if (!destinationSheet) problems.push('Missing sheet: ' + CONFIG.SHEET1_NAME);
+
+  if (sourceSheet) {
+    const sourceHeaders = getHeaderValues_(sourceSheet);
+    const sourceMap = createHeaderMap_(sourceHeaders, CONFIG.ORTHO_SHEET_NAME);
+    if (findHeaderIndexByAliases_(sourceMap, ['FIN']) === -1) {
+      problems.push('Ortho is missing the FIN header.');
+    }
+  }
+
+  if (destinationSheet) {
+    const destinationHeaders = getHeaderValues_(destinationSheet);
+    const destinationMap = createHeaderMap_(destinationHeaders, CONFIG.SHEET1_NAME);
+    if (findHeaderIndexByAliases_(destinationMap, IDENTITY_ALIASES.fin) === -1) {
+      problems.push('Sheet1 is missing the FIN header.');
+    }
+
+    const missingExpected = getMissingExpectedHeaders_(destinationMap);
+    if (missingExpected.length) {
+      warnings.push(
+        'These review fields are not present in Sheet1 and will be ignored until the headers exist: ' +
+        missingExpected.join(', ')
+      );
+    }
+  }
+
+  const result = {
+    ok: problems.length === 0,
+    problems: problems,
+    warnings: warnings
+  };
+
+  const text = result.ok
+    ? 'Ortho autofill setup looks ready.' + (warnings.length ? '\n\n' + warnings.join('\n') : '')
+    : 'Setup problems:\n' + problems.join('\n');
+
+  console.log(text);
+
+  try {
+    SpreadsheetApp.getActiveSpreadsheet().toast(text, 'MUE Setup Check', 10);
+  } catch (error) {
+    console.log(text);
+  }
+
+  return result;
+}
 
 function orthoAutofillAllRows_() {
-  const spreadsheet = orthoGetSpreadsheet_();
-
-  const sourceSheet = spreadsheet.getSheetByName('Ortho');
-  const destinationSheet = spreadsheet.getSheetByName('Sheet1');
+  const spreadsheet = getSpreadsheet_();
+  const sourceSheet = spreadsheet.getSheetByName(CONFIG.ORTHO_SHEET_NAME);
+  const destinationSheet = spreadsheet.getSheetByName(CONFIG.SHEET1_NAME);
 
   if (!sourceSheet) {
-    throw new Error(
-      'The source sheet named "Ortho" was not found. ' +
-      'Confirm that the tab name is exactly Ortho.'
-    );
+    throw new Error('The source sheet named "' + CONFIG.ORTHO_SHEET_NAME + '" was not found.');
   }
 
   if (!destinationSheet) {
-    throw new Error(
-      'The destination sheet named "Sheet1" was not found. ' +
-      'Confirm that the tab name is exactly Sheet1.'
-    );
+    throw new Error('The destination sheet named "' + CONFIG.SHEET1_NAME + '" was not found.');
   }
 
-  if (sourceSheet.getLastRow() < 2) {
+  if (sourceSheet.getLastRow() < CONFIG.DATA_START_ROW) {
     throw new Error('The Ortho sheet does not contain any patient data.');
   }
 
-  if (destinationSheet.getLastRow() < 2) {
-    throw new Error(
-      'Sheet1 does not contain any patient rows. ' +
-      'Enter FIN numbers in Sheet1 before running the autofill.'
-    );
+  if (destinationSheet.getLastRow() < CONFIG.DATA_START_ROW) {
+    throw new Error('Sheet1 does not contain any patient rows.');
   }
 
-  const sourceLastColumn = sourceSheet.getLastColumn();
-  const destinationLastColumn = destinationSheet.getLastColumn();
+  const sourceContext = readGenericSheetContext_(sourceSheet);
+  const destinationContext = readSheetContext_(destinationSheet);
 
-  const sourceHeaders = sourceSheet
-    .getRange(1, 1, 1, sourceLastColumn)
-    .getDisplayValues()[0];
+  const sourceFinColumn = findHeaderIndexByAliases_(sourceContext.headerMap, ['FIN']);
+  const destinationFinColumn = findHeaderIndexByAliases_(destinationContext.headerMap, IDENTITY_ALIASES.fin);
 
-  const destinationHeaders = destinationSheet
-    .getRange(1, 1, 1, destinationLastColumn)
-    .getDisplayValues()[0];
-
-  const sourceHeaderMap = orthoCreateHeaderMap_(sourceHeaders, 'Ortho');
-  const destinationHeaderMap = orthoCreateHeaderMap_(
-    destinationHeaders,
-    'Sheet1'
-  );
-
-  const requiredOrthoHeaders = [
-    'PATIENT',
-    'FIN',
-    'ORD_ID',
-    'DOB',
-    'AGE',
-    'GENDER',
-    'ORIG_ORDER_DT_TM',
-    'O_DEPT_STATUS_DISP',
-    'O_CATALOG_DISP',
-    'ORDERED_AS_MNEMONIC',
-    'CLINICAL_DISPLAY_LINE',
-    'PROVIDER',
-    'ORDER_DC',
-    'ORDER_DC_TYPE',
-    'E_ENCNTR_TYPE_DISP',
-    'ENC_ARRIVE_DT_TM',
-    'ENC_DISCH_DT_TM',
-    'E_LOC_FACILITY_DISP',
-    'E_LOC_NURSE_UNIT_DISP',
-    'ORTHO Hip Procedures Post-Op',
-    'PERSON_ID',
-    'ENCNTR_ID'
-  ];
-
-  const missingOrthoHeaders = requiredOrthoHeaders.filter(function (header) {
-    return sourceHeaderMap[orthoNormalizeHeader_(header)] === undefined;
-  });
-
-  if (missingOrthoHeaders.length > 0) {
-    throw new Error(
-      'The following required headers are missing from Ortho:\n' +
-      missingOrthoHeaders.join(', ')
-    );
+  if (sourceFinColumn === -1) {
+    throw new Error('The FIN header was not found in Ortho.');
   }
 
-  const sourceFinColumn =
-    sourceHeaderMap[orthoNormalizeHeader_('FIN')];
-
-  const destinationFinColumn =
-    destinationHeaderMap[orthoNormalizeHeader_('FIN')];
-
-  if (destinationFinColumn === undefined) {
-    throw new Error(
-      'The FIN header was not found in row 1 of Sheet1.'
-    );
+  if (destinationFinColumn === -1) {
+    throw new Error('The FIN header was not found in Sheet1.');
   }
 
-  const sourceRowCount = sourceSheet.getLastRow() - 1;
-  const destinationRowCount = destinationSheet.getLastRow() - 1;
+  const orthoIndexResult = buildMergedOrthoIndex_(sourceContext);
+  const assignments = buildOrthoAssignments_(sourceContext.headerMap, destinationContext.headerMap);
 
-  const sourceValues = sourceSheet
-    .getRange(2, 1, sourceRowCount, sourceLastColumn)
-    .getValues();
-
-  const sourceDisplayValues = sourceSheet
-    .getRange(2, 1, sourceRowCount, sourceLastColumn)
-    .getDisplayValues();
-
-  const destinationRange = destinationSheet.getRange(
-    2,
-    1,
-    destinationRowCount,
-    destinationLastColumn
-  );
-
-  const destinationValues = destinationRange.getValues();
-  const destinationDisplayValues = destinationRange.getDisplayValues();
-  const destinationFormulas = destinationRange.getFormulas();
-
-  const sourceRecordsByFin = {};
-  const duplicateFinSet = {};
-  const blankSourceFinRows = [];
-
-  sourceValues.forEach(function (row, rowIndex) {
-    const displayedFin =
-      sourceDisplayValues[rowIndex][sourceFinColumn];
-
-    const fin = orthoNormalizeFin_(displayedFin);
-
-    if (!fin) {
-      blankSourceFinRows.push(rowIndex + 2);
-      return;
-    }
-
-    if (sourceRecordsByFin[fin]) {
-      duplicateFinSet[fin] = true;
-      return;
-    }
-
-    sourceRecordsByFin[fin] = {
-      values: row,
-      displayValues: sourceDisplayValues[rowIndex],
-      sourceRow: rowIndex + 2
-    };
-  });
-
-  Object.keys(duplicateFinSet).forEach(function (fin) {
-    delete sourceRecordsByFin[fin];
-  });
-
-  const assignments = orthoBuildAssignments_(
-    sourceHeaderMap,
-    destinationHeaderMap
-  );
-
-  if (assignments.length === 0) {
-    throw new Error(
-      'No matching destination columns were found between Ortho and Sheet1.'
-    );
+  if (!assignments.length) {
+    throw new Error('No compatible Ortho-to-Sheet1 columns were found.');
   }
 
   let rowsUpdated = 0;
@@ -198,224 +717,160 @@ function orthoAutofillAllRows_() {
   let finsMatched = 0;
 
   const notFound = [];
-  const duplicates = [];
   const blankFinRows = [];
+  const changedRows = {};
 
-  destinationValues.forEach(function (destinationRow, rowIndex) {
-    const displayedDestinationFin =
-      destinationDisplayValues[rowIndex][destinationFinColumn];
+  destinationContext.dataValues.forEach(function (destinationRow, rowIndex) {
+    const displayedFin = destinationContext.dataDisplayValues[rowIndex][destinationFinColumn];
+    const finKey = finKeyFromCell_(
+      destinationContext.dataValues[rowIndex][destinationFinColumn],
+      displayedFin
+    );
+    const sheetRow = rowIndex + CONFIG.DATA_START_ROW;
 
-    const fin = orthoNormalizeFin_(displayedDestinationFin);
-    const sheetRowNumber = rowIndex + 2;
-
-    if (!fin) {
-      blankFinRows.push(sheetRowNumber);
+    if (!finKey) {
+      blankFinRows.push(sheetRow);
       return;
     }
 
-    if (duplicateFinSet[fin]) {
-      duplicates.push({
-        row: sheetRowNumber,
-        fin: fin
-      });
-      return;
-    }
-
-    const sourceRecord = sourceRecordsByFin[fin];
+    const sourceRecord = orthoIndexResult.index[finKey];
 
     if (!sourceRecord) {
       notFound.push({
-        row: sheetRowNumber,
-        fin: fin
+        row: sheetRow,
+        fin: cleanText_(displayedFin)
       });
       return;
     }
 
     finsMatched++;
-
     let rowChanged = false;
 
     assignments.forEach(function (assignment) {
       const destinationColumn = assignment.destinationColumn;
+      const raw = destinationContext.dataValues[rowIndex][destinationColumn];
+      const displayed = destinationContext.dataDisplayValues[rowIndex][destinationColumn];
+      const formula = destinationContext.dataFormulas[rowIndex][destinationColumn];
 
-      const existingValue = destinationRow[destinationColumn];
-      const existingDisplayValue =
-        destinationDisplayValues[rowIndex][destinationColumn];
-      const existingFormula =
-        destinationFormulas[rowIndex][destinationColumn];
+      if (!isCellEmpty_(raw, displayed, formula)) return;
 
-      // Never overwrite formulas.
-      if (existingFormula) {
-        return;
-      }
-
-      // Fill only truly empty cells.
-      if (
-        existingValue !== '' &&
-        existingValue !== null &&
-        existingValue !== undefined
-      ) {
-        return;
-      }
-
-      if (String(existingDisplayValue || '').trim() !== '') {
-        return;
-      }
-
-      let sourceValue;
+      let sourceValue = '';
 
       if (assignment.type === 'lengthOfStay') {
-        sourceValue = orthoCalculateLengthOfStay_(
+        sourceValue = calculateOrthoLengthOfStay_(
           sourceRecord.values,
-          sourceHeaderMap
+          sourceContext.headerMap
         );
       } else {
-        sourceValue =
-          sourceRecord.values[assignment.sourceColumn];
+        sourceValue = sourceRecord.values[assignment.sourceColumn];
       }
 
-      if (
-        sourceValue === '' ||
-        sourceValue === null ||
-        sourceValue === undefined
-      ) {
-        return;
-      }
+      if (isBlankValue_(sourceValue)) return;
 
-      destinationRow[destinationColumn] = sourceValue;
-      rowChanged = true;
+      destinationSheet.getRange(sheetRow, destinationColumn + 1).setValue(sourceValue);
+      destinationContext.dataValues[rowIndex][destinationColumn] = sourceValue;
       cellsFilled++;
+      rowChanged = true;
     });
 
     if (rowChanged) {
       rowsUpdated++;
+      changedRows[rowIndex] = true;
     }
   });
 
-  destinationRange.setValues(destinationValues);
+  SpreadsheetApp.flush();
+
+  // Fill derived MUE fields only for rows touched by this import.
+  Object.keys(changedRows).forEach(function (rowIndexText) {
+    const rowIndex = Number(rowIndexText);
+    const sheetRow = rowIndex + CONFIG.DATA_START_ROW;
+
+    fillCalculatedFieldsForRow_(
+      destinationSheet,
+      sheetRow,
+      destinationContext.headerMap,
+      destinationContext.dataValues[rowIndex],
+      destinationContext.dataDisplayValues[rowIndex],
+      destinationContext.dataFormulas[rowIndex]
+    );
+
+    applyRowFormatsByHeaders_(destinationSheet, sheetRow, destinationContext.headerMap);
+  });
 
   SpreadsheetApp.flush();
 
   return {
     success: true,
-    rowsChecked: destinationRowCount,
+    rowsChecked: destinationContext.dataValues.length,
     finsMatched: finsMatched,
     rowsUpdated: rowsUpdated,
     cellsFilled: cellsFilled,
     blankFinRows: blankFinRows,
-    blankSourceFinRows: blankSourceFinRows,
+    blankSourceFinRows: orthoIndexResult.blankFinRows,
     notFound: notFound,
-    duplicates: duplicates,
+    duplicateOrthoFinCount: orthoIndexResult.duplicateFinCount,
+    duplicateOrthoFins: orthoIndexResult.duplicateFins,
     mappedColumns: assignments.map(function (assignment) {
-      return assignment.sourceHeader +
-        ' → ' +
-        assignment.destinationHeader;
+      return assignment.sourceHeader + ' → ' + assignment.destinationHeader;
     })
   };
 }
 
-
-function orthoBuildAssignments_(
-  sourceHeaderMap,
-  destinationHeaderMap
-) {
+function buildOrthoAssignments_(sourceHeaderMap, destinationHeaderMap) {
   const assignments = [];
   const usedDestinationColumns = {};
 
-  // Copy columns having the same header name.
-  Object.keys(destinationHeaderMap).forEach(function (
-    normalizedDestinationHeader
-  ) {
-    if (normalizedDestinationHeader === orthoNormalizeHeader_('FIN')) {
-      return;
-    }
+  // Direct same-name header matches.
+  Object.keys(destinationHeaderMap).forEach(function (destinationKey) {
+    if (destinationKey === normalizeHeader_('FIN')) return;
+    if (sourceHeaderMap[destinationKey] === undefined) return;
 
-    if (
-      sourceHeaderMap[normalizedDestinationHeader] !== undefined
-    ) {
-      const sourceColumn =
-        sourceHeaderMap[normalizedDestinationHeader];
-      const destinationColumn =
-        destinationHeaderMap[normalizedDestinationHeader];
-
-      assignments.push({
-        type: 'direct',
-        sourceColumn: sourceColumn,
-        destinationColumn: destinationColumn,
-        sourceHeader: normalizedDestinationHeader,
-        destinationHeader: normalizedDestinationHeader
-      });
-
-      usedDestinationColumns[destinationColumn] = true;
-    }
+    const destinationColumn = destinationHeaderMap[destinationKey];
+    assignments.push({
+      type: 'direct',
+      sourceColumn: sourceHeaderMap[destinationKey],
+      destinationColumn: destinationColumn,
+      sourceHeader: destinationKey,
+      destinationHeader: destinationKey
+    });
+    usedDestinationColumns[destinationColumn] = true;
   });
 
   const aliases = [
-    {
-      source: 'AGE',
-      destination: 'Age'
-    },
-    {
-      source: 'GENDER',
-      destination: 'Gender'
-    },
-    {
-      source: 'ORTHO Hip Procedures Post-Op',
-      destination: 'Type of surgery'
-    },
-    {
-      source: 'ORIG_ORDER_DT_TM',
-      destination: 'Date and time of surgery'
-    },
-    {
-      source: 'PROVIDER',
-      destination: 'Surgeon'
-    }
+    { source: ['PATIENT'], destination: IDENTITY_ALIASES.patientName },
+    { source: ['DOB'], destination: IDENTITY_ALIASES.dob },
+    { source: ['AGE'], destination: ['Age'] },
+    { source: ['GENDER'], destination: ['Gender'] },
+    { source: ['ORTHO Hip Procedures Post-Op'], destination: ['Type of surgery'] },
+    { source: ['ORIG_ORDER_DT_TM'], destination: ['Date and time of surgery'] },
+    { source: ['PROVIDER'], destination: ['Surgeon'] }
   ];
 
-  aliases.forEach(function (alias) {
-    const sourceKey = orthoNormalizeHeader_(alias.source);
-    const destinationKey =
-      orthoNormalizeHeader_(alias.destination);
+  aliases.forEach(function (mapping) {
+    const sourceColumn = findHeaderIndexByAliases_(sourceHeaderMap, mapping.source);
+    const destinationColumn = findHeaderIndexByAliases_(destinationHeaderMap, mapping.destination);
 
-    const sourceColumn = sourceHeaderMap[sourceKey];
-    const destinationColumn =
-      destinationHeaderMap[destinationKey];
-
-    if (
-      sourceColumn === undefined ||
-      destinationColumn === undefined ||
-      usedDestinationColumns[destinationColumn]
-    ) {
-      return;
-    }
+    if (sourceColumn === -1 || destinationColumn === -1) return;
+    if (usedDestinationColumns[destinationColumn]) return;
 
     assignments.push({
       type: 'direct',
       sourceColumn: sourceColumn,
       destinationColumn: destinationColumn,
-      sourceHeader: alias.source,
-      destinationHeader: alias.destination
+      sourceHeader: mapping.source[0],
+      destinationHeader: mapping.destination[0]
     });
-
     usedDestinationColumns[destinationColumn] = true;
   });
 
-  const lengthOfStayColumn =
-    destinationHeaderMap[
-      orthoNormalizeHeader_('Length of stay')
-    ];
-
-  if (
-    lengthOfStayColumn !== undefined &&
-    !usedDestinationColumns[lengthOfStayColumn]
-  ) {
+  const lengthOfStayColumn = findHeaderIndexByAliases_(destinationHeaderMap, ['Length of stay']);
+  if (lengthOfStayColumn !== -1 && !usedDestinationColumns[lengthOfStayColumn]) {
     assignments.push({
       type: 'lengthOfStay',
       sourceColumn: null,
       destinationColumn: lengthOfStayColumn,
-      sourceHeader:
-        'ENC_ARRIVE_DT_TM and ENC_DISCH_DT_TM',
+      sourceHeader: 'ENC_ARRIVE_DT_TM + ENC_DISCH_DT_TM',
       destinationHeader: 'Length of stay'
     });
   }
@@ -423,138 +878,2949 @@ function orthoBuildAssignments_(
   return assignments;
 }
 
+/* ==========================================================================
+ * REVIEW QUEUE / PATIENT BUILDERS
+ * ========================================================================== */
 
-function orthoCalculateLengthOfStay_(
-  sourceRow,
-  sourceHeaderMap
-) {
-  const arrivalColumn =
-    sourceHeaderMap[
-      orthoNormalizeHeader_('ENC_ARRIVE_DT_TM')
-    ];
+function buildReviewQueue_(context, orthoIndexResult) {
+  const finColumn = findHeaderIndexByAliases_(context.headerMap, IDENTITY_ALIASES.fin);
 
-  const dischargeColumn =
-    sourceHeaderMap[
-      orthoNormalizeHeader_('ENC_DISCH_DT_TM')
-    ];
-
-  if (
-    arrivalColumn === undefined ||
-    dischargeColumn === undefined
-  ) {
-    return '';
+  if (finColumn === -1) {
+    throw new Error('Sheet1 does not contain a FIN header.');
   }
 
-  const arrival = orthoConvertToDate_(
-    sourceRow[arrivalColumn]
-  );
+  const finCounts = {};
+  const finDisplayByKey = {};
+  const blankFinRows = [];
 
-  const discharge = orthoConvertToDate_(
-    sourceRow[dischargeColumn]
-  );
+  context.dataDisplayValues.forEach(function (row, rowIndex) {
+    const displayFin = cleanText_(row[finColumn]);
+    const key = finKeyFromCell_(
+      context.dataValues[rowIndex][finColumn],
+      row[finColumn]
+    );
 
-  if (!arrival || !discharge) {
-    return '';
+    if (!key) {
+      if (row.some(function (value) { return !isBlankValue_(value); })) {
+        blankFinRows.push(rowIndex + CONFIG.DATA_START_ROW);
+      }
+      return;
+    }
+
+    finCounts[key] = (finCounts[key] || 0) + 1;
+    finDisplayByKey[key] = finDisplayByKey[key] || displayFin;
+  });
+
+  const duplicateFins = Object.keys(finCounts)
+    .filter(function (key) { return finCounts[key] > 1; })
+    .map(function (key) {
+      return {
+        fin: finDisplayByKey[key],
+        count: finCounts[key]
+      };
+    });
+
+  const duplicateKeys = {};
+  duplicateFins.forEach(function (item) {
+    duplicateKeys[normalizeFinKey_(item.fin)] = true;
+  });
+
+  const orthoIndex = orthoIndexResult || buildOrthoIndexSafe_();
+  const queue = [];
+
+  context.dataValues.forEach(function (row, rowIndex) {
+    const displayFin = cleanText_(context.dataDisplayValues[rowIndex][finColumn]);
+    const key = finKeyFromCell_(
+      context.dataValues[rowIndex][finColumn],
+      context.dataDisplayValues[rowIndex][finColumn]
+    );
+
+    if (!key || duplicateKeys[key]) return;
+
+    const missingCount = countMissingReviewFields_(context, rowIndex);
+    if (!missingCount) return;
+
+    const identity = getPatientIdentity_(
+      context,
+      rowIndex,
+      orthoIndex.index ? orthoIndex : { index: orthoIndex }
+    );
+
+    queue.push({
+      fin: displayFin,
+      rowNumber: rowIndex + CONFIG.DATA_START_ROW,
+      rowIndex: rowIndex,
+      patientName: identity.patientName,
+      dob: identity.dob,
+      missingCount: missingCount
+    });
+  });
+
+  return {
+    queue: queue,
+    duplicateFins: duplicateFins,
+    blankFinRows: blankFinRows
+  };
+}
+
+function countMissingReviewFields_(context, rowIndex) {
+  let count = 0;
+
+  FIELD_DEFINITIONS.forEach(function (field) {
+    if (field.calculated) return;
+
+    const columnIndex = findFieldColumnIndex_(context.headerMap, field);
+    if (columnIndex === -1) return;
+
+    if (isCellEmpty_(
+      context.dataValues[rowIndex][columnIndex],
+      context.dataDisplayValues[rowIndex][columnIndex],
+      context.dataFormulas[rowIndex][columnIndex]
+    )) {
+      count++;
+    }
+  });
+
+  return count;
+}
+
+function buildPatientReviewData_(context, rowIndex, orthoIndexResult) {
+  const finColumn = findHeaderIndexByAliases_(context.headerMap, IDENTITY_ALIASES.fin);
+  const fin = cleanText_(context.dataDisplayValues[rowIndex][finColumn]);
+  const identity = getPatientIdentity_(context, rowIndex, orthoIndexResult);
+
+  const missingFields = [];
+  const existingFields = [];
+
+  FIELD_DEFINITIONS.forEach(function (field) {
+    const columnIndex = findFieldColumnIndex_(context.headerMap, field);
+    if (columnIndex === -1) return;
+
+    const raw = context.dataValues[rowIndex][columnIndex];
+    const displayed = context.dataDisplayValues[rowIndex][columnIndex];
+    const formula = context.dataFormulas[rowIndex][columnIndex];
+
+    if (field.calculated) {
+      if (!isCellEmpty_(raw, displayed, formula)) {
+        existingFields.push({
+          id: field.id,
+          label: field.label,
+          sectionId: field.sectionId,
+          sectionTitle: field.sectionTitle,
+          value: cleanText_(displayed)
+        });
+      }
+      return;
+    }
+
+    if (isCellEmpty_(raw, displayed, formula)) {
+      missingFields.push(serializeFieldForClient_(field));
+    } else {
+      existingFields.push({
+        id: field.id,
+        label: field.label,
+        sectionId: field.sectionId,
+        sectionTitle: field.sectionTitle,
+        value: cleanText_(displayed)
+      });
+    }
+  });
+
+  return {
+    ok: true,
+    rowNumber: rowIndex + CONFIG.DATA_START_ROW,
+    fin: fin,
+    patientName: identity.patientName || 'Not available',
+    dob: identity.dob || 'Not available',
+    missingFields: missingFields,
+    existingFields: existingFields,
+    missingCount: missingFields.length,
+    completed: missingFields.length === 0
+  };
+}
+
+function getPatientIdentity_(context, rowIndex, orthoIndexResult) {
+  const patientNameColumn = findHeaderIndexByAliases_(context.headerMap, IDENTITY_ALIASES.patientName);
+  const dobColumn = findHeaderIndexByAliases_(context.headerMap, IDENTITY_ALIASES.dob);
+  const finColumn = findHeaderIndexByAliases_(context.headerMap, IDENTITY_ALIASES.fin);
+
+  let patientName = patientNameColumn === -1
+    ? ''
+    : cleanText_(context.dataDisplayValues[rowIndex][patientNameColumn]);
+
+  let dob = dobColumn === -1
+    ? ''
+    : cleanText_(context.dataDisplayValues[rowIndex][dobColumn]);
+
+  if (patientName && dob) {
+    return { patientName: patientName, dob: dob };
   }
+
+  const finKey = finKeyFromCell_(
+    context.dataValues[rowIndex][finColumn],
+    context.dataDisplayValues[rowIndex][finColumn]
+  );
+  const orthoIndex = orthoIndexResult && orthoIndexResult.index
+    ? orthoIndexResult.index
+    : (orthoIndexResult || {});
+
+  const orthoRecord = orthoIndex[finKey];
+
+  if (orthoRecord) {
+    if (!patientName) {
+      patientName = cleanText_(getOrthoValueByHeader_(orthoRecord, 'PATIENT'));
+    }
+    if (!dob) {
+      const dobValue = getOrthoValueByHeader_(orthoRecord, 'DOB');
+      dob = formatDateForDisplay_(dobValue);
+    }
+  }
+
+  return {
+    patientName: patientName,
+    dob: dob
+  };
+}
+
+function findUniqueSheet1RowByFin_(context, fin) {
+  const finColumn = findHeaderIndexByAliases_(context.headerMap, IDENTITY_ALIASES.fin);
+  if (finColumn === -1) {
+    throw new Error('Sheet1 does not contain a FIN header.');
+  }
+
+  const targetKey = normalizeFinKey_(fin);
+  if (!targetKey) {
+    return { found: false, duplicate: false, rowIndex: -1 };
+  }
+
+  const matches = [];
+
+  context.dataDisplayValues.forEach(function (row, rowIndex) {
+    const rowKey = finKeyFromCell_(
+      context.dataValues[rowIndex][finColumn],
+      row[finColumn]
+    );
+
+    if (rowKey === targetKey) {
+      matches.push(rowIndex);
+    }
+  });
+
+  if (!matches.length) {
+    return { found: false, duplicate: false, rowIndex: -1 };
+  }
+
+  if (matches.length > 1) {
+    return {
+      found: true,
+      duplicate: true,
+      rowIndex: -1,
+      rowIndexes: matches
+    };
+  }
+
+  return {
+    found: true,
+    duplicate: false,
+    rowIndex: matches[0]
+  };
+}
+
+/* ==========================================================================
+ * CALCULATED FIELD SUPPORT
+ * ========================================================================== */
+
+function fillCalculatedFieldsForRow_(sheet, sheetRow, headerMap, rowValues, rowDisplayValues, rowFormulas) {
+  const changed = [];
+
+  const valuesById = {};
+  FIELD_DEFINITIONS.forEach(function (field) {
+    const columnIndex = findFieldColumnIndex_(headerMap, field);
+    if (columnIndex === -1) return;
+    valuesById[field.id] = rowValues[columnIndex];
+  });
+
+  const heightCm = cleanNumber_(valuesById.heightCm);
+  const abwKg = cleanNumber_(valuesById.abwKg);
+  const gender = cleanText_(valuesById.gender);
+
+  const calculatedValues = {
+    bmiKgM2: calculateBmi_(heightCm, abwKg),
+    ibwKg: calculateIbw_(gender, heightCm)
+  };
+
+  calculatedValues.abwIbwRatio = calculateRatio_(abwKg, calculatedValues.ibwKg);
+  calculatedValues.adjustedBodyWeightKg = calculateAdjBw_(abwKg, calculatedValues.ibwKg);
+
+  const surgeryDateTime = valueToDate_(valuesById.surgeryDateTime);
+  const firstDoseDateTime = valueToDate_(valuesById.firstDoseDateTime);
+  const intendedStopDate = valueToDate_(valuesById.intendedStopDate);
+
+  calculatedValues.timeToFirstDoseHours = hoursBetween_(surgeryDateTime, firstDoseDateTime);
+  calculatedValues.outpatientDaysSupplied = calculateOutpatientDays_(
+    valuesById.prescriptionQuantity,
+    valuesById.dischargeFrequency
+  );
+  calculatedValues.totalTreatmentDuration = calculateTreatmentDays_(
+    firstDoseDateTime,
+    intendedStopDate
+  );
+
+  Object.keys(calculatedValues).forEach(function (fieldId) {
+    const value = calculatedValues[fieldId];
+    if (isBlankValue_(value)) return;
+
+    const field = FIELD_BY_ID[fieldId];
+    const columnIndex = findFieldColumnIndex_(headerMap, field);
+    if (columnIndex === -1) return;
+
+    const raw = rowValues[columnIndex];
+    const displayed = rowDisplayValues[columnIndex];
+    const formula = rowFormulas[columnIndex];
+
+    if (!isCellEmpty_(raw, displayed, formula)) return;
+
+    sheet.getRange(sheetRow, columnIndex + 1).setValue(value);
+    rowValues[columnIndex] = value;
+    changed.push(field.header);
+  });
+
+  return changed;
+}
+
+/* ==========================================================================
+ * ORTHO INDEX / DUPLICATE MERGING
+ * ========================================================================== */
+
+function buildOrthoIndexSafe_() {
+  try {
+    const spreadsheet = getSpreadsheet_();
+    const sheet = spreadsheet.getSheetByName(CONFIG.ORTHO_SHEET_NAME);
+    if (!sheet || sheet.getLastRow() < CONFIG.DATA_START_ROW) {
+      return {
+        index: {},
+        duplicateFinCount: 0,
+        duplicateFins: [],
+        blankFinRows: []
+      };
+    }
+
+    return buildMergedOrthoIndex_(readGenericSheetContext_(sheet));
+  } catch (error) {
+    console.log('Ortho identity fallback unavailable: ' + error.message);
+    return {
+      index: {},
+      duplicateFinCount: 0,
+      duplicateFins: [],
+      blankFinRows: []
+    };
+  }
+}
+
+function buildMergedOrthoIndex_(context) {
+  const finColumn = findHeaderIndexByAliases_(context.headerMap, ['FIN']);
+  if (finColumn === -1) {
+    throw new Error('Ortho does not contain a FIN header.');
+  }
+
+  const groups = {};
+  const blankFinRows = [];
+
+  context.dataValues.forEach(function (row, rowIndex) {
+    const displayFin = context.dataDisplayValues[rowIndex][finColumn];
+    const key = finKeyFromCell_(
+      context.dataValues[rowIndex][finColumn],
+      displayFin
+    );
+
+    if (!key) {
+      blankFinRows.push(rowIndex + CONFIG.DATA_START_ROW);
+      return;
+    }
+
+    if (!groups[key]) groups[key] = [];
+
+    groups[key].push({
+      values: row.slice(),
+      displayValues: context.dataDisplayValues[rowIndex].slice(),
+      sourceRow: rowIndex + CONFIG.DATA_START_ROW
+    });
+  });
+
+  const index = {};
+  const duplicateFins = [];
+  const orderDateColumn = findHeaderIndexByAliases_(context.headerMap, ['ORIG_ORDER_DT_TM']);
+
+  Object.keys(groups).forEach(function (key) {
+    const records = groups[key];
+
+    if (records.length > 1) {
+      duplicateFins.push({
+        fin: cleanText_(records[0].displayValues[finColumn]),
+        count: records.length
+      });
+    }
+
+    records.sort(function (a, b) {
+      const aDate = orderDateColumn === -1 ? null : valueToDate_(a.values[orderDateColumn]);
+      const bDate = orderDateColumn === -1 ? null : valueToDate_(b.values[orderDateColumn]);
+
+      const aTime = aDate ? aDate.getTime() : -Infinity;
+      const bTime = bDate ? bDate.getTime() : -Infinity;
+
+      if (bTime !== aTime) return bTime - aTime;
+      return b.sourceRow - a.sourceRow;
+    });
+
+    const mergedValues = records[0].values.slice();
+    const mergedDisplayValues = records[0].displayValues.slice();
+
+    for (let r = 1; r < records.length; r++) {
+      for (let c = 0; c < mergedValues.length; c++) {
+        if (isBlankValue_(mergedValues[c]) && !isBlankValue_(records[r].values[c])) {
+          mergedValues[c] = records[r].values[c];
+          mergedDisplayValues[c] = records[r].displayValues[c];
+        }
+      }
+    }
+
+    index[key] = {
+      values: mergedValues,
+      displayValues: mergedDisplayValues,
+      sourceRows: records.map(function (record) { return record.sourceRow; }),
+      headerMap: context.headerMap
+    };
+  });
+
+  return {
+    index: index,
+    duplicateFinCount: duplicateFins.length,
+    duplicateFins: duplicateFins,
+    blankFinRows: blankFinRows
+  };
+}
+
+function getOrthoValueByHeader_(record, header) {
+  if (!record || !record.headerMap) return '';
+  const columnIndex = findHeaderIndexByAliases_(record.headerMap, [header]);
+  if (columnIndex === -1) return '';
+  return record.values[columnIndex];
+}
+
+function calculateOrthoLengthOfStay_(sourceRow, sourceHeaderMap) {
+  const arrivalColumn = findHeaderIndexByAliases_(sourceHeaderMap, ['ENC_ARRIVE_DT_TM']);
+  const dischargeColumn = findHeaderIndexByAliases_(sourceHeaderMap, ['ENC_DISCH_DT_TM']);
+
+  if (arrivalColumn === -1 || dischargeColumn === -1) return '';
+
+  const arrival = valueToDate_(sourceRow[arrivalColumn]);
+  const discharge = valueToDate_(sourceRow[dischargeColumn]);
+
+  if (!arrival || !discharge) return '';
 
   const milliseconds = discharge.getTime() - arrival.getTime();
+  if (milliseconds < 0) return '';
 
-  if (milliseconds < 0) {
-    return '';
-  }
-
-  const days = milliseconds / (1000 * 60 * 60 * 24);
-
-  return Math.round(days * 100) / 100;
+  return round_(milliseconds / 86400000, 2);
 }
 
+/* ==========================================================================
+ * SHEET / HEADER HELPERS
+ * ========================================================================== */
 
-function orthoConvertToDate_(value) {
-  if (value instanceof Date && !isNaN(value.getTime())) {
-    return value;
+function getSpreadsheet_() {
+  if (CONFIG.SPREADSHEET_ID && CONFIG.SPREADSHEET_ID.trim()) {
+    return SpreadsheetApp.openById(CONFIG.SPREADSHEET_ID.trim());
   }
 
-  if (!value) {
-    return null;
+  const spreadsheet = SpreadsheetApp.getActiveSpreadsheet();
+  if (!spreadsheet) {
+    throw new Error(
+      'No spreadsheet is connected. Open the Google Sheet and use Extensions → Apps Script, ' +
+      'or enter the Sheet ID in CONFIG.SPREADSHEET_ID.'
+    );
   }
 
-  const converted = new Date(value);
-
-  if (isNaN(converted.getTime())) {
-    return null;
-  }
-
-  return converted;
+  return spreadsheet;
 }
 
+function getSheet1_() {
+  const spreadsheet = getSpreadsheet_();
+  const sheet = spreadsheet.getSheetByName(CONFIG.SHEET1_NAME);
 
-function orthoCreateHeaderMap_(headers, sheetName) {
+  if (!sheet) {
+    throw new Error(
+      'The sheet named "' + CONFIG.SHEET1_NAME + '" was not found. ' +
+      'Create the Sheet1 tab or correct CONFIG.SHEET1_NAME.'
+    );
+  }
+
+  return sheet;
+}
+
+/**
+ * Kept for compatibility with older code that called getSheet_().
+ */
+function getSheet_() {
+  return getSheet1_();
+}
+
+function readSheetContext_(sheet) {
+  return readGenericSheetContext_(sheet);
+}
+
+function readGenericSheetContext_(sheet) {
+  const lastColumn = Math.max(sheet.getLastColumn(), 1);
+  const headers = sheet.getRange(CONFIG.HEADER_ROW, 1, 1, lastColumn)
+    .getDisplayValues()[0];
+
+  const headerMap = createHeaderMap_(headers, sheet.getName());
+  const rowCount = Math.max(sheet.getLastRow() - CONFIG.HEADER_ROW, 0);
+
+  if (!rowCount) {
+    return {
+      sheet: sheet,
+      headers: headers,
+      headerMap: headerMap,
+      dataValues: [],
+      dataDisplayValues: [],
+      dataFormulas: []
+    };
+  }
+
+  const range = sheet.getRange(CONFIG.DATA_START_ROW, 1, rowCount, lastColumn);
+
+  return {
+    sheet: sheet,
+    headers: headers,
+    headerMap: headerMap,
+    dataValues: range.getValues(),
+    dataDisplayValues: range.getDisplayValues(),
+    dataFormulas: range.getFormulas()
+  };
+}
+
+function getHeaderValues_(sheet) {
+  const lastColumn = Math.max(sheet.getLastColumn(), 1);
+  return sheet.getRange(CONFIG.HEADER_ROW, 1, 1, lastColumn).getDisplayValues()[0];
+}
+
+function createHeaderMap_(headers, sheetName) {
   const map = {};
   const duplicates = [];
 
   headers.forEach(function (header, columnIndex) {
-    const normalizedHeader = orthoNormalizeHeader_(header);
+    const key = normalizeHeader_(header);
+    if (!key) return;
 
-    if (!normalizedHeader) {
+    if (map[key] !== undefined) {
+      duplicates.push(cleanText_(header));
       return;
     }
 
-    if (map[normalizedHeader] !== undefined) {
-      duplicates.push(String(header));
-      return;
-    }
-
-    map[normalizedHeader] = columnIndex;
+    map[key] = columnIndex;
   });
 
-  if (duplicates.length > 0) {
+  if (duplicates.length) {
     throw new Error(
-      'Duplicate column headers were found in ' +
-      sheetName +
-      ': ' +
-      duplicates.join(', ')
+      'Duplicate nonblank column headers were found in ' + sheetName + ': ' +
+      unique_(duplicates).join(', ')
     );
   }
 
   return map;
 }
 
+/**
+ * Kept for compatibility with the earlier Ortho code.
+ */
+function orthoCreateHeaderMap_(headers, sheetName) {
+  return createHeaderMap_(headers, sheetName);
+}
 
-function orthoNormalizeHeader_(value) {
-  return String(value || '')
-    .trim()
+function normalizeHeader_(value) {
+  return cleanText_(value)
     .replace(/\s+/g, ' ')
     .toUpperCase();
 }
 
-
-function orthoNormalizeFin_(value) {
-  return String(value || '')
-    .trim()
-    .replace(/\s+/g, '');
+/**
+ * Kept for compatibility with the earlier Ortho code.
+ */
+function orthoNormalizeHeader_(value) {
+  return normalizeHeader_(value);
 }
 
+function findHeaderIndexByAliases_(headerMap, aliases) {
+  for (let i = 0; i < aliases.length; i++) {
+    const key = normalizeHeader_(aliases[i]);
+    if (headerMap[key] !== undefined) return headerMap[key];
+  }
+  return -1;
+}
 
-function orthoGetSpreadsheet_() {
-  const activeSpreadsheet =
-    SpreadsheetApp.getActiveSpreadsheet();
+function findFieldColumnIndex_(headerMap, field) {
+  const aliases = [field.header].concat(field.aliases || []);
+  return findHeaderIndexByAliases_(headerMap, aliases);
+}
 
-  if (activeSpreadsheet) {
-    return activeSpreadsheet;
+function getMissingExpectedHeaders_(headerMap) {
+  return FIELD_DEFINITIONS
+    .filter(function (field) {
+      return findFieldColumnIndex_(headerMap, field) === -1;
+    })
+    .map(function (field) { return field.header; });
+}
+
+function isHeaderRowEmpty_(sheet) {
+  if (sheet.getLastColumn() === 0) return true;
+  return getHeaderValues_(sheet).every(function (value) {
+    return !cleanText_(value);
+  });
+}
+
+/**
+ * Compatibility helper. It no longer requires columns to stay in a fixed order.
+ */
+function ensureHeaders_(sheet) {
+  if (isHeaderRowEmpty_(sheet)) {
+    sheet.getRange(CONFIG.HEADER_ROW, 1, 1, TEMPLATE_HEADERS.length)
+      .setValues([TEMPLATE_HEADERS]);
+    return;
   }
 
-  if (
-    typeof CONFIG !== 'undefined' &&
-    CONFIG.SPREADSHEET_ID
-  ) {
-    return SpreadsheetApp.openById(
-      CONFIG.SPREADSHEET_ID
+  const map = createHeaderMap_(getHeaderValues_(sheet), sheet.getName());
+  if (findHeaderIndexByAliases_(map, IDENTITY_ALIASES.fin) === -1) {
+    throw new Error('The sheet is missing the FIN header.');
+  }
+}
+
+/**
+ * Compatibility helper. Returns missing expected headers instead of comparing
+ * fixed column positions.
+ */
+function verifyHeaders_(currentHeaders) {
+  const map = createHeaderMap_(currentHeaders, CONFIG.SHEET1_NAME);
+  const missing = getMissingExpectedHeaders_(map);
+  if (findHeaderIndexByAliases_(map, IDENTITY_ALIASES.fin) === -1) {
+    throw new Error('The sheet is missing the FIN header.');
+  }
+  return missing;
+}
+
+/* ==========================================================================
+ * FORM / FIELD HELPERS
+ * ========================================================================== */
+
+function field_(id, header, label, sectionId, sectionTitle, type, options) {
+  const extra = options || {};
+  return Object.freeze({
+    id: id,
+    header: header,
+    label: label,
+    sectionId: sectionId,
+    sectionTitle: sectionTitle,
+    type: type,
+    options: extra.options || [],
+    comment: Boolean(extra.comment),
+    calculated: Boolean(extra.calculated),
+    aliases: extra.aliases || [],
+    min: extra.min,
+    max: extra.max,
+    step: extra.step,
+    suffix: extra.suffix || '',
+    placeholder: extra.placeholder || '',
+    review: extra.review === false ? false : true
+  });
+}
+
+function serializeFieldForClient_(field) {
+  return {
+    id: field.id,
+    header: field.header,
+    label: field.label,
+    sectionId: field.sectionId,
+    sectionTitle: field.sectionTitle,
+    type: field.type,
+    options: field.options,
+    comment: field.comment,
+    min: field.min,
+    max: field.max,
+    step: field.step,
+    suffix: field.suffix,
+    placeholder: field.placeholder
+  };
+}
+
+function normalizeSubmittedFieldValue_(field, value) {
+  if (isBlankValue_(value)) return '';
+
+  if (field.type === 'number') {
+    const number = Number(value);
+    if (!Number.isFinite(number)) {
+      throw new Error(field.label + ' must be a valid number.');
+    }
+
+    if (field.min !== undefined && number < field.min) {
+      throw new Error(field.label + ' must be at least ' + field.min + '.');
+    }
+
+    if (field.max !== undefined && number > field.max) {
+      throw new Error(field.label + ' must be no more than ' + field.max + '.');
+    }
+
+    return number;
+  }
+
+  if (field.type === 'date') {
+    const parsedDate = parseLocalDate_(value);
+    if (parsedDate === '') {
+      throw new Error(field.label + ' must be a valid date.');
+    }
+    return parsedDate;
+  }
+
+  if (field.type === 'datetime') {
+    const parsedDateTime = parseLocalDateTime_(value);
+    if (parsedDateTime === '') {
+      throw new Error(field.label + ' must be a valid date and time.');
+    }
+    return parsedDateTime;
+  }
+
+  return cleanText_(value);
+}
+
+function validateRequired_(data) {
+  const missing = [];
+
+  if (!cleanText_(data.fin)) missing.push('FIN');
+  if (!cleanText_(data.collectionDate)) missing.push('Date');
+  if (!cleanText_(data.surgeryType)) missing.push('Type of surgery');
+
+  if (missing.length) {
+    throw new Error(
+      'Complete the following required field' +
+      (missing.length > 1 ? 's' : '') +
+      ': ' + missing.join(', ') + '.'
     );
   }
 
-  throw new Error(
-    'The Apps Script project is not connected to a Google Sheet. ' +
-    'Open the MUE spreadsheet and select Extensions → Apps Script, ' +
-    'or enter the spreadsheet ID in CONFIG.SPREADSHEET_ID.'
+  const age = cleanNumber_(data.age);
+  if (age !== '' && (age < 0 || age > 120)) {
+    throw new Error('Age must be between 0 and 120.');
+  }
+}
+
+/**
+ * Compatibility helper from the old fixed-row implementation.
+ * It still returns the old logical MUE values, but the active save function
+ * writes by header instead of relying on this array.
+ */
+function buildRow_(data) {
+  const values = {};
+  FIELD_DEFINITIONS.forEach(function (field) {
+    values[field.header] = field.calculated ? '' : normalizeSubmittedFieldValue_(field, data[field.id]);
+  });
+
+  return TEMPLATE_HEADERS.map(function (header) {
+    if (!header) return '';
+    if (normalizeHeader_(header) === normalizeHeader_('FIN')) return cleanText_(data.fin);
+    return values[header] !== undefined ? values[header] : '';
+  });
+}
+
+/* ==========================================================================
+ * FORMATTING
+ * ========================================================================== */
+
+function styleSheet_(sheet, context) {
+  sheet.setFrozenRows(CONFIG.HEADER_ROW);
+
+  const lastColumn = Math.max(sheet.getLastColumn(), 1);
+  const headerRange = sheet.getRange(CONFIG.HEADER_ROW, 1, 1, lastColumn);
+
+  headerRange
+    .setFontWeight('bold')
+    .setFontColor('#FFFFFF')
+    .setBackground('#123B5D')
+    .setWrap(true)
+    .setVerticalAlignment('middle')
+    .setHorizontalAlignment('center');
+
+  sheet.setRowHeight(CONFIG.HEADER_ROW, 56);
+
+  const headerMap = context ? context.headerMap : createHeaderMap_(getHeaderValues_(sheet), sheet.getName());
+
+  const finColumn = findHeaderIndexByAliases_(headerMap, IDENTITY_ALIASES.fin);
+  if (finColumn !== -1) sheet.setColumnWidth(finColumn + 1, 115);
+
+  const nameColumn = findHeaderIndexByAliases_(headerMap, IDENTITY_ALIASES.patientName);
+  if (nameColumn !== -1) sheet.setColumnWidth(nameColumn + 1, 180);
+
+  const dobColumn = findHeaderIndexByAliases_(headerMap, IDENTITY_ALIASES.dob);
+  if (dobColumn !== -1) sheet.setColumnWidth(dobColumn + 1, 105);
+
+  FIELD_DEFINITIONS.forEach(function (field) {
+    const columnIndex = findFieldColumnIndex_(headerMap, field);
+    if (columnIndex === -1) return;
+
+    const width = field.type === 'textarea' ? 220 : 145;
+    sheet.setColumnWidth(columnIndex + 1, width);
+  });
+}
+
+function applyRowFormatsByHeaders_(sheet, rowNumber, headerMap) {
+  FIELD_DEFINITIONS.forEach(function (field) {
+    const columnIndex = findFieldColumnIndex_(headerMap, field);
+    if (columnIndex === -1) return;
+
+    const range = sheet.getRange(rowNumber, columnIndex + 1);
+
+    if (field.type === 'date') {
+      range.setNumberFormat('MM/dd/yyyy');
+    } else if (field.type === 'datetime') {
+      range.setNumberFormat('MM/dd/yyyy HH:mm');
+    } else if (field.type === 'number' || field.type === 'calculated') {
+      if (field.step === 1 || field.id === 'inpatientDoseCount' || field.id === 'refillCount') {
+        range.setNumberFormat('0');
+      } else {
+        range.setNumberFormat('0.00');
+      }
+    }
+
+    range.setVerticalAlignment('top').setWrap(true);
+  });
+
+  const dobColumn = findHeaderIndexByAliases_(headerMap, IDENTITY_ALIASES.dob);
+  if (dobColumn !== -1) {
+    sheet.getRange(rowNumber, dobColumn + 1).setNumberFormat('MM/dd/yyyy');
+  }
+}
+
+/**
+ * Kept for compatibility with the old code.
+ */
+function applyRowFormats_(sheet, rowNumber) {
+  const map = createHeaderMap_(getHeaderValues_(sheet), sheet.getName());
+  applyRowFormatsByHeaders_(sheet, rowNumber, map);
+}
+
+/* ==========================================================================
+ * VALUE / DATE / FIN UTILITIES
+ * ========================================================================== */
+
+function cleanText_(value) {
+  if (value === null || value === undefined) return '';
+  return String(value).trim();
+}
+
+function cleanNumber_(value) {
+  if (value === null || value === undefined || value === '') return '';
+  const number = Number(value);
+  return Number.isFinite(number) ? number : '';
+}
+
+function firstDefinedNumber_(submittedValue, calculatedValue) {
+  const submitted = cleanNumber_(submittedValue);
+  if (submitted !== '') return submitted;
+  return calculatedValue === '' || calculatedValue === null || calculatedValue === undefined
+    ? ''
+    : calculatedValue;
+}
+
+function isBlankValue_(value) {
+  return value === null ||
+    value === undefined ||
+    (typeof value === 'string' && value.trim() === '');
+}
+
+function isCellEmpty_(rawValue, displayValue, formula) {
+  if (cleanText_(formula)) return false;
+  if (!isBlankValue_(rawValue)) return false;
+  return !cleanText_(displayValue);
+}
+
+/**
+ * FIN normalization is ONLY for matching.
+ * The actual FIN stored in Sheet1 is never rewritten by this function.
+ */
+function normalizeFinKey_(value) {
+  let text = cleanText_(value)
+    .replace(/\s+/g, '')
+    .replace(/^'+/, '')
+    .replace(/,/g, '');
+
+  if (!text) return '';
+
+  // Make a number stored as text ("123.0") match numeric 123.
+  if (/^\d+\.0+$/.test(text)) {
+    text = text.replace(/\.0+$/, '');
+  }
+
+  // Make "000123" match numeric 123 while keeping the displayed Sheet1 FIN unchanged.
+  if (/^\d+$/.test(text)) {
+    text = text.replace(/^0+(?=\d)/, '');
+  }
+
+  return text.toUpperCase();
+}
+
+function finKeyFromCell_(rawValue, displayValue) {
+  if (typeof rawValue === 'number' && Number.isFinite(rawValue)) {
+    return normalizeFinKey_(String(rawValue));
+  }
+
+  const rawKey = normalizeFinKey_(rawValue);
+  if (rawKey) return rawKey;
+
+  return normalizeFinKey_(displayValue);
+}
+
+/**
+ * Kept for compatibility with the earlier Ortho code.
+ */
+function orthoNormalizeFin_(value) {
+  return normalizeFinKey_(value);
+}
+
+function parseLocalDate_(value) {
+  if (value instanceof Date && !isNaN(value.getTime())) return value;
+
+  const text = cleanText_(value);
+  if (!text) return '';
+
+  const match = /^(\d{4})-(\d{2})-(\d{2})$/.exec(text);
+  if (match) {
+    return new Date(
+      Number(match[1]),
+      Number(match[2]) - 1,
+      Number(match[3])
+    );
+  }
+
+  const converted = new Date(text);
+  return isNaN(converted.getTime()) ? '' : converted;
+}
+
+function parseLocalDateTime_(value) {
+  if (value instanceof Date && !isNaN(value.getTime())) return value;
+
+  const text = cleanText_(value);
+  if (!text) return '';
+
+  const match = /^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2})/.exec(text);
+  if (match) {
+    return new Date(
+      Number(match[1]),
+      Number(match[2]) - 1,
+      Number(match[3]),
+      Number(match[4]),
+      Number(match[5])
+    );
+  }
+
+  const converted = new Date(text);
+  return isNaN(converted.getTime()) ? '' : converted;
+}
+
+function valueToDate_(value) {
+  if (value instanceof Date && !isNaN(value.getTime())) return value;
+  if (isBlankValue_(value)) return null;
+
+  const converted = new Date(value);
+  return isNaN(converted.getTime()) ? null : converted;
+}
+
+/**
+ * Kept for compatibility with the earlier Ortho code.
+ */
+function orthoConvertToDate_(value) {
+  return valueToDate_(value);
+}
+
+function formatDateForDisplay_(value) {
+  const date = valueToDate_(value);
+  if (!date) return cleanText_(value);
+
+  return Utilities.formatDate(
+    date,
+    Session.getScriptTimeZone(),
+    'MM/dd/yyyy'
   );
 }
+
+function calculateBmi_(heightCm, weightKg) {
+  if (!heightCm || !weightKg) return '';
+  const meters = heightCm / 100;
+  return round_(weightKg / (meters * meters), 2);
+}
+
+function calculateIbw_(gender, heightCm) {
+  if (!heightCm) return '';
+
+  const normalizedGender = cleanText_(gender).toLowerCase();
+  if (normalizedGender !== 'male' && normalizedGender !== 'female') return '';
+
+  const inches = heightCm / 2.54;
+  const base = normalizedGender === 'male' ? 50 : 45.5;
+  return round_(Math.max(base + 2.3 * (inches - 60), 0), 2);
+}
+
+function calculateRatio_(abwKg, ibwKg) {
+  if (!abwKg || !ibwKg) return '';
+  return round_(abwKg / ibwKg, 3);
+}
+
+function calculateAdjBw_(abwKg, ibwKg) {
+  if (!abwKg || !ibwKg) return '';
+  return round_(ibwKg + 0.4 * (abwKg - ibwKg), 2);
+}
+
+function hoursBetween_(start, end) {
+  if (!(start instanceof Date) || !(end instanceof Date)) return '';
+  const hours = (end.getTime() - start.getTime()) / 3600000;
+  return hours >= 0 ? round_(hours, 2) : '';
+}
+
+function calculateOutpatientDays_(quantityValue, frequencyValue) {
+  const quantity = cleanNumber_(quantityValue);
+  if (quantity === '') return '';
+
+  const frequency = cleanText_(frequencyValue).toLowerCase();
+  let dosesPerDay = '';
+
+  if (frequency.includes('twice') || frequency.includes('bid')) {
+    dosesPerDay = 2;
+  } else if (frequency.includes('once') || frequency.includes('daily')) {
+    dosesPerDay = 1;
+  }
+
+  if (!dosesPerDay) return '';
+  return round_(quantity / dosesPerDay, 2);
+}
+
+function calculateTreatmentDays_(firstDoseDateTime, stopDate) {
+  if (!(firstDoseDateTime instanceof Date) || !(stopDate instanceof Date)) return '';
+
+  const firstDoseDay = new Date(
+    firstDoseDateTime.getFullYear(),
+    firstDoseDateTime.getMonth(),
+    firstDoseDateTime.getDate()
+  );
+
+  const stopDay = new Date(
+    stopDate.getFullYear(),
+    stopDate.getMonth(),
+    stopDate.getDate()
+  );
+
+  const dayDifference = Math.round(
+    (stopDay.getTime() - firstDoseDay.getTime()) / 86400000
+  );
+
+  return dayDifference >= 0 ? dayDifference + 1 : '';
+}
+
+function round_(value, digits) {
+  const factor = Math.pow(10, digits || 0);
+  return Math.round((value + Number.EPSILON) * factor) / factor;
+}
+
+function unique_(array) {
+  const seen = {};
+  return array.filter(function (value) {
+    const key = String(value);
+    if (seen[key]) return false;
+    seen[key] = true;
+    return true;
+  });
+}
+
+function errorMessage_(error, fallback) {
+  return error && error.message ? error.message : fallback;
+}
+
+function columnLetter_(columnNumber) {
+  let result = '';
+  let number = columnNumber;
+
+  while (number > 0) {
+    number--;
+    result = String.fromCharCode(65 + (number % 26)) + result;
+    number = Math.floor(number / 26);
+  }
+
+  return result;
+}
+
+/**
+ * Compatibility helper retained from the earlier Ortho section.
+ */
+function orthoGetSpreadsheet_() {
+  return getSpreadsheet_();
+}
+
+/**
+ * Compatibility helper retained from the earlier Ortho section.
+ */
+function orthoCalculateLengthOfStay_(sourceRow, sourceHeaderMap) {
+  return calculateOrthoLengthOfStay_(sourceRow, sourceHeaderMap);
+}
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <base target="_top">
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <title>MUE Data Collection</title>
+
+  <style>
+    :root {
+      --navy: #123b5d;
+      --navy-dark: #0b2a42;
+      --teal: #1f6f78;
+      --teal-soft: #e6f3f3;
+      --page: #f3f7fa;
+      --surface: #ffffff;
+      --ink: #172330;
+      --muted: #647483;
+      --line: #d8e2ea;
+      --line-strong: #c4d2dc;
+      --success: #087a55;
+      --success-soft: #eaf8f2;
+      --danger: #b42318;
+      --danger-soft: #fff0ee;
+      --warning: #9a6700;
+      --warning-soft: #fff8e6;
+      --shadow: 0 14px 36px rgba(23, 53, 77, 0.10);
+      --radius: 18px;
+    }
+
+    * {
+      box-sizing: border-box;
+    }
+
+    html {
+      scroll-behavior: smooth;
+    }
+
+    body {
+      margin: 0;
+      min-height: 100vh;
+      background:
+        radial-gradient(circle at top right, rgba(31, 111, 120, 0.10), transparent 28rem),
+        var(--page);
+      color: var(--ink);
+      font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      line-height: 1.45;
+    }
+
+    button,
+    input,
+    select,
+    textarea {
+      font: inherit;
+    }
+
+    button {
+      cursor: pointer;
+    }
+
+    .app-header {
+      position: sticky;
+      top: 0;
+      z-index: 30;
+      border-bottom: 1px solid rgba(216, 226, 234, 0.92);
+      background: rgba(255, 255, 255, 0.95);
+      backdrop-filter: blur(14px);
+    }
+
+    .header-inner {
+      width: min(1180px, calc(100% - 32px));
+      margin: 0 auto;
+      padding: 15px 0 12px;
+    }
+
+    .title-row {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 18px;
+    }
+
+    .brand {
+      min-width: 0;
+      display: flex;
+      align-items: center;
+      gap: 12px;
+    }
+
+    .brand-mark {
+      width: 44px;
+      height: 44px;
+      flex: 0 0 auto;
+      display: grid;
+      place-items: center;
+      border-radius: 13px;
+      background: linear-gradient(145deg, var(--navy), var(--teal));
+      color: #fff;
+      font-weight: 900;
+      letter-spacing: 0.04em;
+      box-shadow: 0 8px 20px rgba(18, 59, 93, 0.22);
+    }
+
+    h1 {
+      margin: 0;
+      font-size: clamp(1.05rem, 2vw, 1.35rem);
+      line-height: 1.2;
+    }
+
+    .subtitle {
+      margin: 3px 0 0;
+      color: var(--muted);
+      font-size: 0.86rem;
+    }
+
+    .status-pill {
+      max-width: 390px;
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+      min-height: 36px;
+      padding: 7px 11px;
+      border: 1px solid var(--line);
+      border-radius: 999px;
+      background: #fff;
+      color: var(--muted);
+      font-size: 0.8rem;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+
+    .status-dot {
+      width: 8px;
+      height: 8px;
+      flex: 0 0 auto;
+      border-radius: 50%;
+      background: #9aa8b4;
+    }
+
+    .status-pill.ready .status-dot {
+      background: var(--success);
+    }
+
+    .status-pill.error .status-dot {
+      background: var(--danger);
+    }
+
+    .progress-row {
+      display: grid;
+      grid-template-columns: minmax(0, 1fr) auto;
+      align-items: center;
+      gap: 12px;
+      margin-top: 12px;
+    }
+
+    .progress-track {
+      height: 7px;
+      overflow: hidden;
+      border-radius: 999px;
+      background: #e5edf3;
+    }
+
+    .progress-bar {
+      width: 0;
+      height: 100%;
+      border-radius: inherit;
+      background: linear-gradient(90deg, var(--navy), var(--teal));
+      transition: width 180ms ease;
+    }
+
+    .progress-text {
+      min-width: 120px;
+      color: var(--muted);
+      text-align: right;
+      font-size: 0.8rem;
+      font-weight: 700;
+      font-variant-numeric: tabular-nums;
+    }
+
+    .page {
+      width: min(1180px, calc(100% - 32px));
+      margin: 22px auto 112px;
+    }
+
+    .notice {
+      display: none;
+      margin-bottom: 14px;
+      padding: 13px 15px;
+      border-radius: 13px;
+      font-size: 0.82rem;
+    }
+
+    .notice.visible {
+      display: block;
+    }
+
+    .notice.warning {
+      border: 1px solid #ecd394;
+      background: var(--warning-soft);
+      color: #765100;
+    }
+
+    .notice.error {
+      border: 1px solid #f0b9b5;
+      background: var(--danger-soft);
+      color: var(--danger);
+    }
+
+    .patient-card {
+      overflow: hidden;
+      margin-bottom: 18px;
+      border: 1px solid var(--line);
+      border-radius: var(--radius);
+      background: var(--surface);
+      box-shadow: var(--shadow);
+    }
+
+    .patient-card-header {
+      padding: 18px 20px 10px;
+      background:
+        linear-gradient(110deg, rgba(18, 59, 93, 0.06), rgba(31, 111, 120, 0.03)),
+        #fff;
+    }
+
+    .patient-overline {
+      margin-bottom: 5px;
+      color: var(--teal);
+      font-size: 0.72rem;
+      font-weight: 900;
+      letter-spacing: 0.09em;
+      text-transform: uppercase;
+    }
+
+    .patient-name {
+      margin: 0;
+      color: var(--navy-dark);
+      font-size: clamp(1.25rem, 3vw, 1.8rem);
+      line-height: 1.2;
+    }
+
+    .identity-grid {
+      display: grid;
+      grid-template-columns: repeat(3, minmax(0, 1fr));
+      gap: 12px;
+      padding: 12px 20px 18px;
+    }
+
+    .identity-item {
+      min-width: 0;
+      padding: 11px 13px;
+      border: 1px solid #e5edf3;
+      border-radius: 12px;
+      background: #fbfdfe;
+    }
+
+    .identity-label {
+      margin-bottom: 3px;
+      color: var(--muted);
+      font-size: 0.68rem;
+      font-weight: 800;
+      letter-spacing: 0.04em;
+      text-transform: uppercase;
+    }
+
+    .identity-value {
+      overflow-wrap: anywhere;
+      color: var(--ink);
+      font-size: 0.92rem;
+      font-weight: 800;
+    }
+
+    .missing-summary {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 12px;
+      padding: 12px 20px;
+      border-top: 1px solid #edf2f5;
+      background: #fcfeff;
+      color: #3e5363;
+      font-size: 0.82rem;
+    }
+
+    .missing-badge {
+      display: inline-flex;
+      align-items: center;
+      min-height: 28px;
+      padding: 4px 9px;
+      border-radius: 999px;
+      background: #eef4f8;
+      color: var(--navy);
+      font-size: 0.75rem;
+      font-weight: 850;
+    }
+
+    .section-card {
+      overflow: hidden;
+      margin-bottom: 16px;
+      border: 1px solid var(--line);
+      border-radius: var(--radius);
+      background: var(--surface);
+      box-shadow: var(--shadow);
+    }
+
+    .section-header {
+      padding: 15px 18px;
+      border-bottom: 1px solid #edf2f5;
+      background: linear-gradient(90deg, #ffffff, #f8fbfd);
+    }
+
+    .section-title {
+      margin: 0;
+      color: var(--navy);
+      font-size: 0.98rem;
+    }
+
+    .section-subtitle {
+      margin: 3px 0 0;
+      color: var(--muted);
+      font-size: 0.76rem;
+    }
+
+    .field-grid {
+      display: grid;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: 15px;
+      padding: 18px;
+    }
+
+    .field {
+      min-width: 0;
+    }
+
+    .field.wide {
+      grid-column: 1 / -1;
+    }
+
+    .field-label-row {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 8px;
+      margin-bottom: 7px;
+    }
+
+    .field-label {
+      color: #293846;
+      font-size: 0.82rem;
+      font-weight: 800;
+    }
+
+    .unit {
+      color: var(--muted);
+      font-size: 0.7rem;
+      font-weight: 700;
+    }
+
+    input,
+    select,
+    textarea {
+      width: 100%;
+      min-height: 44px;
+      border: 1px solid #cbd8e2;
+      border-radius: 11px;
+      outline: none;
+      background: #fff;
+      color: var(--ink);
+      transition: border-color 130ms ease, box-shadow 130ms ease;
+    }
+
+    input,
+    select {
+      padding: 9px 11px;
+    }
+
+    textarea {
+      min-height: 94px;
+      padding: 10px 11px;
+      resize: vertical;
+    }
+
+    input:focus,
+    select:focus,
+    textarea:focus {
+      border-color: var(--teal);
+      box-shadow: 0 0 0 3px rgba(31, 111, 120, 0.12);
+    }
+
+    .choice-group {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 7px;
+      min-height: 44px;
+      padding: 5px;
+      border: 1px solid #cbd8e2;
+      border-radius: 11px;
+      background: #f8fafc;
+    }
+
+    .choice-button {
+      min-height: 32px;
+      flex: 1 1 95px;
+      padding: 6px 10px;
+      border: 1px solid transparent;
+      border-radius: 8px;
+      background: transparent;
+      color: #425463;
+      font-size: 0.78rem;
+      font-weight: 800;
+    }
+
+    .choice-button:hover {
+      background: #eaf1f5;
+    }
+
+    .choice-button.selected {
+      border-color: #a7cbd0;
+      background: #dff0f1;
+      color: #125761;
+    }
+
+    .comment-row {
+      margin-top: 7px;
+    }
+
+    .comment-toggle {
+      padding: 0;
+      border: 0;
+      background: transparent;
+      color: var(--teal);
+      font-size: 0.74rem;
+      font-weight: 800;
+    }
+
+    .comment-input {
+      display: none;
+      margin-top: 7px;
+    }
+
+    .comment-input.visible {
+      display: block;
+    }
+
+    .comment-input input {
+      min-height: 39px;
+      font-size: 0.8rem;
+    }
+
+    .existing-card {
+      margin-top: 16px;
+      border: 1px solid var(--line);
+      border-radius: 14px;
+      background: #fff;
+    }
+
+    .existing-card summary {
+      cursor: pointer;
+      padding: 13px 15px;
+      color: #3b5162;
+      font-size: 0.82rem;
+      font-weight: 850;
+      user-select: none;
+    }
+
+    .existing-body {
+      padding: 0 15px 15px;
+      border-top: 1px solid #edf2f5;
+    }
+
+    .existing-section {
+      margin-top: 14px;
+    }
+
+    .existing-section h3 {
+      margin: 0 0 8px;
+      color: var(--navy);
+      font-size: 0.78rem;
+    }
+
+    .existing-grid {
+      display: grid;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: 8px 14px;
+    }
+
+    .existing-item {
+      min-width: 0;
+      padding: 8px 10px;
+      border-radius: 9px;
+      background: #f8fbfd;
+    }
+
+    .existing-label {
+      color: var(--muted);
+      font-size: 0.67rem;
+      font-weight: 800;
+    }
+
+    .existing-value {
+      margin-top: 2px;
+      overflow-wrap: anywhere;
+      font-size: 0.8rem;
+      font-weight: 700;
+    }
+
+    .empty-patient {
+      padding: 26px;
+      border: 1px solid #b9dfd1;
+      border-radius: var(--radius);
+      background: var(--success-soft);
+      color: #155f46;
+      text-align: center;
+      box-shadow: var(--shadow);
+    }
+
+    .empty-icon {
+      width: 56px;
+      height: 56px;
+      margin: 0 auto 12px;
+      display: grid;
+      place-items: center;
+      border-radius: 50%;
+      background: var(--success);
+      color: #fff;
+      font-size: 1.6rem;
+      font-weight: 900;
+    }
+
+    .empty-patient h2 {
+      margin: 0;
+      font-size: 1.15rem;
+    }
+
+    .empty-patient p {
+      margin: 8px auto 0;
+      max-width: 680px;
+      font-size: 0.84rem;
+    }
+
+    .error-panel {
+      display: none;
+      padding: 20px;
+      border: 1px solid #efbbb7;
+      border-radius: var(--radius);
+      background: var(--danger-soft);
+      color: var(--danger);
+      box-shadow: var(--shadow);
+    }
+
+    .error-panel.visible {
+      display: block;
+    }
+
+    .error-panel h2 {
+      margin: 0 0 7px;
+      font-size: 1rem;
+    }
+
+    .error-panel p {
+      margin: 0 0 14px;
+      font-size: 0.83rem;
+      white-space: pre-wrap;
+    }
+
+    .sticky-actions {
+      position: fixed;
+      z-index: 40;
+      left: 0;
+      right: 0;
+      bottom: 0;
+      border-top: 1px solid rgba(216, 226, 234, 0.95);
+      background: rgba(255, 255, 255, 0.97);
+      backdrop-filter: blur(14px);
+      box-shadow: 0 -10px 28px rgba(23, 53, 77, 0.08);
+    }
+
+    .actions-inner {
+      width: min(1180px, calc(100% - 32px));
+      min-height: 76px;
+      margin: 0 auto;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 14px;
+    }
+
+    .action-info {
+      color: var(--muted);
+      font-size: 0.79rem;
+    }
+
+    .action-buttons {
+      display: flex;
+      gap: 9px;
+    }
+
+    .button {
+      min-height: 42px;
+      padding: 9px 15px;
+      border-radius: 11px;
+      font-weight: 850;
+    }
+
+    .button:disabled {
+      cursor: not-allowed;
+      opacity: 0.52;
+    }
+
+    .button-secondary {
+      border: 1px solid var(--line-strong);
+      background: #fff;
+      color: #425463;
+    }
+
+    .button-secondary:hover:not(:disabled) {
+      background: #f3f7fa;
+    }
+
+    .button-skip {
+      border: 1px solid #d9c78e;
+      background: #fffdf7;
+      color: #765100;
+    }
+
+    .button-skip:hover:not(:disabled) {
+      background: #fff8e6;
+    }
+
+    .button-primary {
+      border: 1px solid var(--navy);
+      background: linear-gradient(135deg, var(--navy), #18547f);
+      color: #fff;
+      box-shadow: 0 8px 18px rgba(18, 59, 93, 0.18);
+    }
+
+    .button-primary:hover:not(:disabled) {
+      filter: brightness(1.05);
+    }
+
+    .loading-overlay {
+      position: fixed;
+      z-index: 100;
+      inset: 0;
+      display: none;
+      place-items: center;
+      padding: 22px;
+      background: rgba(243, 247, 250, 0.72);
+      backdrop-filter: blur(3px);
+    }
+
+    .loading-overlay.visible {
+      display: grid;
+    }
+
+    .loading-card {
+      min-width: 220px;
+      padding: 20px 24px;
+      border: 1px solid var(--line);
+      border-radius: 16px;
+      background: #fff;
+      box-shadow: 0 22px 60px rgba(18, 45, 64, 0.18);
+      color: var(--navy);
+      text-align: center;
+      font-size: 0.86rem;
+      font-weight: 800;
+    }
+
+    .spinner {
+      width: 28px;
+      height: 28px;
+      margin: 0 auto 11px;
+      border: 3px solid #d9e6ed;
+      border-top-color: var(--teal);
+      border-radius: 50%;
+      animation: spin 700ms linear infinite;
+    }
+
+    @keyframes spin {
+      to { transform: rotate(360deg); }
+    }
+
+    .toast {
+      position: fixed;
+      z-index: 150;
+      right: 20px;
+      bottom: 94px;
+      max-width: min(440px, calc(100% - 40px));
+      display: none;
+      padding: 13px 15px;
+      border-radius: 12px;
+      box-shadow: 0 16px 42px rgba(15, 39, 56, 0.20);
+      font-size: 0.84rem;
+      font-weight: 800;
+    }
+
+    .toast.visible {
+      display: block;
+    }
+
+    .toast.success {
+      border: 1px solid #b8e0d1;
+      background: var(--success-soft);
+      color: var(--success);
+    }
+
+    .toast.error {
+      border: 1px solid #f2b8b5;
+      background: var(--danger-soft);
+      color: var(--danger);
+    }
+
+    @media (max-width: 760px) {
+      .header-inner,
+      .page,
+      .actions-inner {
+        width: min(100% - 22px, 1180px);
+      }
+
+      .status-pill {
+        display: none;
+      }
+
+      .identity-grid,
+      .field-grid,
+      .existing-grid {
+        grid-template-columns: 1fr;
+      }
+
+      .field.wide {
+        grid-column: auto;
+      }
+
+      .action-info {
+        display: none;
+      }
+
+      .action-buttons {
+        width: 100%;
+      }
+
+      .action-buttons .button {
+        flex: 1;
+        padding-left: 9px;
+        padding-right: 9px;
+        font-size: 0.77rem;
+      }
+
+      .page {
+        margin-top: 14px;
+      }
+    }
+  </style>
+</head>
+
+<body>
+  <header class="app-header">
+    <div class="header-inner">
+      <div class="title-row">
+        <div class="brand">
+          <div class="brand-mark">MUE</div>
+          <div>
+            <h1>Apixaban Post-Orthopedic Surgery</h1>
+            <p class="subtitle">Missing-data patient review from Sheet1</p>
+          </div>
+        </div>
+
+        <div class="status-pill" id="appStatus">
+          <span class="status-dot"></span>
+          <span id="statusText">Connecting to Sheet1…</span>
+        </div>
+      </div>
+
+      <div class="progress-row">
+        <div class="progress-track" aria-hidden="true">
+          <div class="progress-bar" id="progressBar"></div>
+        </div>
+        <div class="progress-text" id="progressText">Loading…</div>
+      </div>
+    </div>
+  </header>
+
+  <main class="page">
+    <div class="notice warning" id="warningNotice"></div>
+    <div class="notice error" id="duplicateNotice"></div>
+
+    <div id="patientContainer"></div>
+
+    <div class="error-panel" id="errorPanel">
+      <h2>Unable to load the patient workflow</h2>
+      <p id="errorMessage"></p>
+      <button class="button button-primary" type="button" id="retryButton">Retry</button>
+    </div>
+  </main>
+
+  <footer class="sticky-actions" id="actionBar">
+    <div class="actions-inner">
+      <div class="action-info" id="actionInfo">Only blank Sheet1 fields will be saved.</div>
+
+      <div class="action-buttons">
+        <button class="button button-secondary" type="button" id="previousButton">
+          Previous Patient
+        </button>
+        <button class="button button-skip" type="button" id="skipButton">
+          Skip Patient
+        </button>
+        <button class="button button-primary" type="button" id="saveNextButton">
+          Save &amp; Next
+        </button>
+      </div>
+    </div>
+  </footer>
+
+  <div class="loading-overlay" id="loadingOverlay" aria-live="polite" aria-busy="true">
+    <div class="loading-card">
+      <div class="spinner"></div>
+      <div id="loadingText">Loading patient data…</div>
+    </div>
+  </div>
+
+  <div class="toast" id="toast" role="status" aria-live="polite"></div>
+
+  <script>
+    'use strict';
+
+    const SERVER_TIMEOUT_MS = 45000;
+
+    let bootstrapData = null;
+    let reviewQueue = [];
+    let currentIndex = -1;
+    let currentPatient = null;
+    let isBusy = false;
+    let toastTimer = null;
+    let passNumber = 1;
+
+    const drafts = Object.create(null);
+
+    document.addEventListener('DOMContentLoaded', initializeApp);
+
+    function initializeApp() {
+      bindEvents();
+
+      if (!window.google || !google.script || !google.script.run) {
+        showFatalError(
+          'This page must be opened through the deployed Google Apps Script web app.'
+        );
+        return;
+      }
+
+      loadBootstrap();
+    }
+
+    function bindEvents() {
+      document.getElementById('previousButton').addEventListener('click', goPrevious);
+      document.getElementById('skipButton').addEventListener('click', skipPatient);
+      document.getElementById('saveNextButton').addEventListener('click', saveAndNext);
+      document.getElementById('retryButton').addEventListener('click', loadBootstrap);
+
+      document.getElementById('patientContainer').addEventListener('click', event => {
+        const choiceButton = event.target.closest('[data-choice-field]');
+        if (choiceButton) {
+          selectChoice(choiceButton);
+          return;
+        }
+
+        const commentToggle = event.target.closest('[data-comment-toggle]');
+        if (commentToggle) {
+          toggleComment(commentToggle.dataset.commentToggle);
+        }
+      });
+
+      document.getElementById('patientContainer').addEventListener('input', saveCurrentDraft);
+      document.getElementById('patientContainer').addEventListener('change', saveCurrentDraft);
+    }
+
+    async function loadBootstrap() {
+      if (isBusy) return;
+
+      clearFatalError();
+      setBusy(true, 'Loading patients from Sheet1…');
+
+      try {
+        const data = await serverGetReviewBootstrap();
+        bootstrapData = data;
+        reviewQueue = Array.isArray(data.queue) ? data.queue.slice() : [];
+        currentIndex = -1;
+        currentPatient = null;
+
+        renderWarnings(data);
+        updateStatus(data);
+
+        if (!reviewQueue.length) {
+          showEndState(data);
+          return;
+        }
+
+        if (
+          data.firstPatient &&
+          normalizeFin(data.firstPatient.fin) === normalizeFin(reviewQueue[0].fin)
+        ) {
+          currentIndex = 0;
+          currentPatient = data.firstPatient;
+          renderPatient(currentPatient);
+          return;
+        }
+
+        await loadPatientAtIndex(0, false);
+      } catch (error) {
+        showFatalError(getErrorMessage(error));
+      } finally {
+        setBusy(false);
+      }
+    }
+
+    async function loadPatientAtIndex(index, allowCompleted) {
+      if (!reviewQueue.length) {
+        await refreshAfterPass();
+        return;
+      }
+
+      if (index < 0) {
+        index = 0;
+      }
+
+      if (index >= reviewQueue.length) {
+        await refreshAfterPass();
+        return;
+      }
+
+      currentIndex = index;
+      updateProgress();
+
+      const queuePatient = reviewQueue[currentIndex];
+
+      setBusy(true, 'Loading patient…');
+
+      try {
+        const patient = await serverGetPatientReviewData(queuePatient.fin);
+        currentPatient = patient;
+
+        if (patient.completed && !allowCompleted) {
+          setBusy(false);
+          await loadPatientAtIndex(currentIndex + 1, false);
+          return;
+        }
+
+        renderPatient(patient);
+      } catch (error) {
+        showToast(getErrorMessage(error), 'error');
+        showPatientLoadError(queuePatient.fin, getErrorMessage(error));
+      } finally {
+        setBusy(false);
+      }
+    }
+
+    async function saveAndNext() {
+      if (isBusy || !currentPatient) return;
+
+      saveCurrentDraft();
+
+      const values = collectValues();
+      const payload = {
+        fin: currentPatient.fin,
+        values: values
+      };
+
+      setBusy(true, 'Saving to Sheet1…');
+
+      try {
+        const result = await serverSavePatientMissingData(payload);
+
+        delete drafts[finKey(currentPatient.fin)];
+
+        if (result.patient) {
+          currentPatient = result.patient;
+          if (reviewQueue[currentIndex]) {
+            reviewQueue[currentIndex].missingCount = result.patient.missingCount;
+          }
+        }
+
+        const updatedCount = Number(result.updatedCount || 0);
+        showToast(
+          updatedCount
+            ? `${updatedCount} field${updatedCount === 1 ? '' : 's'} saved.`
+            : 'No new values were entered. Moving to the next patient.',
+          'success'
+        );
+
+        setBusy(false);
+        await loadPatientAtIndex(currentIndex + 1, false);
+      } catch (error) {
+        showToast(getErrorMessage(error), 'error');
+      } finally {
+        setBusy(false);
+      }
+    }
+
+    async function skipPatient() {
+      if (isBusy || !currentPatient) return;
+
+      saveCurrentDraft();
+      showToast('Patient skipped. No Sheet1 data were changed.', 'success');
+      await loadPatientAtIndex(currentIndex + 1, false);
+    }
+
+    async function goPrevious() {
+      if (isBusy || !currentPatient || currentIndex <= 0) return;
+
+      saveCurrentDraft();
+      await loadPatientAtIndex(currentIndex - 1, true);
+    }
+
+    async function refreshAfterPass() {
+      setBusy(true, 'Checking for remaining missing data…');
+
+      try {
+        const data = await serverGetReviewBootstrap();
+
+        bootstrapData = data;
+        renderWarnings(data);
+        updateStatus(data);
+
+        const remaining = Array.isArray(data.queue) ? data.queue : [];
+
+        if (!remaining.length) {
+          reviewQueue = [];
+          currentIndex = -1;
+          currentPatient = null;
+          showEndState(data);
+          return;
+        }
+
+        passNumber++;
+        reviewQueue = remaining.slice();
+        currentIndex = -1;
+        currentPatient = null;
+
+        showToast(
+          `${remaining.length} patient${remaining.length === 1 ? '' : 's'} still need review. Starting the next pass.`,
+          'success'
+        );
+
+        if (
+          data.firstPatient &&
+          normalizeFin(data.firstPatient.fin) === normalizeFin(reviewQueue[0].fin)
+        ) {
+          currentIndex = 0;
+          currentPatient = data.firstPatient;
+          renderPatient(currentPatient);
+        } else {
+          setBusy(false);
+          await loadPatientAtIndex(0, false);
+        }
+      } catch (error) {
+        showFatalError(getErrorMessage(error));
+      } finally {
+        setBusy(false);
+      }
+    }
+
+    function renderPatient(patient) {
+      clearFatalError();
+
+      const container = document.getElementById('patientContainer');
+      const missingFields = Array.isArray(patient.missingFields) ? patient.missingFields : [];
+      const grouped = groupFieldsBySection(missingFields);
+
+      const sectionsHtml = grouped.length
+        ? grouped.map(section => `
+            <section class="section-card">
+              <div class="section-header">
+                <h2 class="section-title">${escapeHtml(section.title)}</h2>
+                <p class="section-subtitle">${section.fields.length} missing field${section.fields.length === 1 ? '' : 's'} in this section</p>
+              </div>
+              <div class="field-grid">
+                ${section.fields.map(renderField).join('')}
+              </div>
+            </section>
+          `).join('')
+        : `
+          <div class="empty-patient">
+            <div class="empty-icon">✓</div>
+            <h2>This patient currently has no missing review fields.</h2>
+            <p>You can use Previous Patient to review this record or continue to the next patient.</p>
+          </div>
+        `;
+
+      container.innerHTML = `
+        <section class="patient-card">
+          <div class="patient-card-header">
+            <div class="patient-overline">Current patient</div>
+            <h2 class="patient-name">${escapeHtml(patient.patientName || 'Not available')}</h2>
+          </div>
+
+          <div class="identity-grid">
+            <div class="identity-item">
+              <div class="identity-label">Patient Name</div>
+              <div class="identity-value">${escapeHtml(patient.patientName || 'Not available')}</div>
+            </div>
+
+            <div class="identity-item">
+              <div class="identity-label">Date of Birth</div>
+              <div class="identity-value">${escapeHtml(patient.dob || 'Not available')}</div>
+            </div>
+
+            <div class="identity-item">
+              <div class="identity-label">FIN</div>
+              <div class="identity-value">${escapeHtml(patient.fin || '')}</div>
+            </div>
+          </div>
+
+          <div class="missing-summary">
+            <span>Only blank fields from this Sheet1 row are shown below.</span>
+            <span class="missing-badge">${patient.missingCount || 0} missing</span>
+          </div>
+        </section>
+
+        <form id="missingDataForm" novalidate>
+          ${sectionsHtml}
+        </form>
+
+        ${renderExistingData(patient.existingFields || [])}
+      `;
+
+      restoreDraftForCurrentPatient();
+      applyDefaultCollectionDate();
+      updateProgress();
+      updateButtons();
+
+      window.scrollTo({ top: 0, behavior: 'smooth' });
+    }
+
+    function renderField(field) {
+      const wide = field.type === 'textarea' ? 'wide' : '';
+      const unit = field.suffix
+        ? `<span class="unit">${escapeHtml(field.suffix)}</span>`
+        : '';
+
+      return `
+        <div class="field ${wide}" data-field-wrapper="${escapeHtml(field.id)}">
+          <div class="field-label-row">
+            <label class="field-label" for="${escapeHtml(field.id)}">${escapeHtml(field.label)}</label>
+            ${unit}
+          </div>
+
+          ${renderControl(field)}
+        </div>
+      `;
+    }
+
+    function renderControl(field) {
+      const id = escapeHtml(field.id);
+      const placeholder = field.placeholder
+        ? `placeholder="${escapeHtml(field.placeholder)}"`
+        : '';
+
+      if (field.type === 'choice') {
+        const buttons = (field.options || []).map(option => `
+          <button
+            type="button"
+            class="choice-button"
+            data-choice-field="${id}"
+            data-choice-value="${escapeHtml(option)}"
+            aria-pressed="false"
+          >
+            ${escapeHtml(option)}
+          </button>
+        `).join('');
+
+        return `
+          <div class="choice-group" role="group" aria-label="${escapeHtml(field.label)}">
+            ${buttons}
+          </div>
+
+          <input type="hidden" id="${id}" data-field-id="${id}">
+
+          ${field.comment ? `
+            <div class="comment-row">
+              <button
+                type="button"
+                class="comment-toggle"
+                data-comment-toggle="${id}"
+              >
+                + Add comment
+              </button>
+            </div>
+
+            <div class="comment-input" data-comment-wrap="${id}">
+              <input
+                type="text"
+                data-comment-for="${id}"
+                placeholder="Optional detail or chart comment"
+              >
+            </div>
+          ` : ''}
+        `;
+      }
+
+      if (field.type === 'select') {
+        return `
+          <select id="${id}" data-field-id="${id}">
+            <option value="">Choose…</option>
+            ${(field.options || []).map(option =>
+              `<option value="${escapeHtml(option)}">${escapeHtml(option)}</option>`
+            ).join('')}
+          </select>
+        `;
+      }
+
+      if (field.type === 'textarea') {
+        return `
+          <textarea
+            id="${id}"
+            data-field-id="${id}"
+            ${placeholder}
+          ></textarea>
+        `;
+      }
+
+      if (field.type === 'number') {
+        const min = field.min !== null && field.min !== undefined
+          ? `min="${escapeHtml(field.min)}"`
+          : '';
+        const max = field.max !== null && field.max !== undefined
+          ? `max="${escapeHtml(field.max)}"`
+          : '';
+        const step = field.step !== null && field.step !== undefined
+          ? `step="${escapeHtml(field.step)}"`
+          : 'step="any"';
+
+        return `
+          <input
+            type="number"
+            id="${id}"
+            data-field-id="${id}"
+            ${min}
+            ${max}
+            ${step}
+            ${placeholder}
+          >
+        `;
+      }
+
+      if (field.type === 'date') {
+        return `<input type="date" id="${id}" data-field-id="${id}">`;
+      }
+
+      if (field.type === 'datetime') {
+        return `<input type="datetime-local" id="${id}" data-field-id="${id}">`;
+      }
+
+      return `
+        <input
+          type="text"
+          id="${id}"
+          data-field-id="${id}"
+          ${placeholder}
+        >
+      `;
+    }
+
+    function renderExistingData(existingFields) {
+      if (!existingFields.length) return '';
+
+      const sections = groupExistingBySection(existingFields);
+
+      return `
+        <details class="existing-card">
+          <summary>View information already completed in Sheet1 (${existingFields.length})</summary>
+
+          <div class="existing-body">
+            ${sections.map(section => `
+              <div class="existing-section">
+                <h3>${escapeHtml(section.title)}</h3>
+
+                <div class="existing-grid">
+                  ${section.fields.map(field => `
+                    <div class="existing-item">
+                      <div class="existing-label">${escapeHtml(field.label)}</div>
+                      <div class="existing-value">${escapeHtml(field.value)}</div>
+                    </div>
+                  `).join('')}
+                </div>
+              </div>
+            `).join('')}
+          </div>
+        </details>
+      `;
+    }
+
+    function groupFieldsBySection(fields) {
+      const order = [
+        ['patient', 'Patient characteristics'],
+        ['surgery', 'Surgery and hospitalization'],
+        ['regimen', 'Apixaban regimen'],
+        ['labs', 'Laboratory data'],
+        ['medications', 'Concomitant medications']
+      ];
+
+      return order
+        .map(([id, title]) => ({
+          id,
+          title,
+          fields: fields.filter(field => field.sectionId === id)
+        }))
+        .filter(section => section.fields.length);
+    }
+
+    function groupExistingBySection(fields) {
+      const map = new Map();
+
+      fields.forEach(field => {
+        const key = field.sectionId || 'other';
+
+        if (!map.has(key)) {
+          map.set(key, {
+            id: key,
+            title: field.sectionTitle || 'Other information',
+            fields: []
+          });
+        }
+
+        map.get(key).fields.push(field);
+      });
+
+      return Array.from(map.values());
+    }
+
+    function selectChoice(button) {
+      const fieldId = button.dataset.choiceField;
+      const value = button.dataset.choiceValue;
+      const hidden = document.getElementById(fieldId);
+      const group = button.closest('.choice-group');
+
+      if (!hidden || !group) return;
+
+      group.querySelectorAll('.choice-button').forEach(item => {
+        const selected = item === button;
+        item.classList.toggle('selected', selected);
+        item.setAttribute('aria-pressed', String(selected));
+      });
+
+      hidden.value = value;
+
+      const field = getCurrentMissingField(fieldId);
+      if (field && field.comment && value === 'Yes') {
+        showComment(fieldId);
+      }
+
+      saveCurrentDraft();
+    }
+
+    function toggleComment(fieldId) {
+      const wrap = document.querySelector(
+        `[data-comment-wrap="${cssEscape(fieldId)}"]`
+      );
+      const toggle = document.querySelector(
+        `[data-comment-toggle="${cssEscape(fieldId)}"]`
+      );
+
+      if (!wrap || !toggle) return;
+
+      const show = !wrap.classList.contains('visible');
+      wrap.classList.toggle('visible', show);
+      toggle.textContent = show ? '− Hide comment' : '+ Add comment';
+
+      if (show) {
+        const input = wrap.querySelector('input');
+        if (input) input.focus();
+      }
+    }
+
+    function showComment(fieldId) {
+      const wrap = document.querySelector(
+        `[data-comment-wrap="${cssEscape(fieldId)}"]`
+      );
+      const toggle = document.querySelector(
+        `[data-comment-toggle="${cssEscape(fieldId)}"]`
+      );
+
+      if (!wrap || !toggle) return;
+
+      wrap.classList.add('visible');
+      toggle.textContent = '− Hide comment';
+    }
+
+    function collectValues() {
+      const result = {};
+
+      if (!currentPatient || !Array.isArray(currentPatient.missingFields)) {
+        return result;
+      }
+
+      currentPatient.missingFields.forEach(field => {
+        const input = document.getElementById(field.id);
+        if (!input) return;
+
+        let value = String(input.value || '').trim();
+
+        if (field.comment) {
+          const commentInput = document.querySelector(
+            `[data-comment-for="${cssEscape(field.id)}"]`
+          );
+          const comment = commentInput
+            ? String(commentInput.value || '').trim()
+            : '';
+
+          if (value && comment) {
+            value = `${value} — ${comment}`;
+          }
+        }
+
+        if (value !== '') {
+          result[field.id] = value;
+        }
+      });
+
+      return result;
+    }
+
+    function saveCurrentDraft() {
+      if (!currentPatient) return;
+
+      const key = finKey(currentPatient.fin);
+      const draft = {
+        values: {},
+        comments: {}
+      };
+
+      (currentPatient.missingFields || []).forEach(field => {
+        const input = document.getElementById(field.id);
+
+        if (input) {
+          draft.values[field.id] = input.value || '';
+        }
+
+        if (field.comment) {
+          const commentInput = document.querySelector(
+            `[data-comment-for="${cssEscape(field.id)}"]`
+          );
+
+          if (commentInput) {
+            draft.comments[field.id] = commentInput.value || '';
+          }
+        }
+      });
+
+      drafts[key] = draft;
+    }
+
+    function restoreDraftForCurrentPatient() {
+      if (!currentPatient) return;
+
+      const draft = drafts[finKey(currentPatient.fin)];
+      if (!draft) return;
+
+      (currentPatient.missingFields || []).forEach(field => {
+        const input = document.getElementById(field.id);
+        if (!input) return;
+
+        const value = draft.values && draft.values[field.id] !== undefined
+          ? draft.values[field.id]
+          : '';
+
+        input.value = value;
+
+        if (field.type === 'choice' && value) {
+          document.querySelectorAll(
+            `[data-choice-field="${cssEscape(field.id)}"]`
+          ).forEach(button => {
+            const selected = button.dataset.choiceValue === value;
+            button.classList.toggle('selected', selected);
+            button.setAttribute('aria-pressed', String(selected));
+          });
+        }
+
+        if (field.comment) {
+          const comment = draft.comments && draft.comments[field.id]
+            ? draft.comments[field.id]
+            : '';
+
+          const commentInput = document.querySelector(
+            `[data-comment-for="${cssEscape(field.id)}"]`
+          );
+
+          if (commentInput && comment) {
+            commentInput.value = comment;
+            showComment(field.id);
+          }
+        }
+      });
+    }
+
+    function applyDefaultCollectionDate() {
+      if (!currentPatient) return;
+
+      const fieldExists = (currentPatient.missingFields || []).some(
+        field => field.id === 'collectionDate'
+      );
+
+      if (!fieldExists) return;
+
+      const input = document.getElementById('collectionDate');
+      if (input && !input.value) {
+        input.value = todayLocalIso();
+        saveCurrentDraft();
+      }
+    }
+
+    function getCurrentMissingField(fieldId) {
+      if (!currentPatient) return null;
+
+      return (currentPatient.missingFields || []).find(
+        field => field.id === fieldId
+      ) || null;
+    }
+
+    function renderWarnings(data) {
+      const warningNotice = document.getElementById('warningNotice');
+      const duplicateNotice = document.getElementById('duplicateNotice');
+
+      const warnings = [];
+
+      if (Array.isArray(data.missingHeaders) && data.missingHeaders.length) {
+        warnings.push(
+          'These Sheet1 headers are missing, so they cannot be reviewed until the headers are added: ' +
+          data.missingHeaders.join(', ')
+        );
+      }
+
+      if (Array.isArray(data.blankFinRows) && data.blankFinRows.length) {
+        warnings.push(
+          `${data.blankFinRows.length} Sheet1 row${data.blankFinRows.length === 1 ? '' : 's'} contain data but have a blank FIN and cannot be reviewed.`
+        );
+      }
+
+      if (warnings.length) {
+        warningNotice.textContent = warnings.join(' ');
+        warningNotice.className = 'notice warning visible';
+      } else {
+        warningNotice.textContent = '';
+        warningNotice.className = 'notice warning';
+      }
+
+      const duplicates = Array.isArray(data.duplicateSheet1Fins)
+        ? data.duplicateSheet1Fins
+        : [];
+
+      if (duplicates.length) {
+        duplicateNotice.textContent =
+          'Duplicate FIN values were found in Sheet1 and were not included in the review queue: ' +
+          duplicates.map(item => `${item.fin} (${item.count} rows)`).join(', ') +
+          '. Correct the duplicate rows before those patients can be safely updated.';
+
+        duplicateNotice.className = 'notice error visible';
+      } else {
+        duplicateNotice.textContent = '';
+        duplicateNotice.className = 'notice error';
+      }
+    }
+
+    function showEndState(data) {
+      const duplicates = Array.isArray(data.duplicateSheet1Fins)
+        ? data.duplicateSheet1Fins
+        : [];
+      const missingHeaders = Array.isArray(data.missingHeaders)
+        ? data.missingHeaders
+        : [];
+      const blankFinRows = Array.isArray(data.blankFinRows)
+        ? data.blankFinRows
+        : [];
+
+      const container = document.getElementById('patientContainer');
+      const blockers = [];
+
+      if (duplicates.length) {
+        blockers.push('duplicate FIN values');
+      }
+      if (missingHeaders.length) {
+        blockers.push('missing Sheet1 headers');
+      }
+      if (blankFinRows.length) {
+        blockers.push('rows with data but no FIN');
+      }
+
+      if (blockers.length) {
+        container.innerHTML = `
+          <div class="error-panel visible">
+            <h2>No additional reviewable patients are available.</h2>
+            <p>The workflow cannot mark the project complete because Sheet1 still has ${escapeHtml(blockers.join(', '))}. Correct these items, then refresh this page.</p>
+          </div>
+        `;
+        setStatus('Sheet1 requires correction', 'error');
+        document.getElementById('progressBar').style.width = '0%';
+        document.getElementById('progressText').textContent = 'Needs correction';
+      } else {
+        container.innerHTML = `
+          <div class="empty-patient">
+            <div class="empty-icon">✓</div>
+            <h2>All patient records have been completed.</h2>
+            <p>There are no remaining patients in Sheet1 with missing review fields.</p>
+          </div>
+        `;
+        setStatus(`${data.sheetName || 'Sheet1'} • complete`, 'ready');
+        document.getElementById('progressBar').style.width = '100%';
+        document.getElementById('progressText').textContent = 'Complete';
+      }
+
+      document.getElementById('actionBar').style.display = 'none';
+    }
+
+    function showPatientLoadError(fin, message) {
+      const container = document.getElementById('patientContainer');
+
+      container.innerHTML = `
+        <div class="error-panel visible">
+          <h2>Patient could not be loaded</h2>
+          <p>FIN: ${escapeHtml(fin || '')}\n${escapeHtml(message || '')}</p>
+        </div>
+      `;
+
+      updateButtons();
+    }
+
+    function showFatalError(message) {
+      document.getElementById('patientContainer').innerHTML = '';
+      document.getElementById('errorMessage').textContent = message;
+      document.getElementById('errorPanel').classList.add('visible');
+      document.getElementById('actionBar').style.display = 'none';
+      setStatus('Connection error', 'error');
+    }
+
+    function clearFatalError() {
+      document.getElementById('errorPanel').classList.remove('visible');
+      document.getElementById('errorMessage').textContent = '';
+      document.getElementById('actionBar').style.display = '';
+    }
+
+    function updateStatus(data) {
+      const count = Number(data.reviewCount || 0);
+      setStatus(
+        `${data.sheetName || 'Sheet1'} • ${count} patient${count === 1 ? '' : 's'} need review`,
+        'ready'
+      );
+    }
+
+    function setStatus(text, state) {
+      const pill = document.getElementById('appStatus');
+      const statusText = document.getElementById('statusText');
+
+      pill.classList.remove('ready', 'error');
+
+      if (state) {
+        pill.classList.add(state);
+      }
+
+      statusText.textContent = text;
+    }
+
+    function updateProgress() {
+      if (!reviewQueue.length || currentIndex < 0) {
+        document.getElementById('progressBar').style.width = '0%';
+        document.getElementById('progressText').textContent = 'Loading…';
+        return;
+      }
+
+      const current = currentIndex + 1;
+      const total = reviewQueue.length;
+      const percentage = Math.min(100, Math.max(0, (current / total) * 100));
+
+      document.getElementById('progressBar').style.width = `${percentage}%`;
+      document.getElementById('progressText').textContent =
+        `Patient ${current} of ${total}`;
+    }
+
+    function updateButtons() {
+      const previous = document.getElementById('previousButton');
+      const skip = document.getElementById('skipButton');
+      const save = document.getElementById('saveNextButton');
+
+      previous.disabled = isBusy || currentIndex <= 0;
+      skip.disabled = isBusy || !currentPatient;
+      save.disabled = isBusy || !currentPatient;
+
+      if (currentPatient && currentPatient.completed) {
+        save.textContent = 'Next Patient';
+      } else {
+        save.textContent = 'Save & Next';
+      }
+    }
+
+    function setBusy(busy, message) {
+      isBusy = busy;
+
+      const overlay = document.getElementById('loadingOverlay');
+      const loadingText = document.getElementById('loadingText');
+
+      if (message) {
+        loadingText.textContent = message;
+      }
+
+      overlay.classList.toggle('visible', busy);
+      updateButtons();
+    }
+
+    function showToast(message, type) {
+      const toast = document.getElementById('toast');
+
+      toast.textContent = message;
+      toast.className = `toast visible ${type || 'success'}`;
+
+      window.clearTimeout(toastTimer);
+
+      toastTimer = window.setTimeout(() => {
+        toast.classList.remove('visible');
+      }, 5200);
+    }
+
+    function serverGetReviewBootstrap() {
+      return serverPromise((success, failure) => {
+        google.script.run
+          .withSuccessHandler(success)
+          .withFailureHandler(failure)
+          .getReviewBootstrap();
+      }, 'Loading patients from Sheet1');
+    }
+
+    function serverGetPatientReviewData(fin) {
+      return serverPromise((success, failure) => {
+        google.script.run
+          .withSuccessHandler(success)
+          .withFailureHandler(failure)
+          .getPatientReviewData(fin);
+      }, 'Loading the patient record');
+    }
+
+    function serverSavePatientMissingData(payload) {
+      return serverPromise((success, failure) => {
+        google.script.run
+          .withSuccessHandler(success)
+          .withFailureHandler(failure)
+          .savePatientMissingData(payload);
+      }, 'Saving the patient record');
+    }
+
+    function serverPromise(invoke, label) {
+      return new Promise((resolve, reject) => {
+        let settled = false;
+
+        const timer = window.setTimeout(() => {
+          if (settled) return;
+          settled = true;
+          reject(
+            new Error(
+              `${label} took longer than expected. The page was unlocked so it does not freeze. Please try again.`
+            )
+          );
+        }, SERVER_TIMEOUT_MS);
+
+        const success = result => {
+          if (settled) return;
+          settled = true;
+          window.clearTimeout(timer);
+          resolve(result);
+        };
+
+        const failure = error => {
+          if (settled) return;
+          settled = true;
+          window.clearTimeout(timer);
+          reject(error instanceof Error ? error : new Error(getErrorMessage(error)));
+        };
+
+        try {
+          invoke(success, failure);
+        } catch (error) {
+          failure(error);
+        }
+      });
+    }
+
+    function getErrorMessage(error) {
+      if (!error) return 'An unexpected error occurred.';
+      if (error.message) return error.message;
+      return String(error);
+    }
+
+    function normalizeFin(value) {
+      let text = String(value || '')
+        .trim()
+        .replace(/\s+/g, '')
+        .replace(/^'+/, '')
+        .replace(/,/g, '');
+
+      if (/^\d+\.0+$/.test(text)) {
+        text = text.replace(/\.0+$/, '');
+      }
+
+      if (/^\d+$/.test(text)) {
+        text = text.replace(/^0+(?=\d)/, '');
+      }
+
+      return text.toUpperCase();
+    }
+
+    function finKey(value) {
+      return normalizeFin(value);
+    }
+
+    function todayLocalIso() {
+      const now = new Date();
+      const offset = now.getTimezoneOffset() * 60000;
+      return new Date(now.getTime() - offset).toISOString().slice(0, 10);
+    }
+
+    function escapeHtml(value) {
+      return String(value === null || value === undefined ? '' : value)
+        .replaceAll('&', '&amp;')
+        .replaceAll('<', '&lt;')
+        .replaceAll('>', '&gt;')
+        .replaceAll('"', '&quot;')
+        .replaceAll("'", '&#039;');
+    }
+
+    function cssEscape(value) {
+      if (window.CSS && CSS.escape) {
+        return CSS.escape(value);
+      }
+
+      return String(value).replace(/[^a-zA-Z0-9_-]/g, '\\$&');
+    }
+  </script>
+</body>
+</html>
+    
