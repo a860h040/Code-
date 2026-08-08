@@ -1,31 +1,25 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-  <base target="_top">
-  <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-  <title>MUE Data Collection</title>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Sigma Wash Service Selection</title>
 
   <style>
-    :root {
-      --navy: #123b5d;
-      --navy-dark: #0b2a42;
-      --teal: #1f6f78;
-      --teal-soft: #e6f3f3;
-      --page: #f3f7fa;
-      --surface: #ffffff;
-      --ink: #172330;
-      --muted: #647483;
-      --line: #d8e2ea;
-      --line-strong: #c4d2dc;
-      --success: #087a55;
-      --success-soft: #eaf8f2;
-      --danger: #b42318;
-      --danger-soft: #fff0ee;
-      --warning: #9a6700;
-      --warning-soft: #fff8e6;
-      --shadow: 0 14px 36px rgba(23, 53, 77, 0.10);
-      --radius: 18px;
+:root {
+      --bg: #f5f5f7;
+      --panel: #ffffff;
+      --panel-soft: #fbfbfd;
+      --text: #1d1d1f;
+      --muted: #6e6e73;
+      --line: #e5e5e7;
+      --blue: #0071e3;
+      --blue-hover: #0077ed;
+      --sidebar-width: 290px;
+      --radius-xl: 28px;
+      --radius-lg: 22px;
+      --shadow: 0 8px 30px rgba(0, 0, 0, 0.06);
+      --max-width: 1280px;
     }
 
     * {
@@ -38,1965 +32,2104 @@
 
     body {
       margin: 0;
+      background: var(--bg);
+      color: var(--text);
+      font-family: "SF Pro Display", "SF Pro Text", "Helvetica Neue", Helvetica, Arial, sans-serif;
+      -webkit-font-smoothing: antialiased;
+      text-rendering: optimizeLegibility;
+    }
+
+    body.modal-open {
+      overflow: hidden;
+    }
+
+    a {
+      color: inherit;
+    }
+
+    .layout {
       min-height: 100vh;
-      background:
-        radial-gradient(circle at top right, rgba(31, 111, 120, 0.10), transparent 28rem),
-        var(--page);
-      color: var(--ink);
-      font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
-      line-height: 1.45;
+      display: flex;
     }
 
-    button,
-    input,
-    select,
-    textarea {
-      font: inherit;
-    }
-
-    button {
-      cursor: pointer;
-    }
-
-    .app-header {
-      position: sticky;
+    .sidebar {
+      width: var(--sidebar-width);
+      background: rgba(255, 255, 255, 0.92);
+      backdrop-filter: blur(20px);
+      border-right: 1px solid var(--line);
+      padding: 28px 20px 24px;
+      position: fixed;
       top: 0;
-      z-index: 30;
-      border-bottom: 1px solid rgba(216, 226, 234, 0.92);
-      background: rgba(255, 255, 255, 0.95);
-      backdrop-filter: blur(14px);
+      left: 0;
+      bottom: 0;
+      overflow-y: auto;
+      z-index: 1000;
+      transition: transform 0.3s ease;
     }
 
-    .header-inner {
-      width: min(1180px, calc(100% - 32px));
-      margin: 0 auto;
-      padding: 15px 0 12px;
+    .sidebar-brand {
+      padding: 8px 10px 22px;
+      border-bottom: 1px solid var(--line);
+      margin-bottom: 24px;
     }
 
-    .title-row {
-      display: flex;
-      align-items: center;
-      justify-content: space-between;
-      gap: 18px;
-    }
-
-    .brand {
-      min-width: 0;
-      display: flex;
-      align-items: center;
-      gap: 12px;
-    }
-
-    .brand-mark {
-      width: 44px;
-      height: 44px;
-      flex: 0 0 auto;
-      display: grid;
-      place-items: center;
-      border-radius: 13px;
-      background: linear-gradient(145deg, var(--navy), var(--teal));
-      color: #fff;
-      font-weight: 900;
-      letter-spacing: 0.04em;
-      box-shadow: 0 8px 20px rgba(18, 59, 93, 0.22);
-    }
-
-    h1 {
-      margin: 0;
-      font-size: clamp(1.05rem, 2vw, 1.35rem);
-      line-height: 1.2;
-    }
-
-    .subtitle {
-      margin: 3px 0 0;
+    .sidebar-copy {
       color: var(--muted);
-      font-size: 0.86rem;
+      line-height: 1.55;
+      font-size: 0.96rem;
+      padding: 0 10px;
+      margin-bottom: 22px;
     }
 
-    .status-pill {
-      max-width: 390px;
-      display: inline-flex;
-      align-items: center;
-      gap: 8px;
-      min-height: 36px;
-      padding: 7px 11px;
-      border: 1px solid var(--line);
-      border-radius: 999px;
-      background: #fff;
+    .sidebar-group {
+      margin-bottom: 22px;
+    }
+
+    .sidebar-label {
       color: var(--muted);
       font-size: 0.8rem;
-      white-space: nowrap;
-      overflow: hidden;
-      text-overflow: ellipsis;
-    }
-
-    .status-dot {
-      width: 8px;
-      height: 8px;
-      flex: 0 0 auto;
-      border-radius: 50%;
-      background: #9aa8b4;
-    }
-
-    .status-pill.ready .status-dot {
-      background: var(--success);
-    }
-
-    .status-pill.error .status-dot {
-      background: var(--danger);
-    }
-
-    .progress-row {
-      display: grid;
-      grid-template-columns: minmax(0, 1fr) auto;
-      align-items: center;
-      gap: 12px;
-      margin-top: 12px;
-    }
-
-    .progress-track {
-      height: 7px;
-      overflow: hidden;
-      border-radius: 999px;
-      background: #e5edf3;
-    }
-
-    .progress-bar {
-      width: 0;
-      height: 100%;
-      border-radius: inherit;
-      background: linear-gradient(90deg, var(--navy), var(--teal));
-      transition: width 180ms ease;
-    }
-
-    .progress-text {
-      min-width: 120px;
-      color: var(--muted);
-      text-align: right;
-      font-size: 0.8rem;
-      font-weight: 700;
-      font-variant-numeric: tabular-nums;
-    }
-
-    .page {
-      width: min(1180px, calc(100% - 32px));
-      margin: 22px auto 112px;
-    }
-
-    .notice {
-      display: none;
-      margin-bottom: 14px;
-      padding: 13px 15px;
-      border-radius: 13px;
-      font-size: 0.82rem;
-    }
-
-    .notice.visible {
-      display: block;
-    }
-
-    .notice.warning {
-      border: 1px solid #ecd394;
-      background: var(--warning-soft);
-      color: #765100;
-    }
-
-    .notice.error {
-      border: 1px solid #f0b9b5;
-      background: var(--danger-soft);
-      color: var(--danger);
-    }
-
-    .patient-card {
-      overflow: hidden;
-      margin-bottom: 18px;
-      border: 1px solid var(--line);
-      border-radius: var(--radius);
-      background: var(--surface);
-      box-shadow: var(--shadow);
-    }
-
-    .patient-card-header {
-      padding: 18px 20px 10px;
-      background:
-        linear-gradient(110deg, rgba(18, 59, 93, 0.06), rgba(31, 111, 120, 0.03)),
-        #fff;
-    }
-
-    .patient-overline {
-      margin-bottom: 5px;
-      color: var(--teal);
-      font-size: 0.72rem;
-      font-weight: 900;
-      letter-spacing: 0.09em;
+      font-weight: 600;
       text-transform: uppercase;
+      letter-spacing: 0.08em;
+      padding: 0 10px;
+      margin-bottom: 10px;
     }
 
-    .patient-name {
-      margin: 0;
-      color: var(--navy-dark);
-      font-size: clamp(1.25rem, 3vw, 1.8rem);
-      line-height: 1.2;
-    }
-
-    .identity-grid {
+    .sidebar-nav {
       display: grid;
-      grid-template-columns: repeat(3, minmax(0, 1fr));
-      gap: 12px;
-      padding: 12px 20px 18px;
-    }
-
-    .identity-item {
-      min-width: 0;
-      padding: 11px 13px;
-      border: 1px solid #e5edf3;
-      border-radius: 12px;
-      background: #fbfdfe;
-    }
-
-    .identity-label {
-      margin-bottom: 3px;
-      color: var(--muted);
-      font-size: 0.68rem;
-      font-weight: 800;
-      letter-spacing: 0.04em;
-      text-transform: uppercase;
-    }
-
-    .identity-value {
-      overflow-wrap: anywhere;
-      color: var(--ink);
-      font-size: 0.92rem;
-      font-weight: 800;
-    }
-
-    .fin-value-row {
-      display: flex;
-      align-items: center;
-      justify-content: space-between;
-      gap: 10px;
-      min-width: 0;
-    }
-
-    .fin-value-row .identity-value {
-      min-width: 0;
-      flex: 1 1 auto;
-    }
-
-    .copy-fin-button {
-      flex: 0 0 auto;
-      display: inline-flex;
-      align-items: center;
-      justify-content: center;
       gap: 6px;
-      min-height: 34px;
-      padding: 6px 10px;
-      border: 1px solid #cbd8e2;
-      border-radius: 9px;
-      background: #ffffff;
-      color: var(--navy);
-      font-size: 0.74rem;
-      font-weight: 850;
-      cursor: pointer;
-      white-space: nowrap;
-      transition: background 130ms ease, border-color 130ms ease, color 130ms ease, transform 130ms ease;
     }
 
-    .copy-fin-button:hover {
-      border-color: var(--teal);
-      background: var(--teal-light);
-      color: #155d65;
-    }
-
-    .copy-fin-button:active {
-      transform: translateY(1px);
-    }
-
-    .copy-fin-button.copied {
-      border-color: #8bcdb3;
-      background: var(--success-light);
-      color: var(--success);
-    }
-
-    .copy-fin-button:disabled {
-      cursor: not-allowed;
-      opacity: 0.6;
-    }
-
-    .missing-summary {
-      display: flex;
-      align-items: center;
-      justify-content: space-between;
-      gap: 12px;
-      padding: 12px 20px;
-      border-top: 1px solid #edf2f5;
-      background: #fcfeff;
-      color: #3e5363;
-      font-size: 0.82rem;
-    }
-
-    .missing-badge {
-      display: inline-flex;
-      align-items: center;
-      min-height: 28px;
-      padding: 4px 9px;
-      border-radius: 999px;
-      background: #eef4f8;
-      color: var(--navy);
-      font-size: 0.75rem;
-      font-weight: 850;
-    }
-
-    .section-card {
-      overflow: hidden;
-      margin-bottom: 16px;
-      border: 1px solid var(--line);
-      border-radius: var(--radius);
-      background: var(--surface);
-      box-shadow: var(--shadow);
-    }
-
-    .section-header {
-      padding: 15px 18px;
-      border-bottom: 1px solid #edf2f5;
-      background: linear-gradient(90deg, #ffffff, #f8fbfd);
-    }
-
-    .section-title {
-      margin: 0;
-      color: var(--navy);
+    .sidebar-nav a {
+      text-decoration: none;
+      padding: 12px 14px;
+      border-radius: 16px;
       font-size: 0.98rem;
+      color: var(--text);
+      transition: background 0.2s ease, color 0.2s ease, transform 0.2s ease;
     }
 
-    .section-subtitle {
-      margin: 3px 0 0;
-      color: var(--muted);
-      font-size: 0.76rem;
+    .sidebar-nav a:hover {
+      background: #f0f3f6;
+      color: var(--blue);
+      transform: translateX(2px);
     }
 
-    .field-grid {
-      display: grid;
-      grid-template-columns: repeat(2, minmax(0, 1fr));
-      gap: 15px;
-      padding: 18px;
-    }
-
-    .field {
-      min-width: 0;
-    }
-
-    .field.wide {
-      grid-column: 1 / -1;
-    }
-
-    .field-label-row {
-      display: flex;
-      align-items: center;
-      justify-content: space-between;
-      gap: 8px;
-      margin-bottom: 7px;
-    }
-
-    .field-label {
-      color: #293846;
-      font-size: 0.82rem;
-      font-weight: 800;
-    }
-
-    .unit {
-      color: var(--muted);
-      font-size: 0.7rem;
-      font-weight: 700;
-    }
-
-    input,
-    select,
-    textarea {
-      width: 100%;
-      min-height: 44px;
-      border: 1px solid #cbd8e2;
-      border-radius: 11px;
-      outline: none;
-      background: #fff;
-      color: var(--ink);
-      transition: border-color 130ms ease, box-shadow 130ms ease;
-    }
-
-    input,
-    select {
-      padding: 9px 11px;
-    }
-
-    textarea {
-      min-height: 94px;
-      padding: 10px 11px;
-      resize: vertical;
-    }
-
-    input:focus,
-    select:focus,
-    textarea:focus {
-      border-color: var(--teal);
-      box-shadow: 0 0 0 3px rgba(31, 111, 120, 0.12);
-    }
-
-    .choice-group {
-      display: flex;
-      flex-wrap: wrap;
-      gap: 7px;
-      min-height: 44px;
-      padding: 5px;
-      border: 1px solid #cbd8e2;
-      border-radius: 11px;
-      background: #f8fafc;
-    }
-
-    .choice-button {
-      min-height: 32px;
-      flex: 1 1 95px;
-      padding: 6px 10px;
-      border: 1px solid transparent;
-      border-radius: 8px;
-      background: transparent;
-      color: #425463;
-      font-size: 0.78rem;
-      font-weight: 800;
-    }
-
-    .choice-button:hover {
-      background: #eaf1f5;
-    }
-
-    .choice-button.selected {
-      border-color: #a7cbd0;
-      background: #dff0f1;
-      color: #125761;
-    }
-
-    .comment-row {
-      margin-top: 7px;
-    }
-
-    .comment-toggle {
-      padding: 0;
-      border: 0;
-      background: transparent;
-      color: var(--teal);
-      font-size: 0.74rem;
-      font-weight: 800;
-    }
-
-    .comment-input {
-      display: none;
-      margin-top: 7px;
-    }
-
-    .comment-input.visible {
-      display: block;
-    }
-
-    .comment-input input {
-      min-height: 39px;
-      font-size: 0.8rem;
-    }
-
-    .existing-card {
-      margin-top: 16px;
+    .sidebar-card {
+      margin-top: 26px;
+      background: linear-gradient(180deg, #ffffff 0%, #f7f7fa 100%);
       border: 1px solid var(--line);
-      border-radius: 14px;
-      background: #fff;
-    }
-
-    .existing-card summary {
-      cursor: pointer;
-      padding: 13px 15px;
-      color: #3b5162;
-      font-size: 0.82rem;
-      font-weight: 850;
-      user-select: none;
-    }
-
-    .existing-body {
-      padding: 0 15px 15px;
-      border-top: 1px solid #edf2f5;
-    }
-
-    .existing-section {
-      margin-top: 14px;
-    }
-
-    .existing-section h3 {
-      margin: 0 0 8px;
-      color: var(--navy);
-      font-size: 0.78rem;
-    }
-
-    .existing-grid {
-      display: grid;
-      grid-template-columns: repeat(2, minmax(0, 1fr));
-      gap: 8px 14px;
-    }
-
-    .existing-item {
-      min-width: 0;
-      padding: 8px 10px;
-      border-radius: 9px;
-      background: #f8fbfd;
-    }
-
-    .existing-label {
-      color: var(--muted);
-      font-size: 0.67rem;
-      font-weight: 800;
-    }
-
-    .existing-value {
-      margin-top: 2px;
-      overflow-wrap: anywhere;
-      font-size: 0.8rem;
-      font-weight: 700;
-    }
-
-    .empty-patient {
-      padding: 26px;
-      border: 1px solid #b9dfd1;
-      border-radius: var(--radius);
-      background: var(--success-soft);
-      color: #155f46;
-      text-align: center;
+      border-radius: 22px;
+      padding: 18px;
       box-shadow: var(--shadow);
     }
 
-    .empty-icon {
-      width: 56px;
-      height: 56px;
-      margin: 0 auto 12px;
-      display: grid;
-      place-items: center;
-      border-radius: 50%;
-      background: var(--success);
-      color: #fff;
-      font-size: 1.6rem;
-      font-weight: 900;
-    }
-
-    .empty-patient h2 {
-      margin: 0;
-      font-size: 1.15rem;
-    }
-
-    .empty-patient p {
-      margin: 8px auto 0;
-      max-width: 680px;
-      font-size: 0.84rem;
-    }
-
-    .error-panel {
-      display: none;
-      padding: 20px;
-      border: 1px solid #efbbb7;
-      border-radius: var(--radius);
-      background: var(--danger-soft);
-      color: var(--danger);
-      box-shadow: var(--shadow);
-    }
-
-    .error-panel.visible {
+    .sidebar-card strong {
       display: block;
-    }
-
-    .error-panel h2 {
-      margin: 0 0 7px;
+      margin-bottom: 8px;
       font-size: 1rem;
     }
 
-    .error-panel p {
-      margin: 0 0 14px;
-      font-size: 0.83rem;
-      white-space: pre-wrap;
+    .sidebar-card a {
+      text-decoration: none;
+      color: var(--blue);
+      font-weight: 500;
     }
 
-    .sticky-actions {
-      position: fixed;
-      z-index: 40;
-      left: 0;
-      right: 0;
-      bottom: 0;
-      border-top: 1px solid rgba(216, 226, 234, 0.95);
-      background: rgba(255, 255, 255, 0.97);
-      backdrop-filter: blur(14px);
-      box-shadow: 0 -10px 28px rgba(23, 53, 77, 0.08);
+    .main {
+      flex: 1;
+      margin-left: var(--sidebar-width);
+      min-width: 0;
     }
 
-    .actions-inner {
-      width: min(1180px, calc(100% - 32px));
-      min-height: 76px;
+    .topbar {
+      position: sticky;
+      top: 0;
+      z-index: 900;
+      background: rgba(245, 245, 247, 0.82);
+      backdrop-filter: blur(18px);
+      border-bottom: 1px solid rgba(0, 0, 0, 0.05);
+    }
+
+    .topbar-inner {
+      max-width: var(--max-width);
       margin: 0 auto;
+      padding: 14px 28px;
       display: flex;
       align-items: center;
       justify-content: space-between;
-      gap: 14px;
+      gap: 20px;
     }
 
-    .action-info {
-      color: var(--muted);
-      font-size: 0.79rem;
-    }
-
-    .action-buttons {
+    .topbar-left {
       display: flex;
-      gap: 9px;
+      align-items: center;
+      gap: 16px;
+      min-width: 0;
     }
 
-    .button {
-      min-height: 42px;
-      padding: 9px 15px;
-      border-radius: 11px;
-      font-weight: 850;
-    }
-
-    .button:disabled {
-      cursor: not-allowed;
-      opacity: 0.52;
-    }
-
-    .button-secondary {
-      border: 1px solid var(--line-strong);
-      background: #fff;
-      color: #425463;
-    }
-
-    .button-secondary:hover:not(:disabled) {
-      background: #f3f7fa;
-    }
-
-    .button-skip {
-      border: 1px solid #d9c78e;
-      background: #fffdf7;
-      color: #765100;
-    }
-
-    .button-skip:hover:not(:disabled) {
-      background: #fff8e6;
-    }
-
-    .button-primary {
-      border: 1px solid var(--navy);
-      background: linear-gradient(135deg, var(--navy), #18547f);
+    .menu-toggle {
+      display: none;
+      border: 0;
+      background: #000;
       color: #fff;
-      box-shadow: 0 8px 18px rgba(18, 59, 93, 0.18);
+      border-radius: 999px;
+      width: 42px;
+      height: 42px;
+      font-size: 1.1rem;
+      cursor: pointer;
+      box-shadow: 0 1px 4px rgba(0,0,0,0.08);
     }
 
-    .button-primary:hover:not(:disabled) {
-      filter: brightness(1.05);
+    .brand-wrap {
+      display: inline-flex;
+      align-items: center;
+      gap: 12px;
+      text-decoration: none;
+      min-width: 0;
     }
 
-    .loading-overlay {
-      position: fixed;
-      z-index: 100;
-      inset: 0;
-      display: none;
-      place-items: center;
-      padding: 22px;
-      background: rgba(243, 247, 250, 0.72);
-      backdrop-filter: blur(3px);
+    .brand {
+      font-size: 1rem;
+      font-weight: 600;
+      letter-spacing: -0.01em;
+      white-space: nowrap;
     }
 
-    .loading-overlay.visible {
-      display: grid;
-    }
-
-    .loading-card {
-      min-width: 220px;
-      padding: 20px 24px;
-      border: 1px solid var(--line);
-      border-radius: 16px;
-      background: #fff;
-      box-shadow: 0 22px 60px rgba(18, 45, 64, 0.18);
-      color: var(--navy);
-      text-align: center;
-      font-size: 0.86rem;
-      font-weight: 800;
-    }
-
-    .spinner {
-      width: 28px;
-      height: 28px;
-      margin: 0 auto 11px;
-      border: 3px solid #d9e6ed;
-      border-top-color: var(--teal);
-      border-radius: 50%;
-      animation: spin 700ms linear infinite;
-    }
-
-    @keyframes spin {
-      to { transform: rotate(360deg); }
-    }
-
-    .toast {
-      position: fixed;
-      z-index: 150;
-      right: 20px;
-      bottom: 94px;
-      max-width: min(440px, calc(100% - 40px));
-      display: none;
-      padding: 13px 15px;
-      border-radius: 12px;
-      box-shadow: 0 16px 42px rgba(15, 39, 56, 0.20);
-      font-size: 0.84rem;
-      font-weight: 800;
-    }
-
-    .toast.visible {
+    .top-logo {
+      height: 88px;
+      width: auto;
       display: block;
     }
 
-    .toast.success {
-      border: 1px solid #b8e0d1;
-      background: var(--success-soft);
-      color: var(--success);
+    .sidebar-logo {
+      display: block;
+      width: 100%;
+      max-width: 220px;
+      height: auto;
+      margin: 0 auto 14px;
     }
 
-    .toast.error {
-      border: 1px solid #f2b8b5;
-      background: var(--danger-soft);
-      color: var(--danger);
+    .menu {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 18px;
+      justify-content: flex-end;
     }
 
-    @media (max-width: 760px) {
-      .header-inner,
-      .page,
-      .actions-inner {
-        width: min(100% - 22px, 1180px);
+    .menu a {
+      text-decoration: none;
+      color: var(--muted);
+      font-size: 0.94rem;
+      font-weight: 500;
+    }
+
+    .menu a:hover {
+      color: var(--text);
+    }
+
+    .page {
+      max-width: var(--max-width);
+      margin: 0 auto;
+      padding: 34px 28px 46px;
+    }
+
+    .hero {
+      display: grid;
+      grid-template-columns: 1.15fr 0.85fr;
+      align-items: center;
+      gap: 28px;
+      padding: 34px 0 40px;
+    }
+
+    .eyebrow {
+      color: var(--muted);
+      font-weight: 600;
+      font-size: 1rem;
+      letter-spacing: -0.01em;
+      margin-bottom: 8px;
+    }
+
+    .hero h1 {
+      margin: 0;
+      font-size: clamp(2.7rem, 6vw, 5.25rem);
+      line-height: 0.96;
+      letter-spacing: -0.055em;
+      font-weight: 700;
+      max-width: 9ch;
+    }
+
+    .hero-copy p {
+      margin: 18px 0 0;
+      color: var(--muted);
+      font-size: 1.08rem;
+      line-height: 1.65;
+      max-width: 44ch;
+    }
+
+    .hero-links {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 18px;
+      margin-top: 22px;
+    }
+
+    .hero-links a {
+      text-decoration: none;
+      color: var(--blue);
+      font-weight: 500;
+      font-size: 1rem;
+    }
+
+    .hero-links a:hover {
+      color: var(--blue-hover);
+    }
+
+    .glass-card {
+      background: rgba(255,255,255,0.78);
+      border: 1px solid rgba(255,255,255,0.7);
+      border-radius: var(--radius-xl);
+      box-shadow: var(--shadow);
+      padding: 28px;
+      margin-bottom: 22px;
+    }
+
+    .glass-card h2 {
+      margin: 0 0 10px;
+      font-size: clamp(1.8rem, 4vw, 2.5rem);
+      letter-spacing: -0.04em;
+    }
+
+    .glass-card .subtext {
+      margin: 0 0 22px;
+      color: var(--muted);
+      line-height: 1.65;
+      max-width: 54ch;
+    }
+
+    label {
+      font-size: 0.95rem;
+      font-weight: 600;
+      color: var(--text);
+    }
+
+    input,
+    textarea,
+    select {
+      width: 100%;
+      border: 1px solid #d9d9de;
+      background: #fff;
+      border-radius: 16px;
+      padding: 14px 16px;
+      font-size: 1rem;
+      font-family: inherit;
+      color: var(--text);
+      transition: border-color 0.2s ease, box-shadow 0.2s ease, transform 0.2s ease;
+      appearance: none;
+    }
+
+    input:focus,
+    textarea:focus,
+    select:focus {
+      outline: none;
+      border-color: rgba(0, 113, 227, 0.55);
+      box-shadow: 0 0 0 4px rgba(0, 113, 227, 0.12);
+      transform: translateY(-1px);
+    }
+
+    .radio-group {
+      display: grid;
+      grid-template-columns: repeat(4, minmax(0, 1fr));
+      gap: 12px;
+    }
+
+    .radio-card {
+      position: relative;
+      display: block;
+      cursor: pointer;
+    }
+
+    .radio-card input {
+      position: absolute;
+      opacity: 0;
+      pointer-events: none;
+    }
+
+    .radio-card span {
+      display: block;
+      position: relative;
+      border: 1px solid #d9d9de;
+      background: #fff;
+      border-radius: 18px;
+      padding: 28px 16px 18px;
+      min-height: 124px;
+      box-shadow: 0 1px 2px rgba(0,0,0,0.02);
+      transition: border-color 0.2s ease, box-shadow 0.2s ease, transform 0.2s ease, background 0.2s ease;
+      font-weight: 600;
+      line-height: 1.4;
+    }
+
+    .radio-price {
+      position: absolute;
+      top: 12px;
+      right: 14px;
+      font-size: 0.9rem;
+      font-weight: 700;
+      color: #0071e3;
+    }
+
+    .radio-card small {
+      display: block;
+      margin-top: 6px;
+      color: var(--muted);
+      font-size: 0.88rem;
+      font-weight: 500;
+    }
+
+    .radio-card input:checked + span {
+      border-color: rgba(0, 113, 227, 0.6);
+      box-shadow: 0 0 0 4px rgba(0, 113, 227, 0.12);
+      background: #f5f9ff;
+      transform: translateY(-1px);
+    }
+
+    .button,
+    .secondary-button {
+      border: 0;
+      border-radius: 999px;
+      padding: 13px 24px;
+      font-size: 1rem;
+      font-weight: 600;
+      letter-spacing: -0.01em;
+      cursor: pointer;
+      transition: background 0.2s ease, transform 0.2s ease;
+    }
+
+    .button {
+      background: var(--blue);
+      color: #fff;
+    }
+
+    .button:hover {
+      background: var(--blue-hover);
+      transform: translateY(-1px);
+    }
+
+    .secondary-button {
+      background: #f2f2f5;
+      color: var(--text);
+    }
+
+    .secondary-button:hover {
+      background: #e9e9ee;
+      transform: translateY(-1px);
+    }
+
+    .button:disabled {
+      background: #bfc7d1;
+      cursor: not-allowed;
+      transform: none;
+      opacity: 0.85;
+    }
+
+    .service-grid,
+    .info-grid {
+      display: grid;
+      grid-template-columns: repeat(3, minmax(0, 1fr));
+      gap: 18px;
+    }
+
+    .mini-card {
+      background: linear-gradient(180deg, #ffffff 0%, #fafafd 100%);
+      border: 1px solid var(--line);
+      border-radius: 24px;
+      padding: 24px;
+      box-shadow: var(--shadow);
+    }
+
+    .mini-card h3 {
+      margin: 0 0 10px;
+      font-size: 1.35rem;
+      letter-spacing: -0.03em;
+    }
+
+    .mini-card p {
+      margin: 0;
+      color: var(--muted);
+      line-height: 1.6;
+    }
+
+    .overlay {
+      display: none;
+    }
+
+    .terms-box {
+      grid-column: 1 / -1;
+      display: flex;
+      align-items: flex-start;
+      gap: 10px;
+      padding: 14px 16px;
+      background: #fff;
+      border: 1px solid #d9d9de;
+      border-radius: 16px;
+    }
+
+    .customer-fields {
+      display: grid;
+      gap: 12px;
+      margin: 14px 0;
+    }
+
+    .customer-field {
+      display: grid;
+      gap: 7px;
+    }
+
+    .customer-field label {
+      font-size: 0.9rem;
+    }
+
+    .customer-field input {
+      border-radius: 14px;
+    }
+
+    .checkout-help {
+      display: none;
+      margin-top: 10px;
+      color: #b00020;
+      font-size: 0.9rem;
+      line-height: 1.45;
+    }
+
+    .checkout-help.show {
+      display: block;
+    }
+
+    .terms-box input[type="checkbox"] {
+      appearance: none;
+      -webkit-appearance: none;
+      width: 20px;
+      height: 20px;
+      margin-top: 3px;
+      border: 2px solid #0071e3;
+      border-radius: 4px;
+      background: #fff;
+      display: grid;
+      place-content: center;
+      cursor: pointer;
+      flex: 0 0 auto;
+      padding: 0;
+    }
+
+    .terms-box input[type="checkbox"]::after {
+      content: "";
+      width: 5px;
+      height: 10px;
+      border: solid #fff;
+      border-width: 0 2px 2px 0;
+      transform: rotate(45deg) scale(0);
+      transition: transform 0.15s ease;
+      margin-top: -1px;
+    }
+
+    .terms-box input[type="checkbox"]:checked {
+      background: #0071e3;
+      border-color: #0071e3;
+    }
+
+    .terms-box input[type="checkbox"]:checked::after {
+      transform: rotate(45deg) scale(1);
+    }
+
+    .terms-text {
+      font-size: 0.95rem;
+      line-height: 1.5;
+      color: #6e6e73;
+    }
+
+    .terms-link {
+      color: #0071e3;
+      font-weight: 600;
+      text-decoration: underline;
+      cursor: pointer;
+      background: none;
+      border: none;
+      padding: 0;
+      font: inherit;
+    }
+
+    .terms-modal {
+      display: none;
+      position: fixed;
+      inset: 0;
+      z-index: 2000;
+    }
+
+    .terms-modal.show {
+      display: block;
+    }
+
+    .terms-overlay {
+      position: absolute;
+      inset: 0;
+      background: rgba(0, 0, 0, 0.45);
+    }
+
+    .terms-content {
+      position: relative;
+      width: min(700px, calc(100% - 30px));
+      max-height: 85vh;
+      overflow-y: auto;
+      margin: 5vh auto 0;
+      background: #fff;
+      border-radius: 24px;
+      padding: 24px;
+      box-shadow: 0 20px 60px rgba(0,0,0,0.2);
+    }
+
+    .terms-content h3 {
+      margin-top: 0;
+      margin-bottom: 12px;
+    }
+
+    .terms-content p,
+    .terms-content li {
+      color: #6e6e73;
+      line-height: 1.6;
+    }
+
+    .close-terms {
+      float: right;
+      border: none;
+      background: #f2f2f5;
+      border-radius: 999px;
+      width: 36px;
+      height: 36px;
+      cursor: pointer;
+      font-size: 1rem;
+    }
+
+    .selection-card {
+      scroll-margin-top: 130px;
+    }
+
+    .selection-header {
+      display: flex;
+      justify-content: space-between;
+      align-items: flex-start;
+      gap: 18px;
+      margin-bottom: 18px;
+    }
+
+    .selection-header h2 {
+      margin-bottom: 8px;
+    }
+
+    .selection-header .subtext {
+      margin-bottom: 0;
+    }
+
+    .category-clear {
+      white-space: nowrap;
+      border: 0;
+      border-radius: 999px;
+      padding: 11px 18px;
+      font-size: 0.94rem;
+      font-weight: 600;
+      cursor: pointer;
+      background: #f2f2f5;
+      color: var(--text);
+      transition: background 0.2s ease, transform 0.2s ease;
+    }
+
+    .category-clear:hover {
+      background: #e9e9ee;
+      transform: translateY(-1px);
+    }
+
+    .service-slider {
+      overflow-x: auto;
+      padding: 4px 4px 10px;
+      scroll-snap-type: x mandatory;
+      scrollbar-width: thin;
+    }
+
+    .service-slider .radio-card {
+      scroll-snap-align: start;
+    }
+
+    .service-title {
+      display: block;
+      padding-right: 78px;
+    }
+
+    .summary-layout {
+      display: grid;
+      grid-template-columns: minmax(0, 1fr) 380px;
+      gap: 18px;
+      align-items: start;
+    }
+
+    .summary-list {
+      display: grid;
+      gap: 12px;
+    }
+
+    .summary-empty {
+      color: var(--muted);
+      background: #fff;
+      border: 1px dashed #d9d9de;
+      border-radius: 18px;
+      padding: 18px;
+      line-height: 1.6;
+    }
+
+    .summary-item {
+      background: #fff;
+      border: 1px solid #d9d9de;
+      border-radius: 18px;
+      padding: 16px;
+      display: flex;
+      justify-content: space-between;
+      gap: 16px;
+    }
+
+    .summary-item strong {
+      display: block;
+      font-size: 1rem;
+      letter-spacing: -0.01em;
+    }
+
+    .summary-item small {
+      display: block;
+      margin-top: 4px;
+      color: var(--muted);
+      line-height: 1.45;
+    }
+
+    .summary-price {
+      color: var(--blue);
+      font-weight: 700;
+      white-space: nowrap;
+    }
+
+    .total-card {
+      position: sticky;
+      top: 136px;
+    }
+
+    .total-label {
+      color: var(--muted);
+      font-size: 0.95rem;
+      font-weight: 600;
+      margin-bottom: 4px;
+    }
+
+    .total-price {
+      font-size: clamp(2.5rem, 5vw, 4rem);
+      letter-spacing: -0.055em;
+      font-weight: 700;
+      line-height: 1;
+      margin-bottom: 18px;
+    }
+
+    .checkout-button {
+      width: 100%;
+      margin-top: 14px;
+    }
+
+    .footer-space {
+      height: 24px;
+    }
+
+    @media (max-width: 1180px) {
+      .service-grid,
+      .info-grid,
+      .radio-group {
+        grid-template-columns: 1fr 1fr;
       }
 
-      .status-pill {
-        display: none;
-      }
-
-      .identity-grid,
-      .field-grid,
-      .existing-grid {
+      .summary-layout {
         grid-template-columns: 1fr;
       }
 
-      .field.wide {
-        grid-column: auto;
+      .total-card {
+        position: static;
+      }
+    }
+
+    @media (max-width: 920px) {
+      .sidebar {
+        transform: translateX(-100%);
       }
 
-      .action-info {
+      .sidebar.open {
+        transform: translateX(0);
+      }
+
+      .main {
+        margin-left: 0;
+      }
+
+      .menu-toggle {
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+      }
+
+      .menu {
         display: none;
       }
 
-      .action-buttons {
+      .top-logo {
+        height: 70px;
+      }
+
+      .overlay.show {
+        display: block;
+        position: fixed;
+        inset: 0;
+        background: rgba(29, 29, 31, 0.26);
+        z-index: 950;
+      }
+
+      .hero {
+        grid-template-columns: 1fr;
+        padding-top: 18px;
+      }
+
+      .hero h1 {
+        max-width: none;
+      }
+    }
+
+    @media (max-width: 720px) {
+      .page,
+      .topbar-inner {
+        padding-left: 18px;
+        padding-right: 18px;
+      }
+
+      .service-grid,
+      .info-grid,
+      .radio-group {
+        grid-template-columns: 1fr;
+      }
+
+      .glass-card,
+      .mini-card {
+        border-radius: 24px;
+      }
+
+      .selection-header {
+        flex-direction: column;
+      }
+
+      .category-clear {
         width: 100%;
       }
 
-      .action-buttons .button {
-        flex: 1;
-        padding-left: 9px;
-        padding-right: 9px;
-        font-size: 0.77rem;
+      .summary-item {
+        flex-direction: column;
       }
 
-      .page {
-        margin-top: 14px;
+      .button.checkout-button {
+        width: 100%;
       }
     }
+
+    .save-status {
+      display: none;
+      margin-top: 12px;
+      padding: 12px 14px;
+      border-radius: 14px;
+      background: #f2f7ff;
+      border: 1px solid #cfe2ff;
+      color: #245b9e;
+      font-size: 0.92rem;
+      line-height: 1.45;
+    }
+
+    .save-status.show {
+      display: block;
+    }
+
+    .save-status.error {
+      background: #fff3f3;
+      border-color: #ffc9c9;
+      color: #a61b1b;
+    }
+
+    .save-status.success {
+      background: #f0faf3;
+      border-color: #bfe6c9;
+      color: #216e39;
+    }
+
+    .contract-meta-note {
+      margin-top: 10px;
+      color: var(--muted);
+      font-size: 0.82rem;
+      line-height: 1.45;
+    }
+
+    .terms-wrapper {
+      clear: both;
+    }
+
+    .terms-wrapper ol {
+      padding-left: 22px;
+    }
+
+    .terms-wrapper li {
+      margin-bottom: 18px;
+    }
+
   </style>
 </head>
 
 <body>
-  <header class="app-header">
-    <div class="header-inner">
-      <div class="title-row">
-        <div class="brand">
-          <div class="brand-mark">MUE</div>
-          <div>
-            <h1>Apixaban Post-Orthopedic Surgery</h1>
-            <p class="subtitle">Missing-data patient review from Sheet1</p>
-          </div>
-        </div>
-
-        <div class="status-pill" id="appStatus">
-          <span class="status-dot"></span>
-          <span id="statusText">Connecting to Sheet1…</span>
-        </div>
+  <div class="layout">
+    <aside class="sidebar" id="sidebar">
+      <div class="sidebar-group">
+        <div class="sidebar-label">Explore</div>
+        <nav class="sidebar-nav">
+          <a href="#resources">How It Works</a>
+          <a href="/contact/">Contact Us</a>
+          <a href="/subscriptions/">Subscriptions</a>
+          <a href="/TrackYourOrder/">Track Your Order</a>
+          <a href="/memberorder/">Member Order</a>
+        </nav>
       </div>
 
-      <div class="progress-row">
-        <div class="progress-track" aria-hidden="true">
-          <div class="progress-bar" id="progressBar"></div>
+      <div class="sidebar-group">
+        <div class="sidebar-label">Booking</div>
+        <nav class="sidebar-nav">
+          <a href="#serviceSelections">Our Offerings</a>
+        </nav>
+      </div>
+
+      <div class="sidebar-card">
+        <strong>Need help ordering?</strong>
+        <a href="#booking">Order Now →</a>
+      </div>
+    </aside>
+
+    <div class="overlay" id="overlay"></div>
+
+    <main class="main">
+      <header class="topbar">
+        <div class="topbar-inner">
+          <div class="topbar-left">
+            <button class="menu-toggle" id="menuToggle" aria-label="Open sidebar">☰</button>
+          </div>
+
+          <nav class="menu" aria-label="Top navigation">
+            <a href="#serviceSelections">Packages</a>
+            <a href="/contact/">Contact Us</a>
+            <a href="/subscriptions/">Subscriptions</a>
+            <a href="/TrackYourOrder/">Track Your Order</a>
+            <a href="/memberorder/">Member Order</a>
+            <a href="#booking">Book</a>
+          </nav>
         </div>
-        <div class="progress-text" id="progressText">Loading…</div>
-      </div>
-    </div>
-  </header>
-
-  <main class="page">
-    <div class="notice warning" id="warningNotice"></div>
-    <div class="notice error" id="duplicateNotice"></div>
-
-    <div id="patientContainer"></div>
-
-    <div class="error-panel" id="errorPanel">
-      <h2>Unable to load the patient workflow</h2>
-      <p id="errorMessage"></p>
-      <button class="button button-primary" type="button" id="retryButton">Retry</button>
-    </div>
-  </main>
-
-  <footer class="sticky-actions" id="actionBar">
-    <div class="actions-inner">
-      <div class="action-info" id="actionInfo">Only blank Sheet1 fields will be saved.</div>
-
-      <div class="action-buttons">
-        <button class="button button-secondary" type="button" id="previousButton">
-          Previous Patient
-        </button>
-        <button class="button button-skip" type="button" id="skipButton">
-          Skip Patient
-        </button>
-        <button class="button button-primary" type="button" id="saveNextButton">
-          Save &amp; Next
-        </button>
-      </div>
-    </div>
-  </footer>
-
-  <div class="loading-overlay" id="loadingOverlay" aria-live="polite" aria-busy="true">
-    <div class="loading-card">
-      <div class="spinner"></div>
-      <div id="loadingText">Loading patient data…</div>
-    </div>
-  </div>
-
-  <div class="toast" id="toast" role="status" aria-live="polite"></div>
-
-  <script>
-    'use strict';
-
-    const SERVER_TIMEOUT_MS = 45000;
-
-    let bootstrapData = null;
-    let reviewQueue = [];
-    let currentIndex = -1;
-    let currentPatient = null;
-    let isBusy = false;
-    let toastTimer = null;
-    let passNumber = 1;
-
-    const drafts = Object.create(null);
-
-    document.addEventListener('DOMContentLoaded', initializeApp);
-
-    function initializeApp() {
-      bindEvents();
-
-      if (!window.google || !google.script || !google.script.run) {
-        showFatalError(
-          'This page must be opened through the deployed Google Apps Script web app.'
-        );
-        return;
-      }
-
-      loadBootstrap();
-    }
-
-    function bindEvents() {
-      document.getElementById('previousButton').addEventListener('click', goPrevious);
-      document.getElementById('skipButton').addEventListener('click', skipPatient);
-      document.getElementById('saveNextButton').addEventListener('click', saveAndNext);
-      document.getElementById('retryButton').addEventListener('click', loadBootstrap);
-
-      document.getElementById('patientContainer').addEventListener('click', event => {
-        const copyFinButton = event.target.closest('[data-copy-fin]');
-        if (copyFinButton) {
-          copyCurrentFin(copyFinButton);
-          return;
-        }
-
-        const choiceButton = event.target.closest('[data-choice-field]');
-        if (choiceButton) {
-          selectChoice(choiceButton);
-          return;
-        }
-
-        const commentToggle = event.target.closest('[data-comment-toggle]');
-        if (commentToggle) {
-          toggleComment(commentToggle.dataset.commentToggle);
-        }
-      });
-
-      document.getElementById('patientContainer').addEventListener('input', saveCurrentDraft);
-      document.getElementById('patientContainer').addEventListener('change', saveCurrentDraft);
-    }
-
-    async function loadBootstrap() {
-      if (isBusy) return;
-
-      clearFatalError();
-      setBusy(true, 'Loading patients from Sheet1…');
-
-      try {
-        const data = await serverGetReviewBootstrap();
-        bootstrapData = data;
-        reviewQueue = Array.isArray(data.queue) ? data.queue.slice() : [];
-        currentIndex = -1;
-        currentPatient = null;
-
-        renderWarnings(data);
-        updateStatus(data);
-
-        if (!reviewQueue.length) {
-          showEndState(data);
-          return;
-        }
-
-        if (
-          data.firstPatient &&
-          normalizeFin(data.firstPatient.fin) === normalizeFin(reviewQueue[0].fin)
-        ) {
-          currentIndex = 0;
-          currentPatient = data.firstPatient;
-          renderPatient(currentPatient);
-          return;
-        }
-
-        await loadPatientAtIndex(0, false);
-      } catch (error) {
-        showFatalError(getErrorMessage(error));
-      } finally {
-        setBusy(false);
-      }
-    }
-
-    async function loadPatientAtIndex(index, allowCompleted) {
-      if (!reviewQueue.length) {
-        await refreshAfterPass();
-        return;
-      }
-
-      if (index < 0) {
-        index = 0;
-      }
-
-      if (index >= reviewQueue.length) {
-        await refreshAfterPass();
-        return;
-      }
-
-      currentIndex = index;
-      updateProgress();
-
-      const queuePatient = reviewQueue[currentIndex];
-
-      setBusy(true, 'Loading patient…');
-
-      try {
-        const patient = await serverGetPatientReviewData(queuePatient.fin);
-        currentPatient = patient;
-
-        if (patient.completed && !allowCompleted) {
-          setBusy(false);
-          await loadPatientAtIndex(currentIndex + 1, false);
-          return;
-        }
-
-        renderPatient(patient);
-      } catch (error) {
-        showToast(getErrorMessage(error), 'error');
-        showPatientLoadError(queuePatient.fin, getErrorMessage(error));
-      } finally {
-        setBusy(false);
-      }
-    }
-
-    async function saveAndNext() {
-      if (isBusy || !currentPatient) return;
-
-      saveCurrentDraft();
-
-      const values = collectValues();
-      const payload = {
-        fin: currentPatient.fin,
-        values: values
-      };
-
-      setBusy(true, 'Saving to Sheet1…');
-
-      try {
-        const result = await serverSavePatientMissingData(payload);
-
-        delete drafts[finKey(currentPatient.fin)];
-
-        if (result.patient) {
-          currentPatient = result.patient;
-          if (reviewQueue[currentIndex]) {
-            reviewQueue[currentIndex].missingCount = result.patient.missingCount;
-          }
-        }
-
-        const updatedCount = Number(result.updatedCount || 0);
-        showToast(
-          updatedCount
-            ? `${updatedCount} field${updatedCount === 1 ? '' : 's'} saved.`
-            : 'No new values were entered. Moving to the next patient.',
-          'success'
-        );
-
-        setBusy(false);
-        await loadPatientAtIndex(currentIndex + 1, false);
-      } catch (error) {
-        showToast(getErrorMessage(error), 'error');
-      } finally {
-        setBusy(false);
-      }
-    }
-
-    async function skipPatient() {
-      if (isBusy || !currentPatient) return;
-
-      saveCurrentDraft();
-      showToast('Patient skipped. No Sheet1 data were changed.', 'success');
-      await loadPatientAtIndex(currentIndex + 1, false);
-    }
-
-    async function goPrevious() {
-      if (isBusy || !currentPatient || currentIndex <= 0) return;
-
-      saveCurrentDraft();
-      await loadPatientAtIndex(currentIndex - 1, true);
-    }
-
-    async function refreshAfterPass() {
-      setBusy(true, 'Checking for remaining missing data…');
-
-      try {
-        const data = await serverGetReviewBootstrap();
-
-        bootstrapData = data;
-        renderWarnings(data);
-        updateStatus(data);
-
-        const remaining = Array.isArray(data.queue) ? data.queue : [];
-
-        if (!remaining.length) {
-          reviewQueue = [];
-          currentIndex = -1;
-          currentPatient = null;
-          showEndState(data);
-          return;
-        }
-
-        passNumber++;
-        reviewQueue = remaining.slice();
-        currentIndex = -1;
-        currentPatient = null;
-
-        showToast(
-          `${remaining.length} patient${remaining.length === 1 ? '' : 's'} still need review. Starting the next pass.`,
-          'success'
-        );
-
-        if (
-          data.firstPatient &&
-          normalizeFin(data.firstPatient.fin) === normalizeFin(reviewQueue[0].fin)
-        ) {
-          currentIndex = 0;
-          currentPatient = data.firstPatient;
-          renderPatient(currentPatient);
-        } else {
-          setBusy(false);
-          await loadPatientAtIndex(0, false);
-        }
-      } catch (error) {
-        showFatalError(getErrorMessage(error));
-      } finally {
-        setBusy(false);
-      }
-    }
-
-    function renderPatient(patient) {
-      clearFatalError();
-
-      const container = document.getElementById('patientContainer');
-      const missingFields = Array.isArray(patient.missingFields) ? patient.missingFields : [];
-      const grouped = groupFieldsBySection(missingFields);
-
-      const sectionsHtml = grouped.length
-        ? grouped.map(section => `
-            <section class="section-card">
-              <div class="section-header">
-                <h2 class="section-title">${escapeHtml(section.title)}</h2>
-                <p class="section-subtitle">${section.fields.length} missing field${section.fields.length === 1 ? '' : 's'} in this section</p>
-              </div>
-              <div class="field-grid">
-                ${section.fields.map(renderField).join('')}
-              </div>
-            </section>
-          `).join('')
-        : `
-          <div class="empty-patient">
-            <div class="empty-icon">✓</div>
-            <h2>This patient currently has no missing review fields.</h2>
-            <p>You can use Previous Patient to review this record or continue to the next patient.</p>
-          </div>
-        `;
-
-      container.innerHTML = `
-        <section class="patient-card">
-          <div class="patient-card-header">
-            <div class="patient-overline">Current patient</div>
-            <h2 class="patient-name">${escapeHtml(patient.patientName || 'Not available')}</h2>
-          </div>
-
-          <div class="identity-grid">
-            <div class="identity-item">
-              <div class="identity-label">Patient Name</div>
-              <div class="identity-value">${escapeHtml(patient.patientName || 'Not available')}</div>
-            </div>
-
-            <div class="identity-item">
-              <div class="identity-label">Date of Birth</div>
-              <div class="identity-value">${escapeHtml(patient.dob || 'Not available')}</div>
-            </div>
-
-            <div class="identity-item">
-              <div class="identity-label">FIN</div>
-              <div class="fin-value-row">
-                <div class="identity-value" id="patientFinValue">${escapeHtml(patient.fin || '')}</div>
-                <button
-                  type="button"
-                  class="copy-fin-button"
-                  data-copy-fin
-                  aria-label="Copy FIN ${escapeHtml(patient.fin || '')}"
-                  title="Copy FIN to clipboard"
-                >
-                  <span aria-hidden="true">📋</span>
-                  <span data-copy-fin-label>Copy FIN</span>
-                </button>
-              </div>
-            </div>
-          </div>
-
-          <div class="missing-summary">
-            <span>Only blank fields from this Sheet1 row are shown below.</span>
-            <span class="missing-badge">${patient.missingCount || 0} missing</span>
+      </header>
+
+      <div class="page">
+        <section class="hero" id="home">
+          <div class="hero-copy">
+            <h1>Where quality meets affordability</h1>
+            <p>
+              Sigma Wash delivers a delicate hand-wash experience to your doorstep and on your schedule.
+            </p>
           </div>
         </section>
 
-        <form id="missingDataForm" novalidate>
-          ${sectionsHtml}
-        </form>
+        <section class="glass-card" id="howItWorks">
+          <h2>How it works</h2>
+          <p class="subtext">Use the plan builder below to find the perfect subscription for you.</p>
 
-        ${renderExistingData(patient.existingFields || [])}
-      `;
+          <div class="service-grid">
+            <div class="mini-card">
+              <h3>Shareable</h3>
+              <p>
+                You can use our services on any car in your household.
+                <span>Washes and cleanings reload each month.</span>
+              </p>
+            </div>
 
-      restoreDraftForCurrentPatient();
-      applyDefaultCollectionDate();
-      updateProgress();
-      updateButtons();
+            <div class="mini-card">
+              <h3>Billed month to month</h3>
+              <p>
+                Your first month is prorated.
+                <span>Cancel anytime.</span>
+              </p>
+            </div>
 
-      window.scrollTo({ top: 0, behavior: 'smooth' });
-    }
+            <div class="mini-card">
+              <h3>Add-Ons included</h3>
+              <p>
+                Just let us know if you would like your cargo area cleaned.
+                <span>No extra charge.</span>
+              </p>
+            </div>
 
-    function renderField(field) {
-      const wide = field.type === 'textarea' ? 'wide' : '';
-      const unit = field.suffix
-        ? `<span class="unit">${escapeHtml(field.suffix)}</span>`
-        : '';
-
-      return `
-        <div class="field ${wide}" data-field-wrapper="${escapeHtml(field.id)}">
-          <div class="field-label-row">
-            <label class="field-label" for="${escapeHtml(field.id)}">${escapeHtml(field.label)}</label>
-            ${unit}
+            <div class="mini-card">
+              <h3>Perks</h3>
+              <p>
+                Members receive 10% off all extra services.
+                <span>
+                  You get insider pricing as a member. If you run out of washes you get
+                  20% off extra washes. Use one for yourself or buy your friend a wash.
+                </span>
+              </p>
+            </div>
           </div>
+        </section>
 
-          ${renderControl(field)}
+        <section class="glass-card" id="resources">
+          <h2>Choose Your Services</h2>
+          <p class="subtext">
+            Select one option from each category you want. You can choose a single
+            service or create a predefined multi-service checkout.
+          </p>
+
+          <div class="info-grid">
+            <div class="mini-card">
+              <h3>1. Select</h3>
+              <p>Pick one service plan from any section below.</p>
+            </div>
+
+            <div class="mini-card">
+              <h3>2. Review</h3>
+              <p>Your selected services and total price appear in the summary.</p>
+            </div>
+
+            <div class="mini-card">
+              <h3>3. Checkout</h3>
+              <p>The page finds the right Square link for your service or predefined combination.</p>
+            </div>
+          </div>
+        </section>
+
+        <div id="serviceSelections">
+          <div id="serviceSections"></div>
         </div>
-      `;
+
+        <section class="glass-card" id="booking">
+          <h2>Price Summary</h2>
+          <p class="subtext">
+            Review your selected services, agree to the Terms & Conditions, then continue to checkout.
+          </p>
+
+          <div class="summary-layout">
+            <div>
+              <div class="summary-list" id="selectedServicesList">
+                <div class="summary-empty">No services selected yet.</div>
+              </div>
+            </div>
+
+            <div class="mini-card total-card" id="termsSection">
+              <div class="total-label">Total Price</div>
+              <div class="total-price" id="totalPrice">$0.00</div>
+
+              <div class="customer-fields" aria-label="Customer contact information">
+                <div class="customer-field">
+                  <label for="customerName">Full name</label>
+                  <input
+                    type="text"
+                    id="customerName"
+                    name="customerName"
+                    autocomplete="name"
+                    placeholder="Enter your full name"
+                    required
+                  />
+                </div>
+
+                <div class="customer-field">
+                  <label for="customerPhone">Phone number</label>
+                  <input
+                    type="tel"
+                    id="customerPhone"
+                    name="phoneNumber"
+                    autocomplete="tel"
+                    inputmode="tel"
+                    placeholder="Enter your phone number"
+                    required
+                  />
+                </div>
+              </div>
+
+              <div class="terms-box">
+                <input type="checkbox" id="agreeTerms" />
+                <div class="terms-text">
+                  I agree to the
+                  <button type="button" class="terms-link" id="openTerms">
+                    Terms & Conditions / Service Waiver
+                  </button>
+                </div>
+              </div>
+
+              <div class="contract-meta-note">
+                Your typed name and checked agreement box will be recorded as part of the electronic contract record.
+              </div>
+
+              <div class="checkout-help" id="checkoutHelp">
+                Please select a service, add your name and phone number, and agree to the terms before checkout.
+              </div>
+
+              <div class="save-status" id="saveStatus" aria-live="polite"></div>
+
+              <button type="button" class="button checkout-button" id="checkoutButton" disabled>
+                Continue to Checkout
+              </button>
+            </div>
+          </div>
+        </section>
+
+        <div class="footer-space"></div>
+      </div>
+    </main>
+  </div>
+
+
+
+  <!--
+    DIRECT GOOGLE APPS SCRIPT CONTRACT SUBMISSION
+    --------------------------------------------------------------
+    This hidden form posts directly to the Google Apps Script Web App.
+    No intermediary server is used.
+  -->
+  <form
+    id="contractSaveForm"
+    method="post"
+    target="contractSaveFrame"
+    style="display:none;"
+  >
+    <input type="hidden" id="formRequestId" name="requestId" />
+    <input type="hidden" id="formContractId" name="contractId" />
+    <input type="hidden" id="formCustomerName" name="customerName" />
+    <input type="hidden" id="formPhoneNumber" name="phoneNumber" />
+    <input type="hidden" id="formSelectedServiceIds" name="selectedServiceIds" />
+    <input type="hidden" id="formAgreeTerms" name="agreeTerms" />
+    <input type="hidden" id="formElectronicSignature" name="electronicSignature" />
+    <input type="hidden" id="formAcceptedAtBrowser" name="acceptedAtBrowser" />
+    <input type="hidden" id="formAcceptedAtLocal" name="acceptedAtLocal" />
+    <input type="hidden" id="formPageUrl" name="pageUrl" />
+    <input type="hidden" id="formUserAgent" name="userAgent" />
+    <input type="text" id="formWebsite" name="website" tabindex="-1" autocomplete="off" />
+    <textarea id="formContractText" name="contractText"></textarea>
+  </form>
+
+  <iframe
+    id="contractSaveFrame"
+    name="contractSaveFrame"
+    title="Contract save response"
+    style="display:none;"
+  ></iframe>
+
+  <div class="terms-modal" id="termsModal" aria-hidden="true">
+    <div class="terms-overlay" id="termsOverlay"></div>
+
+    <div class="terms-content">
+      <button type="button" class="close-terms" id="closeTerms" aria-label="Close terms">✕</button>
+
+      <div class="terms-wrapper" id="contractDocument">
+<h3>Subscription Service Agreement</h3>
+<p>
+      By checking the box below, you (“Customer”) confirm that you have read,
+      understood, and agree to this Subscription Service Agreement with
+      Quantitative Midwest doing business as Sigma Wash, a Kansas limited
+      liability company (the “Company”).
+    </p>
+<p>
+      You understand and agree that checking the box is your electronic signature
+      and has the same legal effect as signing this Agreement by hand, to the
+      fullest extent permitted by law.
+    </p>
+<ol>
+<li>
+<strong>Parties and Agreement:</strong>
+        This Subscription Service Agreement (the “Agreement”) is entered into by
+        and between Quantitative Midwest doing business as Sigma Wash, a Kansas
+        limited liability company (the “Company”), and the customer
+        (“Customer”). This Agreement becomes effective on the date Customer
+        checks the box, electronically signs, or otherwise accepts this
+        Agreement.
+      </li>
+<li>
+<strong>Subscription Enrollment and Automatic Renewal:</strong>
+        Customer agrees to enroll in the subscription service identified in the
+        Subscription Summary. The subscription automatically renews according to
+        the Billing Frequency unless canceled under this Agreement.
+        <br/><br/>
+        Customer authorizes Company and/or its payment processor to charge
+        Customer’s selected payment method on a recurring basis for all
+        subscription charges, fees, taxes, and other amounts due under this
+        Agreement.
+      </li>
+<li>
+<strong>Service Scope; Company Discretion:</strong>
+        The services provided under the subscription are limited to the services,
+        scope, frequency, availability, location, and conditions determined by
+        Company. Company may modify, limit, substitute, discontinue, or refuse
+        any service to the fullest extent permitted by law.
+        <br/><br/>
+        Services are not guaranteed to be available at all times and may depend
+        on scheduling, staffing, location, weather, equipment, customer demand,
+        safety, business operations, third-party providers, or other conditions.
+      </li>
+<li>
+<strong>Expiration of Unused Services:</strong>
+        Any unused services, credits, sessions, visits, benefits, appointments,
+        or service rights expire at the end of each monthly billing period and
+        do not roll over unless Company expressly agrees in writing.
+        <br/><br/>
+        For purposes of this Agreement, a monthly billing period means the
+        recurring subscription period beginning on the charge date and ending
+        immediately before the next recurring billing date, unless Company states
+        a different billing cycle in writing.
+      </li>
+<li>
+<strong>Price Changes and Plan Changes:</strong>
+        Company may increase, decrease, modify, or otherwise change the
+        subscription price, billing frequency, included services, or plan terms
+        at any time, subject to any notice required by applicable law.
+        <br/><br/>
+        If Company gives notice of a material price change, Customer’s continued
+        use of the service after the updated price becomes effective constitutes
+        acceptance of the updated price. Customer’s sole remedy if Customer does
+        not accept a price change is to cancel the subscription before the
+        updated price is charged.
+      </li>
+<li>
+<strong>Cancellation by Customer:</strong>
+        Customer may cancel the subscription using the Cancellation Method listed
+        in the Subscription Summary. A cancellation request must include enough
+        information for Company to identify the subscription account.
+        <br/><br/>
+        Unless Company states otherwise in writing, cancellation becomes
+        effective at the end of the then-current paid billing period.
+        Cancellation does not automatically entitle Customer to a refund for
+        amounts already paid.
+      </li>
+<li>
+<strong>No Refunds; Failed Payments; Chargebacks:</strong>
+        Payments are non-refundable except where required by applicable law or
+        expressly approved in writing by Company.
+        <br/><br/>
+        Company may suspend, limit, or cancel services if payment fails, is
+        disputed, is reversed, is charged back, or is not received. Customer
+        agrees to contact Company first regarding any billing concern, duplicate
+        charge, cancellation issue, or service dispute. Customer remains
+        responsible for all valid charges and amounts owed under this Agreement.
+      </li>
+<li>
+<strong>Personal Use; No Resale; Sharing Responsibility:</strong>
+        The subscription is personal to the individual Customer who accepts this
+        Agreement. Customer may not transfer, assign, sell, sublicense, resell,
+        repackage, broker, market, or commercially exploit any services provided
+        under the subscription.
+        <br/><br/>
+        The service is intended only for the Customer accepting this Agreement.
+        If Customer shares, gifts, donates, transfers, permits access to, or
+        allows another person to use any portion of the service, Customer assumes
+        full responsibility and liability to the fullest extent permitted by law
+        for that person’s use, including payment obligations, conduct, damages,
+        misuse, claims, losses, injuries, disputes, and consequences arising
+        from that use.
+      </li>
+<li>
+<strong>Customer Responsibilities:</strong>
+        Customer agrees to provide accurate information, keep payment and contact
+        information current, comply with Company rules and policies, use the
+        service appropriately, pay all amounts due, cooperate with scheduling and
+        access requirements, and avoid misuse, unauthorized sharing, or
+        unauthorized resale of the service.
+        <br/><br/>
+        Customer is responsible for the conduct of any person Customer allows to
+        access or receive the service.
+      </li>
+<li>
+<strong>Company Right to Suspend, Refuse, or Terminate Service:</strong>
+        Company may cancel, suspend, refuse, limit, or terminate Customer’s
+        subscription or any services at any time, for any reason, including
+        nonpayment, safety concerns, misuse, inappropriate conduct, operational
+        limitations, scheduling limitations, violation of this Agreement, or any
+        other business reason, to the fullest extent permitted by law.
+        <br/><br/>
+        If Company terminates the subscription without cause before the end of a
+        paid billing period, Company may provide a prorated refund, credit,
+        substitute service, or no refund, except where otherwise required by
+        applicable law.
+      </li>
+<li>
+<strong>Prior Terms, Service Rules, and Policies:</strong>
+        This Agreement does not replace, negate, waive, override, amend, or alter
+        any prior Terms of Service, website terms, service policies, waivers,
+        disclaimers, rules, or other agreements that Customer has previously
+        accepted or may accept when receiving the service. All such terms remain
+        fully valid and enforceable to the extent permitted by law.
+        <br/><br/>
+        If there is a direct conflict between this Agreement and another written
+        Company policy, Company may determine which provision controls unless
+        applicable law requires otherwise.
+      </li>
+<li>
+<strong>Communications and Notices:</strong>
+        Customer agrees that Company may contact Customer by phone, email, text
+        message, or other reasonable method regarding the subscription,
+        appointments, scheduling, billing, account updates, cancellation, and
+        service-related matters. Customer is responsible for maintaining current
+        contact information.
+        <br/><br/>
+        Notices sent to the contact information provided by Customer will be
+        considered received by Customer unless prohibited by applicable law.
+      </li>
+<li>
+<strong>Disclaimer; Limitation of Liability:</strong>
+        To the fullest extent permitted by law, Company disclaims all warranties
+        not expressly stated in this Agreement, including implied warranties of
+        merchantability, fitness for a particular purpose, and uninterrupted
+        availability.
+        <br/><br/>
+        To the fullest extent permitted by law, Company’s total liability arising
+        out of or relating to this Agreement or the services will not exceed the
+        amount Customer paid to Company for the subscription during the one-month
+        period immediately preceding the event giving rise to the claim. Company
+        will not be liable for indirect, incidental, consequential, special,
+        punitive, or lost-profit damages.
+      </li>
+<li>
+<strong>Indemnification:</strong>
+        Customer agrees to defend, indemnify, and hold harmless Company, its
+        owners, employees, contractors, agents, representatives, successors, and
+        assigns from any claims, losses, damages, liabilities, costs, and
+        expenses, including reasonable attorney fees, arising out of or related
+        to Customer’s use or misuse of the services, violation of this Agreement,
+        unauthorized sharing, gifting, transfer, resale, or the conduct of any
+        person Customer allows to access or receive the service, to the fullest
+        extent permitted by law.
+      </li>
+<li>
+<strong>Reviews and Public Statements:</strong>
+        Nothing in this Agreement prohibits Customer from making an honest review
+        or truthful statement about Customer’s experience as permitted by
+        applicable law. Customer may not make statements that are knowingly
+        false, misleading, defamatory, harassing, or that improperly disclose
+        private, confidential, or legally protected information.
+      </li>
+<li>
+<strong>Electronic Signature; Copy of Agreement:</strong>
+        Customer agrees that this Agreement may be presented, reviewed, accepted,
+        signed, and stored electronically. Customer agrees that Customer’s
+        electronic signature, typed name, touchscreen signature, checkbox
+        acceptance, or other electronic indication of agreement has the same
+        effect as a handwritten signature to the fullest extent permitted by law.
+        <br/><br/>
+        Customer acknowledges that Customer had the opportunity to read this
+        Agreement before accepting it and may request a paper or electronic copy
+        of this Agreement.
+      </li>
+<li>
+<strong>Governing Law; Venue; General Terms:</strong>
+        This Agreement is governed by the laws of the State of Kansas, without
+        regard to conflict-of-law rules. Any dispute arising from or relating to
+        this Agreement shall be brought in the state or federal courts located in
+        Kansas, unless another venue is required by applicable law.
+        <br/><br/>
+        If any provision of this Agreement is found unenforceable, the remaining
+        provisions will remain in effect. This Agreement, together with any
+        applicable Company terms, service rules, waivers, policies, and accepted
+        service terms, represents the agreement between the parties regarding the
+        subscription. Company’s failure to enforce a provision is not a waiver.
+        Customer may not assign this Agreement without Company’s written consent.
+        Company may assign this Agreement as part of a sale, transfer,
+        reorganization, or business transaction. Headings are for convenience
+        only.
+      </li>
+<li>
+<strong>Minimum Customer Acknowledgment:</strong>
+        Customer confirms that Customer has read this Agreement, understands this
+        is a recurring subscription, authorizes recurring charges, understands
+        unused services expire at the end of each monthly billing period,
+        understands cancellation does not automatically create a refund,
+        understands prices and services may change, and agrees not to resell or
+        commercially exploit the services.
+      </li>
+<li>
+<strong>Signatures:</strong>
+  By checking the box below, Customer accepts and agrees to this
+  Subscription Service Agreement and authorizes Quantitative Midwest doing
+  business as Sigma Wash to provide and bill for the subscription service
+  according to the terms stated above.
+
+  <br/><br/>
+<strong>No Company Signature Required:</strong>
+  Customer acknowledges that this Agreement becomes effective when Customer
+  checks the box, electronically signs, accepts this Agreement, and
+  Quantitative Midwest doing business as Sigma Wash accepts Customer’s
+  subscription, processes Customer’s payment, schedules services, provides
+  services, or otherwise begins performance. A separate signature by
+  Quantitative Midwest doing business as Sigma Wash is not required for
+  this Agreement to be valid or enforceable.
+
+
+<br/> <br/><br/><div>
+<strong>I have read, understood, and agree to the Subscription Service Agreement.
+    I understand that checking this box is my electronic signature and has
+    the same legal effect as signing this Agreement by hand.</strong>
+<br/><br/><br/></div>
+<strong>By providing your phone number, you agree to receive text messages from
+    Quantitative Midwest doing business as Sigma Wash related to your inquiry,
+    appointments, services, orders, customer support, and promotional offers.
+    Message and data rates may apply. Message frequency may vary. Reply STOP
+    to unsubscribe or HELP for assistance. Consent is not a condition of
+    purchase. Mobile opt-in data will not be shared with third parties for
+    marketing or promotional purposes. See our Privacy Policy for details.</strong>
+
+</li>
+</ol>
+      </div>
+    </div>
+  </div>
+
+  <script>
+    "use strict";
+
+    /*
+      ================================================================
+      ONLY REQUIRED HTML SETTING
+      ================================================================
+      After deploying Code.gs as a Google Apps Script Web App, paste the
+      deployment URL ending in /exec below.
+
+      Example:
+      https://script.google.com/macros/s/AKfycbxxxxxxxxxxxxxxxx/exec
+
+      The page submits directly to Google Apps Script.
+    */
+    const APPS_SCRIPT_WEB_APP_URL = "https://script.google.com/macros/s/AKfycbzaBwrSI6stmK4L6XxF2GXsyBjj31ZQ0dTN2-Nkh3CUl8YLecFC0oE_BecAGFvQdzjIkQ/exec";
+
+    const services = [
+      {
+        id: "exterior-monthly",
+        serviceName: "Monthly",
+        categoryName: "Exterior Fresh Subscriptions",
+        price: 9.95,
+        individualSquareLink: "https://square.link/u/vVxASFQ3",
+        description: "An affordable way to keep things fresh."
+      },
+      {
+        id: "exterior-every-other-week",
+        serviceName: "Every other week",
+        categoryName: "Exterior Fresh Subscriptions",
+        price: 17.95,
+        individualSquareLink: "https://square.link/u/5BnrZ7Eo",
+        description: "A good option for the average driver."
+      },
+      {
+        id: "exterior-weekly",
+        serviceName: "Weekly",
+        categoryName: "Exterior Fresh Subscriptions",
+        price: 29.95,
+        individualSquareLink: "https://square.link/u/zyBKzo45",
+        description: "For those who want a serious clean."
+      },
+      {
+        id: "interior-monthly",
+        serviceName: "Monthly",
+        categoryName: "Interior Fresh Subscriptions",
+        price: 24.95,
+        individualSquareLink: "https://square.link/u/QcBCLX4M",
+        description: "An affordable way to keep things fresh."
+      },
+      {
+        id: "interior-every-other-week",
+        serviceName: "Every other week",
+        categoryName: "Interior Fresh Subscriptions",
+        price: 44.95,
+        individualSquareLink: "https://square.link/u/5BnrZ7Eo",
+        description: "A good option for the average driver."
+      },
+      {
+        id: "interior-weekly",
+        serviceName: "Weekly",
+        categoryName: "Interior Fresh Subscriptions",
+        price: 59.95,
+        individualSquareLink: "https://square.link/u/fQjKc3ST",
+        description: "For those who want a serious clean."
+      }
+    ];
+
+    const combinationLinks = {
+      "exterior-monthly+interior-monthly": {
+        totalPrice: 34.90,
+        squareCheckoutLink: "https://square.link/u/3ZNFiIl6"
+      },
+      "exterior-monthly+interior-every-other-week": {
+        totalPrice: 54.90,
+        squareCheckoutLink: "https://square.link/u/I50ia3pV"
+      },
+      "exterior-monthly+interior-weekly": {
+        totalPrice: 69.90,
+        squareCheckoutLink: "https://square.link/u/Y5919yH4"
+      },
+      "exterior-every-other-week+interior-monthly": {
+        totalPrice: 42.90,
+        squareCheckoutLink: "https://square.link/u/UGTrKp5f"
+      },
+      "exterior-every-other-week+interior-every-other-week": {
+        totalPrice: 62.90,
+        squareCheckoutLink: "https://square.link/u/VDco6bVF"
+      },
+      "exterior-every-other-week+interior-weekly": {
+        totalPrice: 77.90,
+        squareCheckoutLink: "https://square.link/u/di4No0G7"
+      },
+      "exterior-weekly+interior-monthly": {
+        totalPrice: 54.90,
+        squareCheckoutLink: "https://square.link/u/dGHjmJdz"
+      },
+      "exterior-weekly+interior-every-other-week": {
+        totalPrice: 74.90,
+        squareCheckoutLink: "https://square.link/u/bRpplnW1"
+      },
+      "exterior-weekly+interior-weekly": {
+        totalPrice: 89.90,
+        squareCheckoutLink: "https://square.link/u/9lKt4m2q"
+      }
+    };
+
+    const categoryDescriptions = {
+      "Exterior Fresh Subscriptions": "We offer three types of subscription plans for exterior washes.",
+      "Interior Fresh Subscriptions": "We offer three types of subscription plans for interior washes."
+    };
+
+    const sidebar = document.getElementById("sidebar");
+    const overlay = document.getElementById("overlay");
+    const menuToggle = document.getElementById("menuToggle");
+    const serviceSections = document.getElementById("serviceSections");
+    const selectedServicesList = document.getElementById("selectedServicesList");
+    const totalPrice = document.getElementById("totalPrice");
+    const checkoutButton = document.getElementById("checkoutButton");
+    const checkoutHelp = document.getElementById("checkoutHelp");
+    const saveStatus = document.getElementById("saveStatus");
+    const customerName = document.getElementById("customerName");
+    const customerPhone = document.getElementById("customerPhone");
+    const agreeTerms = document.getElementById("agreeTerms");
+    const openTerms = document.getElementById("openTerms");
+    const closeTerms = document.getElementById("closeTerms");
+    const termsModal = document.getElementById("termsModal");
+    const termsOverlay = document.getElementById("termsOverlay");
+    const contractDocument = document.getElementById("contractDocument");
+
+    const contractSaveForm = document.getElementById("contractSaveForm");
+    const contractSaveFrame = document.getElementById("contractSaveFrame");
+    const formRequestId = document.getElementById("formRequestId");
+    const formContractId = document.getElementById("formContractId");
+    const formCustomerName = document.getElementById("formCustomerName");
+    const formPhoneNumber = document.getElementById("formPhoneNumber");
+    const formSelectedServiceIds = document.getElementById("formSelectedServiceIds");
+    const formAgreeTerms = document.getElementById("formAgreeTerms");
+    const formElectronicSignature = document.getElementById("formElectronicSignature");
+    const formAcceptedAtBrowser = document.getElementById("formAcceptedAtBrowser");
+    const formAcceptedAtLocal = document.getElementById("formAcceptedAtLocal");
+    const formPageUrl = document.getElementById("formPageUrl");
+    const formUserAgent = document.getElementById("formUserAgent");
+    const formContractText = document.getElementById("formContractText");
+    const formWebsite = document.getElementById("formWebsite");
+
+    let currentCheckoutLink = "";
+    let currentCheckoutIsValid = false;
+    let checkoutSubmissionInProgress = false;
+    let pendingContractSnapshot = null;
+    let pendingAppsScriptRequest = null;
+
+    function openSidebar() {
+      sidebar.classList.add("open");
+      overlay.classList.add("show");
     }
 
-    function renderControl(field) {
-      const id = escapeHtml(field.id);
-      const placeholder = field.placeholder
-        ? `placeholder="${escapeHtml(field.placeholder)}"`
-        : '';
+    function closeSidebarNow() {
+      sidebar.classList.remove("open");
+      overlay.classList.remove("show");
+    }
 
-      if (field.type === 'choice') {
-        const buttons = (field.options || []).map(option => `
-          <button
-            type="button"
-            class="choice-button"
-            data-choice-field="${id}"
-            data-choice-value="${escapeHtml(option)}"
-            aria-pressed="false"
-          >
-            ${escapeHtml(option)}
-          </button>
-        `).join('');
+    function showTerms() {
+      termsModal.classList.add("show");
+      termsModal.setAttribute("aria-hidden", "false");
+      document.body.classList.add("modal-open");
+    }
+
+    function hideTerms() {
+      termsModal.classList.remove("show");
+      termsModal.setAttribute("aria-hidden", "true");
+      document.body.classList.remove("modal-open");
+    }
+
+    function roundCurrency(value) {
+      return Math.round((Number(value) + Number.EPSILON) * 100) / 100;
+    }
+
+    function formatCurrency(value) {
+      return "$" + roundCurrency(value).toFixed(2);
+    }
+
+    function slugify(value) {
+      return String(value)
+        .toLowerCase()
+        .replace(/[^a-z0-9]+/g, "-")
+        .replace(/^-+|-+$/g, "");
+    }
+
+    function hasRealSquareLink(link) {
+      return Boolean(link) &&
+        !String(link).startsWith("PASTE_") &&
+        !String(link).includes("PLACEHOLDER");
+    }
+
+    function hasRealAppsScriptUrl() {
+      return /^https:\/\/script\.google\.com\/macros\/s\/.+\/exec(?:\?.*)?$/i.test(
+        String(APPS_SCRIPT_WEB_APP_URL || "").trim()
+      );
+    }
+
+    function normalizePhone(value) {
+      return String(value).replace(/\D/g, "");
+    }
+
+    function isCustomerInfoValid() {
+      const nameValue = customerName.value.trim();
+      const phoneDigits = normalizePhone(customerPhone.value);
+
+      return nameValue.length >= 2 &&
+        phoneDigits.length >= 10 &&
+        phoneDigits.length <= 15;
+    }
+
+    function getCategories() {
+      return [...new Set(services.map(service => service.categoryName))];
+    }
+
+    function createCombinationKey(selectedServices) {
+      return selectedServices
+        .map(service => service.id)
+        .sort()
+        .join("+");
+    }
+
+    function getSelectedServices() {
+      return Array.from(document.querySelectorAll(".service-option:checked"))
+        .map(input => services.find(service => service.id === input.value))
+        .filter(Boolean);
+    }
+
+    function getSelectedTotal(selectedServices) {
+      return roundCurrency(
+        selectedServices.reduce((total, service) => total + service.price, 0)
+      );
+    }
+
+    function getCheckoutStatus(selectedServices) {
+      if (!selectedServices.length) {
+        return { checkoutLink: "", isValid: false };
+      }
+
+      if (selectedServices.length === 1) {
+        return {
+          checkoutLink: selectedServices[0].individualSquareLink,
+          isValid: hasRealSquareLink(selectedServices[0].individualSquareLink)
+        };
+      }
+
+      const combinationKey = createCombinationKey(selectedServices);
+      const matchedCombination = combinationLinks[combinationKey];
+
+      if (
+        matchedCombination &&
+        hasRealSquareLink(matchedCombination.squareCheckoutLink)
+      ) {
+        return {
+          checkoutLink: matchedCombination.squareCheckoutLink,
+          isValid: true
+        };
+      }
+
+      return { checkoutLink: "", isValid: false };
+    }
+
+    function resetPendingContractSnapshot() {
+      if (!checkoutSubmissionInProgress) {
+        pendingContractSnapshot = null;
+      }
+
+      hideSaveStatus();
+    }
+
+    function showSaveStatus(message, type = "") {
+      if (!saveStatus) {
+        return;
+      }
+
+      saveStatus.textContent = message;
+      saveStatus.className = "save-status show" + (type ? " " + type : "");
+    }
+
+    function hideSaveStatus() {
+      if (!saveStatus) {
+        return;
+      }
+
+      saveStatus.textContent = "";
+      saveStatus.className = "save-status";
+    }
+
+    function renderServiceSections() {
+      const categories = getCategories();
+
+      serviceSections.innerHTML = categories.map(category => {
+        const categoryId = "category-" + slugify(category);
+        const inputName = slugify(category);
+        const categoryServices = services.filter(
+          service => service.categoryName === category
+        );
 
         return `
-          <div class="choice-group" role="group" aria-label="${escapeHtml(field.label)}">
-            ${buttons}
-          </div>
+          <section class="glass-card selection-card" id="${categoryId}">
+            <div class="selection-header">
+              <div>
+                <h2>${category}</h2>
+                <p class="subtext">${categoryDescriptions[category] || "Choose one option from this category."}</p>
+              </div>
 
-          <input type="hidden" id="${id}" data-field-id="${id}">
-
-          ${field.comment ? `
-            <div class="comment-row">
-              <button
-                type="button"
-                class="comment-toggle"
-                data-comment-toggle="${id}"
-              >
-                + Add comment
+              <button type="button" class="category-clear" data-category="${category}">
+                Clear Selection
               </button>
             </div>
 
-            <div class="comment-input" data-comment-wrap="${id}">
-              <input
-                type="text"
-                data-comment-for="${id}"
-                placeholder="Optional detail or chart comment"
-              >
+            <div class="radio-group service-slider">
+              ${categoryServices.map(service => `
+                <label class="radio-card">
+                  <input
+                    type="radio"
+                    class="service-option"
+                    name="${inputName}"
+                    value="${service.id}"
+                    data-category="${service.categoryName}"
+                  />
+                  <span>
+                    <strong class="radio-price">${formatCurrency(service.price)}</strong>
+                    <strong class="service-title">${service.serviceName}</strong>
+                    <small>${service.description}</small>
+                  </span>
+                </label>
+              `).join("")}
             </div>
-          ` : ''}
+          </section>
         `;
-      }
+      }).join("");
 
-      if (field.type === 'select') {
-        return `
-          <select id="${id}" data-field-id="${id}">
-            <option value="">Choose…</option>
-            ${(field.options || []).map(option =>
-              `<option value="${escapeHtml(option)}">${escapeHtml(option)}</option>`
-            ).join('')}
-          </select>
-        `;
-      }
-
-      if (field.type === 'textarea') {
-        return `
-          <textarea
-            id="${id}"
-            data-field-id="${id}"
-            ${placeholder}
-          ></textarea>
-        `;
-      }
-
-      if (field.type === 'number') {
-        const min = field.min !== null && field.min !== undefined
-          ? `min="${escapeHtml(field.min)}"`
-          : '';
-        const max = field.max !== null && field.max !== undefined
-          ? `max="${escapeHtml(field.max)}"`
-          : '';
-        const step = field.step !== null && field.step !== undefined
-          ? `step="${escapeHtml(field.step)}"`
-          : 'step="any"';
-
-        return `
-          <input
-            type="number"
-            id="${id}"
-            data-field-id="${id}"
-            ${min}
-            ${max}
-            ${step}
-            ${placeholder}
-          >
-        `;
-      }
-
-      if (field.type === 'date') {
-        return `<input type="date" id="${id}" data-field-id="${id}">`;
-      }
-
-      if (field.type === 'datetime') {
-        return `<input type="datetime-local" id="${id}" data-field-id="${id}">`;
-      }
-
-      return `
-        <input
-          type="text"
-          id="${id}"
-          data-field-id="${id}"
-          ${placeholder}
-        >
-      `;
-    }
-
-    function renderExistingData(existingFields) {
-      if (!existingFields.length) return '';
-
-      const sections = groupExistingBySection(existingFields);
-
-      return `
-        <details class="existing-card">
-          <summary>View information already completed in Sheet1 (${existingFields.length})</summary>
-
-          <div class="existing-body">
-            ${sections.map(section => `
-              <div class="existing-section">
-                <h3>${escapeHtml(section.title)}</h3>
-
-                <div class="existing-grid">
-                  ${section.fields.map(field => `
-                    <div class="existing-item">
-                      <div class="existing-label">${escapeHtml(field.label)}</div>
-                      <div class="existing-value">${escapeHtml(field.value)}</div>
-                    </div>
-                  `).join('')}
-                </div>
-              </div>
-            `).join('')}
-          </div>
-        </details>
-      `;
-    }
-
-    function groupFieldsBySection(fields) {
-      const order = [
-        ['patient', 'Patient characteristics'],
-        ['surgery', 'Surgery and hospitalization'],
-        ['regimen', 'Apixaban regimen'],
-        ['labs', 'Laboratory data'],
-        ['medications', 'Concomitant medications']
-      ];
-
-      return order
-        .map(([id, title]) => ({
-          id,
-          title,
-          fields: fields.filter(field => field.sectionId === id)
-        }))
-        .filter(section => section.fields.length);
-    }
-
-    function groupExistingBySection(fields) {
-      const map = new Map();
-
-      fields.forEach(field => {
-        const key = field.sectionId || 'other';
-
-        if (!map.has(key)) {
-          map.set(key, {
-            id: key,
-            title: field.sectionTitle || 'Other information',
-            fields: []
-          });
-        }
-
-        map.get(key).fields.push(field);
+      document.querySelectorAll(".service-option").forEach(input => {
+        input.addEventListener("change", () => {
+          resetPendingContractSnapshot();
+          updateSummary();
+        });
       });
 
-      return Array.from(map.values());
-    }
+      document.querySelectorAll(".category-clear").forEach(button => {
+        button.addEventListener("click", () => {
+          const category = button.dataset.category;
 
-    function selectChoice(button) {
-      const fieldId = button.dataset.choiceField;
-      const value = button.dataset.choiceValue;
-      const hidden = document.getElementById(fieldId);
-      const group = button.closest('.choice-group');
+          document
+            .querySelectorAll(`.service-option[data-category="${category}"]`)
+            .forEach(input => {
+              input.checked = false;
+            });
 
-      if (!hidden || !group) return;
-
-      group.querySelectorAll('.choice-button').forEach(item => {
-        const selected = item === button;
-        item.classList.toggle('selected', selected);
-        item.setAttribute('aria-pressed', String(selected));
+          resetPendingContractSnapshot();
+          updateSummary();
+        });
       });
-
-      hidden.value = value;
-
-      const field = getCurrentMissingField(fieldId);
-      if (field && field.comment && value === 'Yes') {
-        showComment(fieldId);
-      }
-
-      saveCurrentDraft();
     }
 
-    function toggleComment(fieldId) {
-      const wrap = document.querySelector(
-        `[data-comment-wrap="${cssEscape(fieldId)}"]`
-      );
-      const toggle = document.querySelector(
-        `[data-comment-toggle="${cssEscape(fieldId)}"]`
-      );
-
-      if (!wrap || !toggle) return;
-
-      const show = !wrap.classList.contains('visible');
-      wrap.classList.toggle('visible', show);
-      toggle.textContent = show ? '− Hide comment' : '+ Add comment';
-
-      if (show) {
-        const input = wrap.querySelector('input');
-        if (input) input.focus();
-      }
-    }
-
-    function showComment(fieldId) {
-      const wrap = document.querySelector(
-        `[data-comment-wrap="${cssEscape(fieldId)}"]`
-      );
-      const toggle = document.querySelector(
-        `[data-comment-toggle="${cssEscape(fieldId)}"]`
-      );
-
-      if (!wrap || !toggle) return;
-
-      wrap.classList.add('visible');
-      toggle.textContent = '− Hide comment';
-    }
-
-    async function copyCurrentFin(button) {
-      const fin = currentPatient && currentPatient.fin !== null && currentPatient.fin !== undefined
-        ? String(currentPatient.fin).trim()
-        : '';
-
-      if (!fin) {
-        showToast('No FIN is available to copy.', 'error');
+    function renderSelectedServices(selectedServices) {
+      if (!selectedServices.length) {
+        selectedServicesList.innerHTML =
+          `<div class="summary-empty">No services selected yet.</div>`;
         return;
       }
 
-      if (button) {
-        button.disabled = true;
-      }
-
-      try {
-        await copyTextToClipboard(fin);
-        setCopyFinButtonState(button, true);
-        showToast('FIN copied to clipboard.', 'success');
-      } catch (error) {
-        console.error('FIN copy failed:', error);
-        showToast('Unable to copy the FIN. You can still select it manually.', 'error');
-        if (button) {
-          button.disabled = false;
-        }
-      }
+      selectedServicesList.innerHTML = selectedServices.map(service => `
+        <div class="summary-item">
+          <div>
+            <strong>${service.serviceName}</strong>
+            <small>${service.categoryName} · ${service.description}</small>
+          </div>
+          <div class="summary-price">${formatCurrency(service.price)}</div>
+        </div>
+      `).join("");
     }
 
-    async function copyTextToClipboard(text) {
-      if (navigator.clipboard && typeof navigator.clipboard.writeText === 'function') {
-        try {
-          await navigator.clipboard.writeText(text);
-          return;
-        } catch (error) {
-          console.warn('Clipboard API unavailable; using fallback copy method.', error);
-        }
+    function updateCheckoutHelp(isReady) {
+      if (checkoutSubmissionInProgress) {
+        checkoutHelp.textContent =
+          "Saving your signed subscription contract to Google Sheets before checkout...";
+        checkoutHelp.classList.add("show");
+        return;
       }
 
-      const textarea = document.createElement('textarea');
-      textarea.value = text;
-      textarea.setAttribute('readonly', '');
-      textarea.style.position = 'fixed';
-      textarea.style.left = '-9999px';
-      textarea.style.top = '0';
-      textarea.style.opacity = '0';
-      document.body.appendChild(textarea);
-
-      const selection = document.getSelection();
-      const previousRange = selection && selection.rangeCount
-        ? selection.getRangeAt(0)
-        : null;
-
-      textarea.focus();
-      textarea.select();
-      textarea.setSelectionRange(0, textarea.value.length);
-
-      let copied = false;
-      try {
-        copied = document.execCommand('copy');
-      } finally {
-        document.body.removeChild(textarea);
-
-        if (previousRange && selection) {
-          selection.removeAllRanges();
-          selection.addRange(previousRange);
-        }
+      if (!hasRealAppsScriptUrl()) {
+        checkoutHelp.textContent =
+          "Website setup is incomplete. Add your Google Apps Script /exec URL in the HTML.";
+        checkoutHelp.classList.add("show");
+        return;
       }
 
-      if (!copied) {
-        throw new Error('The browser did not allow clipboard access.');
-      }
+      checkoutHelp.textContent =
+        "Please select a service, add your name and phone number, and agree to the terms before checkout.";
+      checkoutHelp.classList.toggle("show", !isReady);
     }
 
-    function setCopyFinButtonState(button, copied) {
-      if (!button) return;
+    function updateSummary() {
+      const selectedServices = getSelectedServices();
+      const selectedTotal = getSelectedTotal(selectedServices);
+      const checkoutStatus = getCheckoutStatus(selectedServices);
 
-      const label = button.querySelector('[data-copy-fin-label]');
-      const icon = button.querySelector('[aria-hidden="true"]');
+      currentCheckoutLink = checkoutStatus.checkoutLink;
+      currentCheckoutIsValid = checkoutStatus.isValid;
 
-      button.classList.toggle('copied', Boolean(copied));
-      button.disabled = false;
+      renderSelectedServices(selectedServices);
+      totalPrice.textContent = formatCurrency(selectedTotal);
 
-      if (label) {
-        label.textContent = copied ? 'Copied' : 'Copy FIN';
-      }
+      const checkoutIsReady = Boolean(
+        selectedServices.length &&
+        agreeTerms.checked &&
+        checkoutStatus.isValid &&
+        isCustomerInfoValid() &&
+        hasRealAppsScriptUrl()
+      );
 
-      if (icon) {
-        icon.textContent = copied ? '✓' : '📋';
-      }
-
-      if (copied) {
-        window.setTimeout(() => {
-          if (!document.body.contains(button)) return;
-          setCopyFinButtonState(button, false);
-        }, 1600);
-      }
+      checkoutButton.disabled = !checkoutIsReady || checkoutSubmissionInProgress;
+      updateCheckoutHelp(checkoutIsReady);
     }
 
-    function collectValues() {
-      const result = {};
+    function randomHex(byteCount) {
+      const randomBytes = new Uint8Array(byteCount);
+      crypto.getRandomValues(randomBytes);
 
-      if (!currentPatient || !Array.isArray(currentPatient.missingFields)) {
-        return result;
-      }
-
-      currentPatient.missingFields.forEach(field => {
-        const input = document.getElementById(field.id);
-        if (!input) return;
-
-        let value = String(input.value || '').trim();
-
-        if (field.comment) {
-          const commentInput = document.querySelector(
-            `[data-comment-for="${cssEscape(field.id)}"]`
-          );
-          const comment = commentInput
-            ? String(commentInput.value || '').trim()
-            : '';
-
-          if (value && comment) {
-            value = `${value} — ${comment}`;
-          }
-        }
-
-        if (value !== '') {
-          result[field.id] = value;
-        }
-      });
-
-      return result;
+      return Array.from(randomBytes)
+        .map(value => value.toString(16).padStart(2, "0"))
+        .join("")
+        .toUpperCase();
     }
 
-    function saveCurrentDraft() {
-      if (!currentPatient) return;
+    function generateContractId() {
+      const now = new Date();
+      const yyyy = now.getFullYear();
+      const mm = String(now.getMonth() + 1).padStart(2, "0");
+      const dd = String(now.getDate()).padStart(2, "0");
 
-      const key = finKey(currentPatient.fin);
-      const draft = {
-        values: {},
-        comments: {}
+      return `SW-${yyyy}${mm}${dd}-${randomHex(5)}`;
+    }
+
+    function generateRequestId() {
+      return `REQ-${Date.now()}-${randomHex(6)}`;
+    }
+
+    function getNormalizedContractText() {
+      return contractDocument.innerText
+        .replace(/\u00a0/g, " ")
+        .replace(/[ \t]+\n/g, "\n")
+        .replace(/\n{3,}/g, "\n\n")
+        .trim();
+    }
+
+    function getReadableLocalDate(isoDate) {
+      const date = new Date(isoDate);
+
+      return new Intl.DateTimeFormat("en-US", {
+        year: "numeric",
+        month: "long",
+        day: "numeric",
+        hour: "numeric",
+        minute: "2-digit",
+        second: "2-digit",
+        timeZoneName: "short"
+      }).format(date);
+    }
+
+    function getOrCreateContractSnapshot() {
+      if (pendingContractSnapshot) {
+        return pendingContractSnapshot;
+      }
+
+      const acceptedAtBrowser = new Date().toISOString();
+
+      pendingContractSnapshot = {
+        contractId: generateContractId(),
+        acceptedAtBrowser,
+        acceptedAtLocal: getReadableLocalDate(acceptedAtBrowser)
       };
 
-      (currentPatient.missingFields || []).forEach(field => {
-        const input = document.getElementById(field.id);
-
-        if (input) {
-          draft.values[field.id] = input.value || '';
-        }
-
-        if (field.comment) {
-          const commentInput = document.querySelector(
-            `[data-comment-for="${cssEscape(field.id)}"]`
-          );
-
-          if (commentInput) {
-            draft.comments[field.id] = commentInput.value || '';
-          }
-        }
-      });
-
-      drafts[key] = draft;
+      return pendingContractSnapshot;
     }
 
-    function restoreDraftForCurrentPatient() {
-      if (!currentPatient) return;
+    function buildContractRecord() {
+      const selectedServices = getSelectedServices();
+      const selectedTotal = getSelectedTotal(selectedServices);
+      const snapshot = getOrCreateContractSnapshot();
 
-      const draft = drafts[finKey(currentPatient.fin)];
-      if (!draft) return;
-
-      (currentPatient.missingFields || []).forEach(field => {
-        const input = document.getElementById(field.id);
-        if (!input) return;
-
-        const value = draft.values && draft.values[field.id] !== undefined
-          ? draft.values[field.id]
-          : '';
-
-        input.value = value;
-
-        if (field.type === 'choice' && value) {
-          document.querySelectorAll(
-            `[data-choice-field="${cssEscape(field.id)}"]`
-          ).forEach(button => {
-            const selected = button.dataset.choiceValue === value;
-            button.classList.toggle('selected', selected);
-            button.setAttribute('aria-pressed', String(selected));
-          });
-        }
-
-        if (field.comment) {
-          const comment = draft.comments && draft.comments[field.id]
-            ? draft.comments[field.id]
-            : '';
-
-          const commentInput = document.querySelector(
-            `[data-comment-for="${cssEscape(field.id)}"]`
-          );
-
-          if (commentInput && comment) {
-            commentInput.value = comment;
-            showComment(field.id);
-          }
-        }
-      });
+      return {
+        requestId: generateRequestId(),
+        contractId: snapshot.contractId,
+        customerName: customerName.value.trim(),
+        phoneNumber: customerPhone.value.trim(),
+        selectedServiceIds: selectedServices.map(service => service.id),
+        selectedServices: selectedServices.map(service => ({
+          id: service.id,
+          serviceName: service.serviceName,
+          categoryName: service.categoryName,
+          price: roundCurrency(service.price)
+        })),
+        totalPrice: selectedTotal,
+        totalPriceFormatted: formatCurrency(selectedTotal),
+        agreeTerms: agreeTerms.checked ? "Yes" : "No",
+        electronicSignature: customerName.value.trim(),
+        acceptedAtBrowser: snapshot.acceptedAtBrowser,
+        acceptedAtLocal: snapshot.acceptedAtLocal,
+        status: "Accepted / Checkout Started",
+        contractText: getNormalizedContractText(),
+        pageUrl: window.location.href,
+        userAgent: navigator.userAgent
+      };
     }
 
-    function applyDefaultCollectionDate() {
-      if (!currentPatient) return;
+    function buildCheckoutUrl(link, contractRecord) {
+      const checkoutUrl = new URL(link, window.location.href);
 
-      const fieldExists = (currentPatient.missingFields || []).some(
-        field => field.id === 'collectionDate'
-      );
+      // These are matching/reference values only. Square remains responsible
+      // for the actual payment and recurring subscription processing.
+      checkoutUrl.searchParams.set("customer_name", contractRecord.customerName);
+      checkoutUrl.searchParams.set("customer_phone", contractRecord.phoneNumber);
+      checkoutUrl.searchParams.set("original_price", contractRecord.totalPriceFormatted);
+      checkoutUrl.searchParams.set("agreed_to_terms", contractRecord.agreeTerms);
+      checkoutUrl.searchParams.set("contract_id", contractRecord.contractId);
 
-      if (!fieldExists) return;
-
-      const input = document.getElementById('collectionDate');
-      if (input && !input.value) {
-        input.value = todayLocalIso();
-        saveCurrentDraft();
-      }
+      return checkoutUrl.toString();
     }
 
-    function getCurrentMissingField(fieldId) {
-      if (!currentPatient) return null;
+    function populateContractSaveForm(contractRecord) {
+      contractSaveForm.action = APPS_SCRIPT_WEB_APP_URL.trim();
 
-      return (currentPatient.missingFields || []).find(
-        field => field.id === fieldId
-      ) || null;
+      formRequestId.value = contractRecord.requestId;
+      formContractId.value = contractRecord.contractId;
+      formCustomerName.value = contractRecord.customerName;
+      formPhoneNumber.value = contractRecord.phoneNumber;
+      formSelectedServiceIds.value = JSON.stringify(contractRecord.selectedServiceIds);
+      formAgreeTerms.value = contractRecord.agreeTerms;
+      formElectronicSignature.value = contractRecord.electronicSignature;
+      formAcceptedAtBrowser.value = contractRecord.acceptedAtBrowser;
+      formAcceptedAtLocal.value = contractRecord.acceptedAtLocal;
+      formPageUrl.value = contractRecord.pageUrl;
+      formUserAgent.value = contractRecord.userAgent;
+      formContractText.value = contractRecord.contractText;
+      formWebsite.value = "";
     }
 
-    function renderWarnings(data) {
-      const warningNotice = document.getElementById('warningNotice');
-      const duplicateNotice = document.getElementById('duplicateNotice');
-
-      const warnings = [];
-
-      if (Array.isArray(data.missingHeaders) && data.missingHeaders.length) {
-        warnings.push(
-          'These Sheet1 headers are missing, so they cannot be reviewed until the headers are added: ' +
-          data.missingHeaders.join(', ')
+    function saveContractDirectlyToAppsScript(contractRecord) {
+      if (!hasRealAppsScriptUrl()) {
+        return Promise.reject(
+          new Error("Google Apps Script Web App URL has not been configured in the HTML.")
         );
       }
 
-      if (Array.isArray(data.blankFinRows) && data.blankFinRows.length) {
-        warnings.push(
-          `${data.blankFinRows.length} Sheet1 row${data.blankFinRows.length === 1 ? '' : 's'} contain data but have a blank FIN and cannot be reviewed.`
+      if (pendingAppsScriptRequest) {
+        return Promise.reject(
+          new Error("A contract save request is already in progress.")
         );
       }
 
-      if (warnings.length) {
-        warningNotice.textContent = warnings.join(' ');
-        warningNotice.className = 'notice warning visible';
-      } else {
-        warningNotice.textContent = '';
-        warningNotice.className = 'notice warning';
-      }
+      populateContractSaveForm(contractRecord);
 
-      const duplicates = Array.isArray(data.duplicateSheet1Fins)
-        ? data.duplicateSheet1Fins
-        : [];
+      return new Promise((resolve, reject) => {
+        const timeoutId = window.setTimeout(() => {
+          if (
+            pendingAppsScriptRequest &&
+            pendingAppsScriptRequest.requestId === contractRecord.requestId
+          ) {
+            pendingAppsScriptRequest = null;
+            reject(
+              new Error(
+                "Google Sheets did not confirm the save. Please try again."
+              )
+            );
+          }
+        }, 30000);
 
-      if (duplicates.length) {
-        duplicateNotice.textContent =
-          'Duplicate FIN values were found in Sheet1 and were not included in the review queue: ' +
-          duplicates.map(item => `${item.fin} (${item.count} rows)`).join(', ') +
-          '. Correct the duplicate rows before those patients can be safely updated.';
+        pendingAppsScriptRequest = {
+          requestId: contractRecord.requestId,
+          resolve,
+          reject,
+          timeoutId
+        };
 
-        duplicateNotice.className = 'notice error visible';
-      } else {
-        duplicateNotice.textContent = '';
-        duplicateNotice.className = 'notice error';
-      }
+        HTMLFormElement.prototype.submit.call(contractSaveForm);
+      });
     }
 
-    function showEndState(data) {
-      const duplicates = Array.isArray(data.duplicateSheet1Fins)
-        ? data.duplicateSheet1Fins
-        : [];
-      const missingHeaders = Array.isArray(data.missingHeaders)
-        ? data.missingHeaders
-        : [];
-      const blankFinRows = Array.isArray(data.blankFinRows)
-        ? data.blankFinRows
-        : [];
-
-      const container = document.getElementById('patientContainer');
-      const blockers = [];
-
-      if (duplicates.length) {
-        blockers.push('duplicate FIN values');
-      }
-      if (missingHeaders.length) {
-        blockers.push('missing Sheet1 headers');
-      }
-      if (blankFinRows.length) {
-        blockers.push('rows with data but no FIN');
-      }
-
-      if (blockers.length) {
-        container.innerHTML = `
-          <div class="error-panel visible">
-            <h2>No additional reviewable patients are available.</h2>
-            <p>The workflow cannot mark the project complete because Sheet1 still has ${escapeHtml(blockers.join(', '))}. Correct these items, then refresh this page.</p>
-          </div>
-        `;
-        setStatus('Sheet1 requires correction', 'error');
-        document.getElementById('progressBar').style.width = '0%';
-        document.getElementById('progressText').textContent = 'Needs correction';
-      } else {
-        container.innerHTML = `
-          <div class="empty-patient">
-            <div class="empty-icon">✓</div>
-            <h2>All patient records have been completed.</h2>
-            <p>There are no remaining patients in Sheet1 with missing review fields.</p>
-          </div>
-        `;
-        setStatus(`${data.sheetName || 'Sheet1'} • complete`, 'ready');
-        document.getElementById('progressBar').style.width = '100%';
-        document.getElementById('progressText').textContent = 'Complete';
-      }
-
-      document.getElementById('actionBar').style.display = 'none';
-    }
-
-    function showPatientLoadError(fin, message) {
-      const container = document.getElementById('patientContainer');
-
-      container.innerHTML = `
-        <div class="error-panel visible">
-          <h2>Patient could not be loaded</h2>
-          <p>FIN: ${escapeHtml(fin || '')}\n${escapeHtml(message || '')}</p>
-        </div>
-      `;
-
-      updateButtons();
-    }
-
-    function showFatalError(message) {
-      document.getElementById('patientContainer').innerHTML = '';
-      document.getElementById('errorMessage').textContent = message;
-      document.getElementById('errorPanel').classList.add('visible');
-      document.getElementById('actionBar').style.display = 'none';
-      setStatus('Connection error', 'error');
-    }
-
-    function clearFatalError() {
-      document.getElementById('errorPanel').classList.remove('visible');
-      document.getElementById('errorMessage').textContent = '';
-      document.getElementById('actionBar').style.display = '';
-    }
-
-    function updateStatus(data) {
-      const count = Number(data.reviewCount || 0);
-      setStatus(
-        `${data.sheetName || 'Sheet1'} • ${count} patient${count === 1 ? '' : 's'} need review`,
-        'ready'
-      );
-    }
-
-    function setStatus(text, state) {
-      const pill = document.getElementById('appStatus');
-      const statusText = document.getElementById('statusText');
-
-      pill.classList.remove('ready', 'error');
-
-      if (state) {
-        pill.classList.add(state);
-      }
-
-      statusText.textContent = text;
-    }
-
-    function updateProgress() {
-      if (!reviewQueue.length || currentIndex < 0) {
-        document.getElementById('progressBar').style.width = '0%';
-        document.getElementById('progressText').textContent = 'Loading…';
+    function handleAppsScriptMessage(event) {
+      if (!pendingAppsScriptRequest) {
         return;
       }
 
-      const current = currentIndex + 1;
-      const total = reviewQueue.length;
-      const percentage = Math.min(100, Math.max(0, (current / total) * 100));
+      // The response must come from the iframe used for the Apps Script form.
+      if (event.source !== contractSaveFrame.contentWindow) {
+        return;
+      }
 
-      document.getElementById('progressBar').style.width = `${percentage}%`;
-      document.getElementById('progressText').textContent =
-        `Patient ${current} of ${total}`;
-    }
+      const data = event.data;
 
-    function updateButtons() {
-      const previous = document.getElementById('previousButton');
-      const skip = document.getElementById('skipButton');
-      const save = document.getElementById('saveNextButton');
+      if (!data || typeof data !== "object") {
+        return;
+      }
 
-      previous.disabled = isBusy || currentIndex <= 0;
-      skip.disabled = isBusy || !currentPatient;
-      save.disabled = isBusy || !currentPatient;
+      if (data.type !== "SIGMA_WASH_CONTRACT_SAVE_RESULT") {
+        return;
+      }
 
-      if (currentPatient && currentPatient.completed) {
-        save.textContent = 'Next Patient';
+      if (data.requestId !== pendingAppsScriptRequest.requestId) {
+        return;
+      }
+
+      const currentRequest = pendingAppsScriptRequest;
+      pendingAppsScriptRequest = null;
+      window.clearTimeout(currentRequest.timeoutId);
+
+      if (data.success) {
+        currentRequest.resolve(data);
       } else {
-        save.textContent = 'Save & Next';
+        currentRequest.reject(
+          new Error(data.error || "Google Sheets could not save the contract.")
+        );
       }
     }
 
-    function setBusy(busy, message) {
-      isBusy = busy;
+    window.addEventListener("message", handleAppsScriptMessage);
 
-      const overlay = document.getElementById('loadingOverlay');
-      const loadingText = document.getElementById('loadingText');
-
-      if (message) {
-        loadingText.textContent = message;
+    menuToggle.addEventListener("click", () => {
+      if (sidebar.classList.contains("open")) {
+        closeSidebarNow();
+      } else {
+        openSidebar();
       }
+    });
 
-      overlay.classList.toggle('visible', busy);
-      updateButtons();
-    }
+    overlay.addEventListener("click", closeSidebarNow);
 
-    function showToast(message, type) {
-      const toast = document.getElementById('toast');
-
-      toast.textContent = message;
-      toast.className = `toast visible ${type || 'success'}`;
-
-      window.clearTimeout(toastTimer);
-
-      toastTimer = window.setTimeout(() => {
-        toast.classList.remove('visible');
-      }, 5200);
-    }
-
-    function serverGetReviewBootstrap() {
-      return serverPromise((success, failure) => {
-        google.script.run
-          .withSuccessHandler(success)
-          .withFailureHandler(failure)
-          .getReviewBootstrap();
-      }, 'Loading patients from Sheet1');
-    }
-
-    function serverGetPatientReviewData(fin) {
-      return serverPromise((success, failure) => {
-        google.script.run
-          .withSuccessHandler(success)
-          .withFailureHandler(failure)
-          .getPatientReviewData(fin);
-      }, 'Loading the patient record');
-    }
-
-    function serverSavePatientMissingData(payload) {
-      return serverPromise((success, failure) => {
-        google.script.run
-          .withSuccessHandler(success)
-          .withFailureHandler(failure)
-          .savePatientMissingData(payload);
-      }, 'Saving the patient record');
-    }
-
-    function serverPromise(invoke, label) {
-      return new Promise((resolve, reject) => {
-        let settled = false;
-
-        const timer = window.setTimeout(() => {
-          if (settled) return;
-          settled = true;
-          reject(
-            new Error(
-              `${label} took longer than expected. The page was unlocked so it does not freeze. Please try again.`
-            )
-          );
-        }, SERVER_TIMEOUT_MS);
-
-        const success = result => {
-          if (settled) return;
-          settled = true;
-          window.clearTimeout(timer);
-          resolve(result);
-        };
-
-        const failure = error => {
-          if (settled) return;
-          settled = true;
-          window.clearTimeout(timer);
-          reject(error instanceof Error ? error : new Error(getErrorMessage(error)));
-        };
-
-        try {
-          invoke(success, failure);
-        } catch (error) {
-          failure(error);
+    document.querySelectorAll(".sidebar a").forEach(link => {
+      link.addEventListener("click", () => {
+        if (window.innerWidth <= 920) {
+          closeSidebarNow();
         }
       });
-    }
+    });
 
-    function getErrorMessage(error) {
-      if (!error) return 'An unexpected error occurred.';
-      if (error.message) return error.message;
-      return String(error);
-    }
+    openTerms.addEventListener("click", showTerms);
+    closeTerms.addEventListener("click", hideTerms);
+    termsOverlay.addEventListener("click", hideTerms);
 
-    function normalizeFin(value) {
-      let text = String(value || '')
-        .trim()
-        .replace(/\s+/g, '')
-        .replace(/^'+/, '')
-        .replace(/,/g, '');
+    agreeTerms.addEventListener("change", () => {
+      resetPendingContractSnapshot();
+      updateSummary();
+    });
 
-      if (/^\d+\.0+$/.test(text)) {
-        text = text.replace(/\.0+$/, '');
+    customerName.addEventListener("input", () => {
+      resetPendingContractSnapshot();
+      updateSummary();
+    });
+
+    customerPhone.addEventListener("input", () => {
+      resetPendingContractSnapshot();
+      updateSummary();
+    });
+
+    checkoutButton.addEventListener("click", async () => {
+      if (
+        !currentCheckoutIsValid ||
+        !currentCheckoutLink ||
+        !isCustomerInfoValid() ||
+        !agreeTerms.checked ||
+        !hasRealAppsScriptUrl() ||
+        checkoutSubmissionInProgress
+      ) {
+        updateSummary();
+        return;
       }
 
-      if (/^\d+$/.test(text)) {
-        text = text.replace(/^0+(?=\d)/, '');
+      const originalButtonText = checkoutButton.textContent;
+
+      checkoutSubmissionInProgress = true;
+      checkoutButton.disabled = true;
+      checkoutButton.textContent = "Saving Contract...";
+      updateCheckoutHelp(false);
+      showSaveStatus("Saving the full signed contract to Google Sheets...");
+
+      try {
+        const contractRecord = buildContractRecord();
+        const saveResult = await saveContractDirectlyToAppsScript(contractRecord);
+
+        const serverCheckoutUrl = String(saveResult.checkoutUrl || "").trim();
+
+        if (!hasRealSquareLink(serverCheckoutUrl)) {
+          throw new Error(
+            "The contract was saved, but the Square checkout link returned by Google Apps Script is missing."
+          );
+        }
+
+        showSaveStatus(
+          saveResult.duplicate
+            ? "Contract was already saved. Opening checkout..."
+            : "Contract saved to Google Sheets. Opening checkout...",
+          "success"
+        );
+
+        checkoutButton.textContent = "Opening Checkout...";
+
+        window.location.href = buildCheckoutUrl(
+          serverCheckoutUrl,
+          contractRecord
+        );
+
+      } catch (error) {
+        console.error("Contract save error:", error);
+
+        const readableMessage =
+          error && error.message
+            ? error.message
+            : "The contract could not be saved. Please try again.";
+
+        showSaveStatus(
+          "Checkout was stopped because the contract was not confirmed as saved. " +
+          readableMessage,
+          "error"
+        );
+
+        checkoutSubmissionInProgress = false;
+        checkoutButton.textContent = originalButtonText;
+        updateSummary();
       }
+    });
 
-      return text.toUpperCase();
-    }
-
-    function finKey(value) {
-      return normalizeFin(value);
-    }
-
-    function todayLocalIso() {
-      const now = new Date();
-      const offset = now.getTimezoneOffset() * 60000;
-      return new Date(now.getTime() - offset).toISOString().slice(0, 10);
-    }
-
-    function escapeHtml(value) {
-      return String(value === null || value === undefined ? '' : value)
-        .replaceAll('&', '&amp;')
-        .replaceAll('<', '&lt;')
-        .replaceAll('>', '&gt;')
-        .replaceAll('"', '&quot;')
-        .replaceAll("'", '&#039;');
-    }
-
-    function cssEscape(value) {
-      if (window.CSS && CSS.escape) {
-        return CSS.escape(value);
+    document.addEventListener("keydown", event => {
+      if (event.key === "Escape") {
+        closeSidebarNow();
+        hideTerms();
       }
+    });
 
-      return String(value).replace(/[^a-zA-Z0-9_-]/g, '\\$&');
-    }
+    renderServiceSections();
+    updateSummary();
   </script>
 </body>
 </html>
