@@ -1,25 +1,678 @@
-<!DOCTYPE html>
+/**
+ * ============================================================
+ * GOOGLE APPS SCRIPT — APP LAUNCHER + APP MANAGER
+ * ============================================================
+ *
+ * Google Sheet format:
+ *
+ * Column A = App Name
+ * Column B = App URL
+ * Column C = Image URL
+ *
+ * Row 1 = headings
+ * Data begins on row 2.
+ *
+ * The HTML page can:
+ * - Add apps
+ * - Edit apps
+ * - Delete apps
+ * - Reorder apps
+ *
+ * Every change is permanently saved back to Google Sheets.
+ */
+
+/* ============================================================
+   CONFIGURATION
+   ============================================================ */
+
+const SPREADSHEET_ID = '1NX6KrxghXH7Cs7jI9aYzd73nxgpzXwxfUVxYh5lMveA';
+const SHEET_NAME = 'Apps';
+
+
+/* ============================================================
+   WEB APP
+   ============================================================ */
+
+/**
+ * Opens Index.html.
+ *//**
+ * ============================================================
+ * APP LAUNCHER WITH FOLDERS
+ * ============================================================
+ *
+ * Sheet structure:
+ *
+ * A = Name
+ * B = App URL
+ * C = Image URL
+ * D = Type          ("app" or "folder")
+ * E = Parent ID     (folder ID, blank for root)
+ * F = Item ID       (unique identifier)
+ * G = Order
+ *
+ * Existing A-C sheets are automatically migrated.
+ */
+
+
+/* ============================================================
+   CONFIGURATION
+   ============================================================ */
+
+
+
+/* ============================================================
+   WEB APP
+   ============================================================ */
+
+function doGet() {
+  return HtmlService
+    .createHtmlOutputFromFile('Index')
+    .setTitle('App Launcher')
+    .addMetaTag(
+      'viewport',
+      'width=device-width, initial-scale=1, maximum-scale=5'
+    );
+}
+
+
+/* ============================================================
+   GET DATA
+   ============================================================ */
+
+function getLauncherData() {
+  const lock = LockService.getScriptLock();
+
+  try {
+    lock.waitLock(30000);
+
+    const sheet = getSheet_();
+
+    ensureHeaders_(sheet);
+
+    migrateExistingApps_(sheet);
+
+    const lastRow = sheet.getLastRow();
+
+    if (lastRow < 2) {
+      return {
+        success: true,
+        items: []
+      };
+    }
+
+    const rows = sheet
+      .getRange(
+        2,
+        1,
+        lastRow - 1,
+        7
+      )
+      .getDisplayValues();
+
+    const items = [];
+
+    rows.forEach(function(row) {
+      const name = cleanText_(row[0]);
+      const url = cleanUrlOptional_(row[1]);
+      const imageUrl = cleanUrlOptional_(row[2]);
+      const type = normalizeType_(row[3]);
+      const parentId = cleanId_(row[4]);
+      const id = cleanId_(row[5]);
+
+      let order = Number(row[6]);
+
+      if (!Number.isFinite(order)) {
+        order = 0;
+      }
+
+      if (
+        !name &&
+        !url &&
+        !imageUrl &&
+        !id
+      ) {
+        return;
+      }
+
+      if (!id || !name) {
+        return;
+      }
+
+      items.push({
+        id: id,
+        type: type,
+        name: name,
+        url: type === 'app' ? url : '',
+        imageUrl: type === 'app' ? imageUrl : '',
+        parentId: parentId,
+        order: order
+      });
+    });
+
+    items.sort(function(a, b) {
+      return a.order - b.order;
+    });
+
+    return {
+      success: true,
+      items: items
+    };
+
+  } catch (error) {
+    console.error(error);
+
+    return {
+      success: false,
+      items: [],
+      message: error.message || 'Unable to load launcher.'
+    };
+
+  } finally {
+    try {
+      lock.releaseLock();
+    } catch (ignore) {}
+  }
+}
+
+
+/* ============================================================
+   SAVE COMPLETE STRUCTURE
+   ============================================================ */
+
+function saveLauncherData(items) {
+  const lock = LockService.getScriptLock();
+
+  try {
+    lock.waitLock(30000);
+
+    if (!Array.isArray(items)) {
+      throw new Error(
+        'Invalid launcher data.'
+      );
+    }
+
+    if (items.length > 1000) {
+      throw new Error(
+        'Too many launcher items.'
+      );
+    }
+
+    const cleaned = [];
+    const ids = {};
+    const folders = {};
+
+    /*
+     * First pass:
+     * validate IDs and folder definitions.
+     */
+    items.forEach(function(item, index) {
+      if (!item || typeof item !== 'object') {
+        throw new Error(
+          'Invalid item #' + (index + 1)
+        );
+      }
+
+      const id = cleanId_(item.id);
+      const name = cleanText_(item.name);
+      const type = normalizeType_(item.type);
+      const parentId = cleanId_(item.parentId);
+
+      if (!id) {
+        throw new Error(
+          'An item is missing its ID.'
+        );
+      }
+
+      if (ids[id]) {
+        throw new Error(
+          'Duplicate launcher item ID.'
+        );
+      }
+
+      if (!name) {
+        throw new Error(
+          'An item is missing its name.'
+        );
+      }
+
+      ids[id] = true;
+
+      if (type === 'folder') {
+        folders[id] = true;
+      }
+
+      const url =
+        type === 'app'
+          ? cleanRequiredUrl_(item.url)
+          : '';
+
+      const imageUrl =
+        type === 'app'
+          ? cleanUrlOptional_(item.imageUrl)
+          : '';
+
+      cleaned.push({
+        id: id,
+        type: type,
+        name: name,
+        url: url,
+        imageUrl: imageUrl,
+        parentId: parentId,
+        order: index
+      });
+    });
+
+
+    /*
+     * Second pass:
+     * verify parent folders.
+     *
+     * Folders themselves remain at root.
+     */
+    cleaned.forEach(function(item) {
+      if (item.type === 'folder') {
+        item.parentId = '';
+        return;
+      }
+
+      if (
+        item.parentId &&
+        !folders[item.parentId]
+      ) {
+        item.parentId = '';
+      }
+    });
+
+
+    const sheet = getSheet_();
+
+    ensureHeaders_(sheet);
+
+    const lastRow = sheet.getLastRow();
+
+    if (lastRow > 1) {
+      sheet
+        .getRange(
+          2,
+          1,
+          lastRow - 1,
+          7
+        )
+        .clearContent();
+    }
+
+    if (cleaned.length) {
+      const rows = cleaned.map(function(item) {
+        return [
+          item.name,
+          item.url,
+          item.imageUrl,
+          item.type,
+          item.parentId,
+          item.id,
+          item.order
+        ];
+      });
+
+      sheet
+        .getRange(
+          2,
+          1,
+          rows.length,
+          7
+        )
+        .setValues(rows);
+    }
+
+    SpreadsheetApp.flush();
+
+    return {
+      success: true,
+      items: cleaned,
+      message: 'Changes saved.'
+    };
+
+  } catch (error) {
+    console.error(error);
+
+    return {
+      success: false,
+      message:
+        error.message ||
+        'Unable to save launcher.'
+    };
+
+  } finally {
+    try {
+      lock.releaseLock();
+    } catch (ignore) {}
+  }
+}
+
+
+/* ============================================================
+   MIGRATE EXISTING A-C APPS
+   ============================================================ */
+
+/**
+ * Existing apps that only use columns A-C are automatically
+ * assigned:
+ *
+ * D = app
+ * E = blank
+ * F = unique ID
+ * G = order
+ */
+function migrateExistingApps_(sheet) {
+  const lastRow = sheet.getLastRow();
+
+  if (lastRow < 2) {
+    return;
+  }
+
+  const range = sheet.getRange(
+    2,
+    1,
+    lastRow - 1,
+    7
+  );
+
+  const rows = range.getDisplayValues();
+
+  let changed = false;
+
+  rows.forEach(function(row, index) {
+    const name = cleanText_(row[0]);
+    const url = cleanText_(row[1]);
+    const image = cleanText_(row[2]);
+
+    const completelyEmpty =
+      !name &&
+      !url &&
+      !image &&
+      !cleanText_(row[3]) &&
+      !cleanText_(row[4]) &&
+      !cleanText_(row[5]);
+
+    if (completelyEmpty) {
+      return;
+    }
+
+    if (!row[3]) {
+      row[3] = 'app';
+      changed = true;
+    }
+
+    if (!row[5]) {
+      row[5] =
+        'item_' +
+        Utilities.getUuid();
+
+      changed = true;
+    }
+
+    if (
+      row[6] === '' ||
+      row[6] === null
+    ) {
+      row[6] = index;
+      changed = true;
+    }
+  });
+
+  if (changed) {
+    range.setValues(rows);
+    SpreadsheetApp.flush();
+  }
+}
+
+
+/* ============================================================
+   SHEET
+   ============================================================ */
+
+function getSheet_() {
+  validateSettings_();
+
+  const spreadsheet =
+    SpreadsheetApp.openById(
+      SPREADSHEET_ID
+    );
+
+  const sheet =
+    spreadsheet.getSheetByName(
+      SHEET_NAME
+    );
+
+  if (!sheet) {
+    throw new Error(
+      'The sheet "' +
+      SHEET_NAME +
+      '" was not found.'
+    );
+  }
+
+  return sheet;
+}
+
+
+function ensureHeaders_(sheet) {
+  const headers = [
+    'Name',
+    'App URL',
+    'Image URL',
+    'Type',
+    'Parent Folder ID',
+    'Item ID',
+    'Order'
+  ];
+
+  const current = sheet
+    .getRange(
+      1,
+      1,
+      1,
+      7
+    )
+    .getDisplayValues()[0];
+
+  let needsUpdate = false;
+
+  headers.forEach(function(header, i) {
+    if (!current[i]) {
+      needsUpdate = true;
+    }
+  });
+
+  if (needsUpdate) {
+    sheet
+      .getRange(
+        1,
+        1,
+        1,
+        7
+      )
+      .setValues([headers]);
+
+    sheet
+      .getRange('A1:G1')
+      .setFontWeight('bold');
+  }
+}
+
+
+/* ============================================================
+   VALIDATION
+   ============================================================ */
+
+function validateSettings_() {
+  if (
+    !SPREADSHEET_ID ||
+    SPREADSHEET_ID ===
+      'PASTE_YOUR_SPREADSHEET_ID_HERE'
+  ) {
+    throw new Error(
+      'Enter your spreadsheet ID in Code.gs.'
+    );
+  }
+
+  if (
+    !SHEET_NAME ||
+    !String(SHEET_NAME).trim()
+  ) {
+    throw new Error(
+      'Enter your sheet name in Code.gs.'
+    );
+  }
+}
+
+
+function cleanText_(value) {
+  return String(
+    value == null ? '' : value
+  )
+    .replace(
+      /[\u0000-\u0008\u000B\u000C\u000E-\u001F\u007F]/g,
+      ''
+    )
+    .trim()
+    .substring(0, 300);
+}
+
+
+function cleanId_(value) {
+  return String(
+    value == null ? '' : value
+  )
+    .trim()
+    .replace(
+      /[^a-zA-Z0-9_\-]/g,
+      ''
+    )
+    .substring(0, 200);
+}
+
+
+function normalizeType_(value) {
+  return String(value || '')
+    .toLowerCase()
+    .trim() === 'folder'
+      ? 'folder'
+      : 'app';
+}
+
+
+function cleanRequiredUrl_(value) {
+  const url =
+    cleanUrlOptional_(value);
+
+  if (!url) {
+    throw new Error(
+      'An application has an invalid URL.'
+    );
+  }
+
+  return url;
+}
+
+
+function cleanUrlOptional_(value) {
+  const url =
+    String(value || '').trim();
+
+  if (!url) {
+    return '';
+  }
+
+  if (
+    !/^https?:\/\/\S+$/i.test(url)
+  ) {
+    return '';
+  }
+
+  return url.substring(0, 4096);
+}
+
+
+/* ============================================================
+   TEST
+   ============================================================ */
+
+function testGetLauncherData() {
+  console.log(
+    JSON.stringify(
+      getLauncherData(),
+      null,
+      2
+    )
+  );
+}
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+    <!DOCTYPE html>
 <html lang="en">
 <head>
-  <meta charset="UTF-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>Sigma Wash Service Selection</title>
+  <base target="_top">
+
+  <meta charset="UTF-8">
+
+  <meta
+    name="viewport"
+    content="width=device-width, initial-scale=1, maximum-scale=5"
+  >
+
+  <title>App Launcher</title>
 
   <style>
-:root {
-      --bg: #f5f5f7;
-      --panel: #ffffff;
-      --panel-soft: #fbfbfd;
-      --text: #1d1d1f;
-      --muted: #6e6e73;
-      --line: #e5e5e7;
-      --blue: #0071e3;
-      --blue-hover: #0077ed;
-      --sidebar-width: 290px;
-      --radius-xl: 28px;
-      --radius-lg: 22px;
-      --shadow: 0 8px 30px rgba(0, 0, 0, 0.06);
-      --max-width: 1280px;
+    :root {
+      --blue: #3478f6;
+      --blue-dark: #225dcc;
+      --navy: #17283f;
+
+      --background: #f3f6fb;
+
+      --text: #172337;
+      --muted: #748197;
+
+      --border: rgba(25,45,72,.10);
+
+      --red: #cc3c4b;
+      --red-light: #fff0f2;
+
+      --green: #128565;
+
+      --shadow:
+        0 8px 24px rgba(30,48,76,.08);
+
+      --shadow-hover:
+        0 18px 40px rgba(30,48,76,.16);
     }
 
     * {
@@ -27,2109 +680,5903 @@
     }
 
     html {
-      scroll-behavior: smooth;
+      min-height: 100%;
     }
 
     body {
-      margin: 0;
-      background: var(--bg);
-      color: var(--text);
-      font-family: "SF Pro Display", "SF Pro Text", "Helvetica Neue", Helvetica, Arial, sans-serif;
-      -webkit-font-smoothing: antialiased;
-      text-rendering: optimizeLegibility;
-    }
-
-    body.modal-open {
-      overflow: hidden;
-    }
-
-    a {
-      color: inherit;
-    }
-
-    .layout {
       min-height: 100vh;
-      display: flex;
-    }
-
-    .sidebar {
-      width: var(--sidebar-width);
-      background: rgba(255, 255, 255, 0.92);
-      backdrop-filter: blur(20px);
-      border-right: 1px solid var(--line);
-      padding: 28px 20px 24px;
-      position: fixed;
-      top: 0;
-      left: 0;
-      bottom: 0;
-      overflow-y: auto;
-      z-index: 1000;
-      transition: transform 0.3s ease;
-    }
-
-    .sidebar-brand {
-      padding: 8px 10px 22px;
-      border-bottom: 1px solid var(--line);
-      margin-bottom: 24px;
-    }
-
-    .sidebar-copy {
-      color: var(--muted);
-      line-height: 1.55;
-      font-size: 0.96rem;
-      padding: 0 10px;
-      margin-bottom: 22px;
-    }
-
-    .sidebar-group {
-      margin-bottom: 22px;
-    }
-
-    .sidebar-label {
-      color: var(--muted);
-      font-size: 0.8rem;
-      font-weight: 600;
-      text-transform: uppercase;
-      letter-spacing: 0.08em;
-      padding: 0 10px;
-      margin-bottom: 10px;
-    }
-
-    .sidebar-nav {
-      display: grid;
-      gap: 6px;
-    }
-
-    .sidebar-nav a {
-      text-decoration: none;
-      padding: 12px 14px;
-      border-radius: 16px;
-      font-size: 0.98rem;
-      color: var(--text);
-      transition: background 0.2s ease, color 0.2s ease, transform 0.2s ease;
-    }
-
-    .sidebar-nav a:hover {
-      background: #f0f3f6;
-      color: var(--blue);
-      transform: translateX(2px);
-    }
-
-    .sidebar-card {
-      margin-top: 26px;
-      background: linear-gradient(180deg, #ffffff 0%, #f7f7fa 100%);
-      border: 1px solid var(--line);
-      border-radius: 22px;
-      padding: 18px;
-      box-shadow: var(--shadow);
-    }
-
-    .sidebar-card strong {
-      display: block;
-      margin-bottom: 8px;
-      font-size: 1rem;
-    }
-
-    .sidebar-card a {
-      text-decoration: none;
-      color: var(--blue);
-      font-weight: 500;
-    }
-
-    .main {
-      flex: 1;
-      margin-left: var(--sidebar-width);
-      min-width: 0;
-    }
-
-    .topbar {
-      position: sticky;
-      top: 0;
-      z-index: 900;
-      background: rgba(245, 245, 247, 0.82);
-      backdrop-filter: blur(18px);
-      border-bottom: 1px solid rgba(0, 0, 0, 0.05);
-    }
-
-    .topbar-inner {
-      max-width: var(--max-width);
-      margin: 0 auto;
-      padding: 14px 28px;
-      display: flex;
-      align-items: center;
-      justify-content: space-between;
-      gap: 20px;
-    }
-
-    .topbar-left {
-      display: flex;
-      align-items: center;
-      gap: 16px;
-      min-width: 0;
-    }
-
-    .menu-toggle {
-      display: none;
-      border: 0;
-      background: #000;
-      color: #fff;
-      border-radius: 999px;
-      width: 42px;
-      height: 42px;
-      font-size: 1.1rem;
-      cursor: pointer;
-      box-shadow: 0 1px 4px rgba(0,0,0,0.08);
-    }
-
-    .brand-wrap {
-      display: inline-flex;
-      align-items: center;
-      gap: 12px;
-      text-decoration: none;
-      min-width: 0;
-    }
-
-    .brand {
-      font-size: 1rem;
-      font-weight: 600;
-      letter-spacing: -0.01em;
-      white-space: nowrap;
-    }
-
-    .top-logo {
-      height: 88px;
-      width: auto;
-      display: block;
-    }
-
-    .sidebar-logo {
-      display: block;
-      width: 100%;
-      max-width: 220px;
-      height: auto;
-      margin: 0 auto 14px;
-    }
-
-    .menu {
-      display: flex;
-      flex-wrap: wrap;
-      gap: 18px;
-      justify-content: flex-end;
-    }
-
-    .menu a {
-      text-decoration: none;
-      color: var(--muted);
-      font-size: 0.94rem;
-      font-weight: 500;
-    }
-
-    .menu a:hover {
-      color: var(--text);
-    }
-
-    .page {
-      max-width: var(--max-width);
-      margin: 0 auto;
-      padding: 34px 28px 46px;
-    }
-
-    .hero {
-      display: grid;
-      grid-template-columns: 1.15fr 0.85fr;
-      align-items: center;
-      gap: 28px;
-      padding: 34px 0 40px;
-    }
-
-    .eyebrow {
-      color: var(--muted);
-      font-weight: 600;
-      font-size: 1rem;
-      letter-spacing: -0.01em;
-      margin-bottom: 8px;
-    }
-
-    .hero h1 {
       margin: 0;
-      font-size: clamp(2.7rem, 6vw, 5.25rem);
-      line-height: 0.96;
-      letter-spacing: -0.055em;
-      font-weight: 700;
-      max-width: 9ch;
-    }
 
-    .hero-copy p {
-      margin: 18px 0 0;
-      color: var(--muted);
-      font-size: 1.08rem;
-      line-height: 1.65;
-      max-width: 44ch;
-    }
+      font-family:
+        -apple-system,
+        BlinkMacSystemFont,
+        "Segoe UI",
+        Roboto,
+        Helvetica,
+        Arial,
+        sans-serif;
 
-    .hero-links {
-      display: flex;
-      flex-wrap: wrap;
-      gap: 18px;
-      margin-top: 22px;
-    }
-
-    .hero-links a {
-      text-decoration: none;
-      color: var(--blue);
-      font-weight: 500;
-      font-size: 1rem;
-    }
-
-    .hero-links a:hover {
-      color: var(--blue-hover);
-    }
-
-    .glass-card {
-      background: rgba(255,255,255,0.78);
-      border: 1px solid rgba(255,255,255,0.7);
-      border-radius: var(--radius-xl);
-      box-shadow: var(--shadow);
-      padding: 28px;
-      margin-bottom: 22px;
-    }
-
-    .glass-card h2 {
-      margin: 0 0 10px;
-      font-size: clamp(1.8rem, 4vw, 2.5rem);
-      letter-spacing: -0.04em;
-    }
-
-    .glass-card .subtext {
-      margin: 0 0 22px;
-      color: var(--muted);
-      line-height: 1.65;
-      max-width: 54ch;
-    }
-
-    label {
-      font-size: 0.95rem;
-      font-weight: 600;
       color: var(--text);
+
+      background:
+        radial-gradient(
+          circle at 8% 0%,
+          rgba(52,120,246,.16),
+          transparent 29%
+        ),
+        radial-gradient(
+          circle at 96% 13%,
+          rgba(78,197,164,.11),
+          transparent 27%
+        ),
+        var(--background);
     }
 
-    input,
-    textarea,
-    select {
-      width: 100%;
-      border: 1px solid #d9d9de;
-      background: #fff;
-      border-radius: 16px;
-      padding: 14px 16px;
-      font-size: 1rem;
-      font-family: inherit;
-      color: var(--text);
-      transition: border-color 0.2s ease, box-shadow 0.2s ease, transform 0.2s ease;
-      appearance: none;
-    }
-
-    input:focus,
-    textarea:focus,
-    select:focus {
-      outline: none;
-      border-color: rgba(0, 113, 227, 0.55);
-      box-shadow: 0 0 0 4px rgba(0, 113, 227, 0.12);
-      transform: translateY(-1px);
-    }
-
-    .radio-group {
-      display: grid;
-      grid-template-columns: repeat(4, minmax(0, 1fr));
-      gap: 12px;
-    }
-
-    .radio-card {
-      position: relative;
-      display: block;
-      cursor: pointer;
-    }
-
-    .radio-card input {
-      position: absolute;
-      opacity: 0;
-      pointer-events: none;
-    }
-
-    .radio-card span {
-      display: block;
-      position: relative;
-      border: 1px solid #d9d9de;
-      background: #fff;
-      border-radius: 18px;
-      padding: 28px 16px 18px;
-      min-height: 124px;
-      box-shadow: 0 1px 2px rgba(0,0,0,0.02);
-      transition: border-color 0.2s ease, box-shadow 0.2s ease, transform 0.2s ease, background 0.2s ease;
-      font-weight: 600;
-      line-height: 1.4;
-    }
-
-    .radio-price {
-      position: absolute;
-      top: 12px;
-      right: 14px;
-      font-size: 0.9rem;
-      font-weight: 700;
-      color: #0071e3;
-    }
-
-    .radio-card small {
-      display: block;
-      margin-top: 6px;
-      color: var(--muted);
-      font-size: 0.88rem;
-      font-weight: 500;
-    }
-
-    .radio-card input:checked + span {
-      border-color: rgba(0, 113, 227, 0.6);
-      box-shadow: 0 0 0 4px rgba(0, 113, 227, 0.12);
-      background: #f5f9ff;
-      transform: translateY(-1px);
-    }
-
-    .button,
-    .secondary-button {
-      border: 0;
-      border-radius: 999px;
-      padding: 13px 24px;
-      font-size: 1rem;
-      font-weight: 600;
-      letter-spacing: -0.01em;
-      cursor: pointer;
-      transition: background 0.2s ease, transform 0.2s ease;
-    }
-
-    .button {
-      background: var(--blue);
-      color: #fff;
-    }
-
-    .button:hover {
-      background: var(--blue-hover);
-      transform: translateY(-1px);
-    }
-
-    .secondary-button {
-      background: #f2f2f5;
-      color: var(--text);
-    }
-
-    .secondary-button:hover {
-      background: #e9e9ee;
-      transform: translateY(-1px);
-    }
-
-    .button:disabled {
-      background: #bfc7d1;
-      cursor: not-allowed;
-      transform: none;
-      opacity: 0.85;
-    }
-
-    .service-grid,
-    .info-grid {
-      display: grid;
-      grid-template-columns: repeat(3, minmax(0, 1fr));
-      gap: 18px;
-    }
-
-    .mini-card {
-      background: linear-gradient(180deg, #ffffff 0%, #fafafd 100%);
-      border: 1px solid var(--line);
-      border-radius: 24px;
-      padding: 24px;
-      box-shadow: var(--shadow);
-    }
-
-    .mini-card h3 {
-      margin: 0 0 10px;
-      font-size: 1.35rem;
-      letter-spacing: -0.03em;
-    }
-
-    .mini-card p {
-      margin: 0;
-      color: var(--muted);
-      line-height: 1.6;
-    }
-
-    .overlay {
-      display: none;
-    }
-
-    .terms-box {
-      grid-column: 1 / -1;
-      display: flex;
-      align-items: flex-start;
-      gap: 10px;
-      padding: 14px 16px;
-      background: #fff;
-      border: 1px solid #d9d9de;
-      border-radius: 16px;
-    }
-
-    .customer-fields {
-      display: grid;
-      gap: 12px;
-      margin: 14px 0;
-    }
-
-    .customer-field {
-      display: grid;
-      gap: 7px;
-    }
-
-    .customer-field label {
-      font-size: 0.9rem;
-    }
-
-    .customer-field input {
-      border-radius: 14px;
-    }
-
-    .checkout-help {
-      display: none;
-      margin-top: 10px;
-      color: #b00020;
-      font-size: 0.9rem;
-      line-height: 1.45;
-    }
-
-    .checkout-help.show {
-      display: block;
-    }
-
-    .terms-box input[type="checkbox"] {
-      appearance: none;
-      -webkit-appearance: none;
-      width: 20px;
-      height: 20px;
-      margin-top: 3px;
-      border: 2px solid #0071e3;
-      border-radius: 4px;
-      background: #fff;
-      display: grid;
-      place-content: center;
-      cursor: pointer;
-      flex: 0 0 auto;
-      padding: 0;
-    }
-
-    .terms-box input[type="checkbox"]::after {
-      content: "";
-      width: 5px;
-      height: 10px;
-      border: solid #fff;
-      border-width: 0 2px 2px 0;
-      transform: rotate(45deg) scale(0);
-      transition: transform 0.15s ease;
-      margin-top: -1px;
-    }
-
-    .terms-box input[type="checkbox"]:checked {
-      background: #0071e3;
-      border-color: #0071e3;
-    }
-
-    .terms-box input[type="checkbox"]:checked::after {
-      transform: rotate(45deg) scale(1);
-    }
-
-    .terms-text {
-      font-size: 0.95rem;
-      line-height: 1.5;
-      color: #6e6e73;
-    }
-
-    .terms-link {
-      color: #0071e3;
-      font-weight: 600;
-      text-decoration: underline;
-      cursor: pointer;
-      background: none;
-      border: none;
-      padding: 0;
+    button,
+    input {
       font: inherit;
     }
 
-    .terms-modal {
-      display: none;
-      position: fixed;
-      inset: 0;
-      z-index: 2000;
+    button {
+      -webkit-tap-highlight-color: transparent;
     }
 
-    .terms-modal.show {
-      display: block;
+    .hidden {
+      display: none !important;
     }
 
-    .terms-overlay {
-      position: absolute;
-      inset: 0;
-      background: rgba(0, 0, 0, 0.45);
+    /* =====================================================
+       PAGE
+       ===================================================== */
+
+    .page {
+      width: min(1450px,100%);
+      margin: 0 auto;
+
+      padding:
+        24px
+        clamp(15px,4vw,55px)
+        55px;
     }
 
-    .terms-content {
-      position: relative;
-      width: min(700px, calc(100% - 30px));
-      max-height: 85vh;
-      overflow-y: auto;
-      margin: 5vh auto 0;
-      background: #fff;
-      border-radius: 24px;
-      padding: 24px;
-      box-shadow: 0 20px 60px rgba(0,0,0,0.2);
-    }
+    /* =====================================================
+       HEADER
+       ===================================================== */
 
-    .terms-content h3 {
-      margin-top: 0;
-      margin-bottom: 12px;
-    }
+    .header {
+      position: sticky;
+      top: 10px;
+      z-index: 100;
 
-    .terms-content p,
-    .terms-content li {
-      color: #6e6e73;
-      line-height: 1.6;
-    }
-
-    .close-terms {
-      float: right;
-      border: none;
-      background: #f2f2f5;
-      border-radius: 999px;
-      width: 36px;
-      height: 36px;
-      cursor: pointer;
-      font-size: 1rem;
-    }
-
-    .selection-card {
-      scroll-margin-top: 130px;
-    }
-
-    .selection-header {
       display: flex;
+      align-items: center;
       justify-content: space-between;
-      align-items: flex-start;
-      gap: 18px;
-      margin-bottom: 18px;
+
+      gap: 15px;
+
+      margin-bottom: 30px;
+      padding: 16px 18px;
+
+      border: 1px solid var(--border);
+      border-radius: 24px;
+
+      background:
+        rgba(255,255,255,.91);
+
+      backdrop-filter: blur(20px);
+      -webkit-backdrop-filter: blur(20px);
+
+      box-shadow: var(--shadow);
     }
 
-    .selection-header h2 {
-      margin-bottom: 8px;
-    }
-
-    .selection-header .subtext {
-      margin-bottom: 0;
-    }
-
-    .category-clear {
-      white-space: nowrap;
-      border: 0;
-      border-radius: 999px;
-      padding: 11px 18px;
-      font-size: 0.94rem;
-      font-weight: 600;
-      cursor: pointer;
-      background: #f2f2f5;
-      color: var(--text);
-      transition: background 0.2s ease, transform 0.2s ease;
-    }
-
-    .category-clear:hover {
-      background: #e9e9ee;
-      transform: translateY(-1px);
-    }
-
-    .service-slider {
-      overflow-x: auto;
-      padding: 4px 4px 10px;
-      scroll-snap-type: x mandatory;
-      scrollbar-width: thin;
-    }
-
-    .service-slider .radio-card {
-      scroll-snap-align: start;
-    }
-
-    .service-title {
-      display: block;
-      padding-right: 78px;
-    }
-
-    .summary-layout {
-      display: grid;
-      grid-template-columns: minmax(0, 1fr) 380px;
-      gap: 18px;
-      align-items: start;
-    }
-
-    .summary-list {
-      display: grid;
+    .brand {
+      display: flex;
+      align-items: center;
       gap: 12px;
     }
 
-    .summary-empty {
-      color: var(--muted);
-      background: #fff;
-      border: 1px dashed #d9d9de;
-      border-radius: 18px;
-      padding: 18px;
-      line-height: 1.6;
+    .brand-icon {
+      display: grid;
+
+      width: 48px;
+      height: 48px;
+
+      flex: 0 0 48px;
+
+      place-items: center;
+
+      color: white;
+
+      border-radius: 15px;
+
+      background:
+        linear-gradient(
+          145deg,
+          #3478f6,
+          #7359eb
+        );
+
+      box-shadow:
+        0 9px 22px
+        rgba(52,120,246,.25);
     }
 
-    .summary-item {
-      background: #fff;
-      border: 1px solid #d9d9de;
-      border-radius: 18px;
-      padding: 16px;
+    .brand-icon svg {
+      width: 25px;
+      height: 25px;
+    }
+
+    .brand-title {
+      margin: 0;
+
+      font-size: 1.08rem;
+      font-weight: 760;
+    }
+
+    .brand-subtitle {
+      margin: 3px 0 0;
+
+      color: var(--muted);
+
+      font-size: .8rem;
+    }
+
+    .header-actions {
       display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+
+    /* =====================================================
+       BUTTONS
+       ===================================================== */
+
+    .btn {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+
+      gap: 7px;
+
+      min-height: 42px;
+
+      padding: 9px 14px;
+
+      border: 0;
+      border-radius: 12px;
+
+      cursor: pointer;
+
+      font-size: .86rem;
+      font-weight: 700;
+
+      transition:
+        transform .15s ease,
+        background .15s ease;
+    }
+
+    .btn:hover {
+      transform: translateY(-1px);
+    }
+
+    .btn-primary {
+      color: white;
+      background: var(--blue);
+    }
+
+    .btn-primary:hover {
+      background: var(--blue-dark);
+    }
+
+    .btn-secondary {
+      color: var(--navy);
+      background: #edf2f8;
+    }
+
+    .btn-success {
+      color: white;
+      background: var(--green);
+    }
+
+    .btn-danger {
+      color: var(--red);
+      background: var(--red-light);
+    }
+
+    /* =====================================================
+       CONTENT
+       ===================================================== */
+
+    .content-header {
+      display: flex;
+      align-items: flex-end;
       justify-content: space-between;
-      gap: 16px;
+
+      gap: 15px;
+
+      margin-bottom: 19px;
     }
 
-    .summary-item strong {
-      display: block;
-      font-size: 1rem;
-      letter-spacing: -0.01em;
+    .content-title {
+      margin: 0;
+
+      font-size:
+        clamp(1.5rem,2.4vw,2rem);
+
+      font-weight: 780;
+
+      letter-spacing: -.035em;
     }
 
-    .summary-item small {
-      display: block;
-      margin-top: 4px;
+    .description {
+      margin: 6px 0 0;
+
       color: var(--muted);
+
+      font-size: .9rem;
+      line-height: 1.5;
+    }
+
+    .count {
+      flex: 0 0 auto;
+
+      margin: 0;
+      padding: 7px 11px;
+
+      border: 1px solid var(--border);
+      border-radius: 100px;
+
+      background:
+        rgba(255,255,255,.65);
+
+      color: var(--muted);
+
+      font-size: .8rem;
+      font-weight: 700;
+    }
+
+    /* =====================================================
+       EDIT BANNER
+       ===================================================== */
+
+    .edit-banner {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+
+      gap: 15px;
+
+      margin-bottom: 19px;
+      padding: 13px 15px;
+
+      border:
+        1px solid
+        rgba(52,120,246,.20);
+
+      border-radius: 14px;
+
+      background: #edf4ff;
+    }
+
+    .edit-banner strong {
+      display: block;
+      font-size: .88rem;
+    }
+
+    .edit-banner span {
+      display: block;
+
+      margin-top: 3px;
+
+      color: #61728b;
+
+      font-size: .77rem;
+      line-height: 1.5;
+    }
+
+    /* =====================================================
+       MAIN GRID
+       ===================================================== */
+
+    .grid {
+      display: grid;
+
+      grid-template-columns:
+        repeat(
+          auto-fill,
+          minmax(
+            min(100%,210px),
+            1fr
+          )
+        );
+
+      gap: 18px;
+    }
+
+    /* =====================================================
+       CARD
+       ===================================================== */
+
+    .card {
+      position: relative;
+
+      display: flex;
+      flex-direction: column;
+
+      min-width: 0;
+      min-height: 245px;
+
+      padding: 0;
+
+      overflow: hidden;
+
+      border: 1px solid var(--border);
+      border-radius: 20px;
+
+      background: #ffffff;
+
+      box-shadow: var(--shadow);
+
+      cursor: pointer;
+
+      user-select: none;
+
+      transition:
+        transform .16s ease,
+        box-shadow .16s ease,
+        border .16s ease,
+        background .16s ease;
+    }
+
+    .card:hover {
+      transform: translateY(-4px);
+
+      box-shadow:
+        var(--shadow-hover);
+    }
+
+    .card.editing {
+      cursor: grab;
+      padding-bottom: 42px;
+    }
+
+    .card.dragging {
+      opacity: .3;
+    }
+
+    /* =====================================================
+       IMAGE AREA
+       ===================================================== */
+
+    .icon-wrap {
+      position: relative;
+
+      display: flex;
+      align-items: center;
+      justify-content: center;
+
+      width: 100%;
+      height: 190px;
+
+      margin: 0;
+      padding: 0;
+
+      overflow: hidden;
+
+      border: 0;
+      border-radius: 0;
+
+      background: #ffffff;
+
+      box-shadow: none;
+    }
+
+    /* =====================================================
+       FULL IMAGE — NO CROPPING
+       ===================================================== */
+
+    .app-image {
+      display: block;
+
+      width: 100%;
+      height: 100%;
+
+      margin: 0;
+      padding: 0;
+
+      border: 0;
+
+      background: transparent;
+
+      object-fit: contain;
+      object-position: center;
+    }
+
+    /* =====================================================
+       NAME UNDER IMAGE
+       ===================================================== */
+
+    .card-name {
+      display: flex;
+      align-items: center;
+      justify-content: center;
+
+      width: 100%;
+      min-height: 55px;
+
+      margin: 0;
+
+      padding: 10px 12px;
+
+      text-align: center;
+
+      color: var(--text);
+
+      background: #ffffff;
+
+      font-size: .95rem;
+      font-weight: 720;
+      line-height: 1.3;
+
+      overflow-wrap: anywhere;
+
+      border-top:
+        1px solid
+        rgba(25,45,72,.06);
+    }
+
+    /* =====================================================
+       DRAG DROP
+       ===================================================== */
+
+    .card.drop-before {
+      box-shadow:
+        inset 7px 0 0 var(--blue),
+        var(--shadow-hover);
+
+      background: #f4f8ff;
+    }
+
+    .card.drop-after {
+      box-shadow:
+        inset -7px 0 0 var(--blue),
+        var(--shadow-hover);
+
+      background: #f4f8ff;
+    }
+
+    .card.drop-folder {
+      border:
+        3px solid var(--blue);
+
+      background: #eaf2ff;
+
+      transform: scale(1.03);
+    }
+
+    .drop-message {
+      position: absolute;
+
+      left: 50%;
+      bottom: 7px;
+
+      z-index: 25;
+
+      transform:
+        translateX(-50%);
+
+      padding: 4px 8px;
+
+      border-radius: 8px;
+
+      color: white;
+
+      background:
+        rgba(34,59,96,.90);
+
+      font-size: .65rem;
+      font-weight: 700;
+
+      white-space: nowrap;
+
+      pointer-events: none;
+    }
+
+    /* =====================================================
+       FOLDER
+       ===================================================== */
+
+    .folder-card {
+      justify-content: center;
+      align-items: center;
+
+      padding: 30px 15px 20px;
+
+      background:
+        linear-gradient(
+          145deg,
+          #ffffff,
+          #f5f8ff
+        );
+    }
+
+    .folder-card.editing {
+      padding-bottom: 48px;
+    }
+
+    .folder-icon {
+      position: relative;
+
+      width: 112px;
+      height: 90px;
+
+      padding: 12px;
+
+      margin-top: 12px;
+
+      border-radius:
+        14px 20px 20px 20px;
+
+      background:
+        linear-gradient(
+          145deg,
+          #6fa5ff,
+          #447ee8
+        );
+
+      box-shadow:
+        0 10px 24px
+        rgba(52,120,246,.24);
+    }
+
+    .folder-icon::before {
+      position: absolute;
+
+      top: -8px;
+      left: 10px;
+
+      width: 42px;
+      height: 14px;
+
+      content: "";
+
+      border-radius:
+        8px 8px 0 0;
+
+      background: #6fa5ff;
+    }
+
+    .folder-preview {
+      display: grid;
+
+      width: 100%;
+      height: 100%;
+
+      grid-template-columns:
+        repeat(2,1fr);
+
+      gap: 6px;
+    }
+
+    .folder-preview-cell {
+      display: flex;
+      align-items: center;
+      justify-content: center;
+
+      overflow: hidden;
+
+      border-radius: 8px;
+
+      background:
+        rgba(255,255,255,.95);
+    }
+
+    .folder-preview-cell img {
+      width: 100%;
+      height: 100%;
+
+      padding: 2px;
+
+      object-fit: contain;
+      object-position: center;
+    }
+
+    .folder-empty-dot {
+      width: 10px;
+      height: 10px;
+
+      border-radius: 50%;
+
+      background:
+        rgba(63,99,160,.25);
+    }
+
+    .folder-card .card-name {
+      margin-top: 18px;
+
+      border: 0;
+
+      background: transparent;
+    }
+
+    /* =====================================================
+       CARD TOOLS
+       ===================================================== */
+
+    .card-tools {
+      position: absolute;
+
+      top: 8px;
+      right: 8px;
+
+      z-index: 30;
+
+      display: flex;
+
+      gap: 5px;
+    }
+
+    .tool-button {
+      display: grid;
+
+      width: 32px;
+      height: 32px;
+
+      place-items: center;
+
+      padding: 0;
+
+      border: 0;
+      border-radius: 9px;
+
+      cursor: pointer;
+
+      color: #5c697c;
+
+      background:
+        rgba(240,244,249,.97);
+
+      box-shadow:
+        0 3px 8px
+        rgba(20,40,70,.10);
+    }
+
+    .tool-button.delete {
+      color: var(--red);
+
+      background: var(--red-light);
+    }
+
+    /* =====================================================
+       ORDER BUTTONS
+       ===================================================== */
+
+    .order-tools {
+      position: absolute;
+
+      left: 50%;
+      bottom: 7px;
+
+      z-index: 30;
+
+      display: flex;
+
+      gap: 5px;
+
+      transform:
+        translateX(-50%);
+    }
+
+    .order-btn {
+      display: grid;
+
+      width: 34px;
+      height: 29px;
+
+      place-items: center;
+
+      padding: 0;
+
+      border: 0;
+      border-radius: 8px;
+
+      cursor: pointer;
+
+      color: var(--navy);
+
+      background: #eaf0f8;
+
+      font-weight: 800;
+    }
+
+    .order-btn:disabled {
+      opacity: .3;
+      cursor: default;
+    }
+
+    /* =====================================================
+       STATUS
+       ===================================================== */
+
+    .status {
+      display: grid;
+
+      min-height: 270px;
+
+      place-items: center;
+
+      padding: 35px 20px;
+
+      border:
+        1px dashed
+        rgba(31,50,78,.16);
+
+      border-radius: 19px;
+
+      background:
+        rgba(255,255,255,.6);
+
+      text-align: center;
+    }
+
+    .spinner {
+      width: 44px;
+      height: 44px;
+
+      margin:
+        0 auto 16px;
+
+      border:
+        4px solid
+        rgba(52,120,246,.14);
+
+      border-top-color:
+        var(--blue);
+
+      border-radius: 50%;
+
+      animation:
+        spin .8s linear infinite;
+    }
+
+    @keyframes spin {
+      to {
+        transform: rotate(360deg);
+      }
+    }
+
+    /* =====================================================
+       MODALS
+       ===================================================== */
+
+    .overlay {
+      position: fixed;
+
+      inset: 0;
+
+      z-index: 1000;
+
+      display: grid;
+      place-items: center;
+
+      padding: 18px;
+
+      background:
+        rgba(19,31,48,.5);
+
+      backdrop-filter: blur(6px);
+      -webkit-backdrop-filter: blur(6px);
+    }
+
+    .modal {
+      width: min(500px,100%);
+
+      max-height:
+        calc(100vh - 36px);
+
+      overflow-y: auto;
+
+      padding: 24px;
+
+      border-radius: 22px;
+
+      background: white;
+
+      box-shadow:
+        0 30px 80px
+        rgba(18,31,48,.3);
+    }
+
+    .folder-window {
+      width:
+        min(900px,100%);
+    }
+
+    .modal-header {
+      display: flex;
+      align-items: flex-start;
+      justify-content: space-between;
+
+      gap: 15px;
+
+      margin-bottom: 20px;
+    }
+
+    .modal-title {
+      margin: 0;
+
+      font-size: 1.3rem;
+      font-weight: 780;
+    }
+
+    .modal-subtitle {
+      margin: 5px 0 0;
+
+      color: var(--muted);
+
+      font-size: .82rem;
       line-height: 1.45;
     }
 
-    .summary-price {
-      color: var(--blue);
-      font-weight: 700;
-      white-space: nowrap;
-    }
+    .close {
+      display: grid;
 
-    .total-card {
-      position: sticky;
-      top: 136px;
-    }
+      width: 35px;
+      height: 35px;
 
-    .total-label {
+      flex: 0 0 35px;
+
+      place-items: center;
+
+      border: 0;
+      border-radius: 10px;
+
+      cursor: pointer;
+
       color: var(--muted);
-      font-size: 0.95rem;
-      font-weight: 600;
-      margin-bottom: 4px;
+
+      background: #eef2f7;
     }
 
-    .total-price {
-      font-size: clamp(2.5rem, 5vw, 4rem);
-      letter-spacing: -0.055em;
+    /* =====================================================
+       FORM
+       ===================================================== */
+
+    .field {
+      margin-bottom: 16px;
+    }
+
+    .label {
+      display: block;
+
+      margin-bottom: 7px;
+
+      font-size: .83rem;
       font-weight: 700;
-      line-height: 1;
-      margin-bottom: 18px;
     }
 
-    .checkout-button {
+    .input {
       width: 100%;
-      margin-top: 14px;
+      height: 47px;
+
+      padding: 0 13px;
+
+      border:
+        1px solid #dce3ec;
+
+      border-radius: 11px;
+
+      outline: 0;
+
+      background: #fbfcfe;
     }
 
-    .footer-space {
-      height: 24px;
+    .input:focus {
+      border-color: var(--blue);
+
+      box-shadow:
+        0 0 0 4px
+        rgba(52,120,246,.1);
+
+      background: white;
     }
 
-    @media (max-width: 1180px) {
-      .service-grid,
-      .info-grid,
-      .radio-group {
-        grid-template-columns: 1fr 1fr;
-      }
+    .form-error {
+      min-height: 18px;
 
-      .summary-layout {
-        grid-template-columns: 1fr;
-      }
+      margin-top: 6px;
 
-      .total-card {
-        position: static;
-      }
+      color: var(--red);
+
+      font-size: .78rem;
+      font-weight: 600;
     }
 
-    @media (max-width: 920px) {
-      .sidebar {
-        transform: translateX(-100%);
+    .modal-actions {
+      display: flex;
+      justify-content: flex-end;
+
+      gap: 8px;
+
+      margin-top: 20px;
+    }
+
+    /* =====================================================
+       FOLDER CONTENT
+       ===================================================== */
+
+    .folder-grid {
+      display: grid;
+
+      grid-template-columns:
+        repeat(
+          auto-fill,
+          minmax(170px,1fr)
+        );
+
+      gap: 14px;
+    }
+
+    .folder-app {
+      position: relative;
+
+      display: flex;
+      flex-direction: column;
+
+      align-items: stretch;
+      justify-content: flex-start;
+
+      min-height: 200px;
+
+      overflow: hidden;
+
+      border:
+        1px solid var(--border);
+
+      border-radius: 16px;
+
+      cursor: pointer;
+
+      background: white;
+
+      box-shadow:
+        0 6px 18px
+        rgba(30,48,76,.07);
+    }
+
+    .folder-app:hover {
+      background: #f8fbff;
+    }
+
+    .folder-app .icon-wrap {
+      width: 100%;
+      height: 145px;
+    }
+
+    .folder-app .app-image {
+      width: 100%;
+      height: 100%;
+
+      padding: 0;
+
+      object-fit: contain;
+      object-position: center;
+    }
+
+    .folder-app .card-name {
+      min-height: 48px;
+
+      font-size: .85rem;
+    }
+
+    .folder-app.edit-folder-app {
+      padding-bottom: 39px;
+    }
+
+    .folder-tools {
+      position: absolute;
+
+      top: 6px;
+      right: 6px;
+
+      z-index: 30;
+
+      display: flex;
+
+      gap: 4px;
+    }
+
+    .folder-order-tools {
+      position: absolute;
+
+      bottom: 6px;
+      left: 50%;
+
+      z-index: 30;
+
+      display: flex;
+
+      gap: 4px;
+
+      transform:
+        translateX(-50%);
+    }
+
+    .folder-tool {
+      display: grid;
+
+      width: 29px;
+      height: 29px;
+
+      place-items: center;
+
+      padding: 0;
+
+      border: 0;
+      border-radius: 8px;
+
+      cursor: pointer;
+
+      color: #59677b;
+
+      background: white;
+
+      box-shadow:
+        0 3px 8px
+        rgba(31,50,78,.12);
+    }
+
+    /* =====================================================
+       TOAST
+       ===================================================== */
+
+    .toast-area {
+      position: fixed;
+
+      right: 17px;
+      bottom: 17px;
+
+      z-index: 3000;
+    }
+
+    .toast {
+      margin-top: 7px;
+
+      padding: 12px 15px;
+
+      border-radius: 12px;
+
+      color: white;
+
+      background: #27364e;
+
+      box-shadow:
+        0 12px 35px
+        rgba(18,31,48,.22);
+
+      font-size: .83rem;
+      font-weight: 650;
+    }
+
+    .toast.success {
+      background: var(--green);
+    }
+
+    .toast.error {
+      background: var(--red);
+    }
+
+    /* =====================================================
+       SAVING
+       ===================================================== */
+
+    .saving {
+      position: fixed;
+
+      inset: 0;
+
+      z-index: 4000;
+
+      display: grid;
+      place-items: center;
+
+      background:
+        rgba(243,246,251,.7);
+
+      backdrop-filter: blur(3px);
+    }
+
+    .saving-card {
+      display: flex;
+      align-items: center;
+
+      gap: 11px;
+
+      padding: 14px 18px;
+
+      border-radius: 14px;
+
+      background: white;
+
+      box-shadow:
+        0 20px 55px
+        rgba(18,31,48,.18);
+
+      font-size: .85rem;
+      font-weight: 700;
+    }
+
+    .saving-spinner {
+      width: 20px;
+      height: 20px;
+
+      border:
+        3px solid
+        rgba(52,120,246,.15);
+
+      border-top-color:
+        var(--blue);
+
+      border-radius: 50%;
+
+      animation:
+        spin .75s linear infinite;
+    }
+
+    /* =====================================================
+       MOBILE
+       ===================================================== */
+
+    @media (max-width:720px) {
+
+      .page {
+        padding-top: 11px;
       }
 
-      .sidebar.open {
-        transform: translateX(0);
+      .header {
+        top: 6px;
+
+        padding: 12px;
+
+        border-radius: 18px;
       }
 
-      .main {
-        margin-left: 0;
+      .brand-icon {
+        width: 42px;
+        height: 42px;
+
+        flex-basis: 42px;
       }
 
-      .menu-toggle {
-        display: inline-flex;
-        align-items: center;
-        justify-content: center;
-      }
-
-      .menu {
+      .brand-subtitle {
         display: none;
       }
 
-      .top-logo {
-        height: 70px;
+      .btn {
+        min-height: 39px;
+
+        padding: 8px 10px;
       }
 
-      .overlay.show {
-        display: block;
-        position: fixed;
-        inset: 0;
-        background: rgba(29, 29, 31, 0.26);
-        z-index: 950;
+      .mobile-hide {
+        display: none;
       }
 
-      .hero {
-        grid-template-columns: 1fr;
-        padding-top: 18px;
+      .grid {
+        grid-template-columns:
+          repeat(2,minmax(0,1fr));
+
+        gap: 12px;
       }
 
-      .hero h1 {
-        max-width: none;
-      }
-    }
+      .card {
+        min-height: 200px;
 
-    @media (max-width: 720px) {
-      .page,
-      .topbar-inner {
-        padding-left: 18px;
-        padding-right: 18px;
+        border-radius: 17px;
       }
 
-      .service-grid,
-      .info-grid,
-      .radio-group {
-        grid-template-columns: 1fr;
+      .card.editing {
+        padding-bottom: 40px;
       }
 
-      .glass-card,
-      .mini-card {
-        border-radius: 24px;
+      .icon-wrap {
+        width: 100%;
+        height: 150px;
       }
 
-      .selection-header {
+      .app-image {
+        width: 100%;
+        height: 100%;
+
+        padding: 0;
+
+        object-fit: contain;
+        object-position: center;
+      }
+
+      .card-name {
+        min-height: 50px;
+
+        padding: 8px 9px;
+
+        font-size: .86rem;
+      }
+
+      .folder-card {
+        min-height: 200px;
+
+        padding-top: 27px;
+      }
+
+      .folder-icon {
+        width: 85px;
+        height: 69px;
+      }
+
+      .folder-card .card-name {
+        margin-top: 15px;
+      }
+
+      .edit-banner {
+        align-items: flex-start;
         flex-direction: column;
       }
 
-      .category-clear {
-        width: 100%;
+      .folder-grid {
+        grid-template-columns:
+          repeat(2,minmax(0,1fr));
       }
 
-      .summary-item {
-        flex-direction: column;
+      .folder-app .icon-wrap {
+        height: 120px;
       }
 
-      .button.checkout-button {
-        width: 100%;
+    }
+
+    @media (max-width:390px) {
+
+      .grid {
+        grid-template-columns:
+          repeat(2,minmax(0,1fr));
       }
-    }
 
-    .save-status {
-      display: none;
-      margin-top: 12px;
-      padding: 12px 14px;
-      border-radius: 14px;
-      background: #f2f7ff;
-      border: 1px solid #cfe2ff;
-      color: #245b9e;
-      font-size: 0.92rem;
-      line-height: 1.45;
-    }
+      .icon-wrap {
+        height: 130px;
+      }
 
-    .save-status.show {
-      display: block;
-    }
+      .card {
+        min-height: 180px;
+      }
 
-    .save-status.error {
-      background: #fff3f3;
-      border-color: #ffc9c9;
-      color: #a61b1b;
-    }
-
-    .save-status.success {
-      background: #f0faf3;
-      border-color: #bfe6c9;
-      color: #216e39;
-    }
-
-    .contract-meta-note {
-      margin-top: 10px;
-      color: var(--muted);
-      font-size: 0.82rem;
-      line-height: 1.45;
-    }
-
-    .terms-wrapper {
-      clear: both;
-    }
-
-    .terms-wrapper ol {
-      padding-left: 22px;
-    }
-
-    .terms-wrapper li {
-      margin-bottom: 18px;
     }
 
   </style>
 </head>
 
 <body>
-  <div class="layout">
-    <aside class="sidebar" id="sidebar">
-      <div class="sidebar-group">
-        <div class="sidebar-label">Explore</div>
-        <nav class="sidebar-nav">
-          <a href="#resources">How It Works</a>
-          <a href="/contact/">Contact Us</a>
-          <a href="/subscriptions/">Subscriptions</a>
-          <a href="/TrackYourOrder/">Track Your Order</a>
-          <a href="/memberorder/">Member Order</a>
-        </nav>
+
+<main class="page">
+
+  <!-- HEADER -->
+
+  <header class="header">
+
+    <div class="brand">
+
+      <div class="brand-icon">
+
+        <svg
+          viewBox="0 0 24 24"
+          fill="none"
+          stroke="currentColor"
+          stroke-width="2"
+        >
+          <rect x="3" y="3" width="7" height="7" rx="2"></rect>
+          <rect x="14" y="3" width="7" height="7" rx="2"></rect>
+          <rect x="3" y="14" width="7" height="7" rx="2"></rect>
+          <rect x="14" y="14" width="7" height="7" rx="2"></rect>
+        </svg>
+
       </div>
 
-      <div class="sidebar-group">
-        <div class="sidebar-label">Booking</div>
-        <nav class="sidebar-nav">
-          <a href="#serviceSelections">Our Offerings</a>
-        </nav>
+      <div>
+
+        <h1 class="brand-title">
+          App Launcher
+        </h1>
+
+        <p class="brand-subtitle">
+          Your applications in one place
+        </p>
+
       </div>
 
-      <div class="sidebar-card">
-        <strong>Need help ordering?</strong>
-        <a href="#booking">Order Now →</a>
-      </div>
-    </aside>
-
-    <div class="overlay" id="overlay"></div>
-
-    <main class="main">
-      <header class="topbar">
-        <div class="topbar-inner">
-          <div class="topbar-left">
-            <button class="menu-toggle" id="menuToggle" aria-label="Open sidebar">☰</button>
-          </div>
-
-          <nav class="menu" aria-label="Top navigation">
-            <a href="#serviceSelections">Packages</a>
-            <a href="/contact/">Contact Us</a>
-            <a href="/subscriptions/">Subscriptions</a>
-            <a href="/TrackYourOrder/">Track Your Order</a>
-            <a href="/memberorder/">Member Order</a>
-            <a href="#booking">Book</a>
-          </nav>
-        </div>
-      </header>
-
-      <div class="page">
-        <section class="hero" id="home">
-          <div class="hero-copy">
-            <h1>Where quality meets affordability</h1>
-            <p>
-              Sigma Wash delivers a delicate hand-wash experience to your doorstep and on your schedule.
-            </p>
-          </div>
-        </section>
-
-        <section class="glass-card" id="howItWorks">
-          <h2>How it works</h2>
-          <p class="subtext">Use the plan builder below to find the perfect subscription for you.</p>
-
-          <div class="service-grid">
-            <div class="mini-card">
-              <h3>Shareable</h3>
-              <p>
-                You can use our services on any car in your household.
-                <span>Washes and cleanings reload each month.</span>
-              </p>
-            </div>
-
-            <div class="mini-card">
-              <h3>Billed month to month</h3>
-              <p>
-                Your first month is prorated.
-                <span>Cancel anytime.</span>
-              </p>
-            </div>
-
-            <div class="mini-card">
-              <h3>Add-Ons included</h3>
-              <p>
-                Just let us know if you would like your cargo area cleaned.
-                <span>No extra charge.</span>
-              </p>
-            </div>
-
-            <div class="mini-card">
-              <h3>Perks</h3>
-              <p>
-                Members receive 10% off all extra services.
-                <span>
-                  You get insider pricing as a member. If you run out of washes you get
-                  20% off extra washes. Use one for yourself or buy your friend a wash.
-                </span>
-              </p>
-            </div>
-          </div>
-        </section>
-
-        <section class="glass-card" id="resources">
-          <h2>Choose Your Services</h2>
-          <p class="subtext">
-            Select one option from each category you want. You can choose a single
-            service or create a predefined multi-service checkout.
-          </p>
-
-          <div class="info-grid">
-            <div class="mini-card">
-              <h3>1. Select</h3>
-              <p>Pick one service plan from any section below.</p>
-            </div>
-
-            <div class="mini-card">
-              <h3>2. Review</h3>
-              <p>Your selected services and total price appear in the summary.</p>
-            </div>
-
-            <div class="mini-card">
-              <h3>3. Checkout</h3>
-              <p>The page finds the right Square link for your service or predefined combination.</p>
-            </div>
-          </div>
-        </section>
-
-        <div id="serviceSelections">
-          <div id="serviceSections"></div>
-        </div>
-
-        <section class="glass-card" id="booking">
-          <h2>Price Summary</h2>
-          <p class="subtext">
-            Review your selected services, agree to the Terms & Conditions, then continue to checkout.
-          </p>
-
-          <div class="summary-layout">
-            <div>
-              <div class="summary-list" id="selectedServicesList">
-                <div class="summary-empty">No services selected yet.</div>
-              </div>
-            </div>
-
-            <div class="mini-card total-card" id="termsSection">
-              <div class="total-label">Total Price</div>
-              <div class="total-price" id="totalPrice">$0.00</div>
-
-              <div class="customer-fields" aria-label="Customer contact information">
-                <div class="customer-field">
-                  <label for="customerName">Full name</label>
-                  <input
-                    type="text"
-                    id="customerName"
-                    name="customerName"
-                    autocomplete="name"
-                    placeholder="Enter your full name"
-                    required
-                  />
-                </div>
-
-                <div class="customer-field">
-                  <label for="customerPhone">Phone number</label>
-                  <input
-                    type="tel"
-                    id="customerPhone"
-                    name="phoneNumber"
-                    autocomplete="tel"
-                    inputmode="tel"
-                    placeholder="Enter your phone number"
-                    required
-                  />
-                </div>
-              </div>
-
-              <div class="terms-box">
-                <input type="checkbox" id="agreeTerms" />
-                <div class="terms-text">
-                  I agree to the
-                  <button type="button" class="terms-link" id="openTerms">
-                    Terms & Conditions / Service Waiver
-                  </button>
-                </div>
-              </div>
-
-              <div class="contract-meta-note">
-                Your typed name and checked agreement box will be recorded as part of the electronic contract record.
-              </div>
-
-              <div class="checkout-help" id="checkoutHelp">
-                Please select a service, add your name and phone number, and agree to the terms before checkout.
-              </div>
-
-              <div class="save-status" id="saveStatus" aria-live="polite"></div>
-
-              <button type="button" class="button checkout-button" id="checkoutButton" disabled>
-                Continue to Checkout
-              </button>
-            </div>
-          </div>
-        </section>
-
-        <div class="footer-space"></div>
-      </div>
-    </main>
-  </div>
-
-
-
-  <!--
-    DIRECT GOOGLE APPS SCRIPT CONTRACT SUBMISSION
-    --------------------------------------------------------------
-    This hidden form posts directly to the Google Apps Script Web App.
-    No intermediary server is used.
-  -->
-  <form
-    id="contractSaveForm"
-    method="post"
-    target="contractSaveFrame"
-    style="display:none;"
-  >
-    <input type="hidden" id="formRequestId" name="requestId" />
-    <input type="hidden" id="formContractId" name="contractId" />
-    <input type="hidden" id="formCustomerName" name="customerName" />
-    <input type="hidden" id="formPhoneNumber" name="phoneNumber" />
-    <input type="hidden" id="formSelectedServiceIds" name="selectedServiceIds" />
-    <input type="hidden" id="formAgreeTerms" name="agreeTerms" />
-    <input type="hidden" id="formElectronicSignature" name="electronicSignature" />
-    <input type="hidden" id="formAcceptedAtBrowser" name="acceptedAtBrowser" />
-    <input type="hidden" id="formAcceptedAtLocal" name="acceptedAtLocal" />
-    <input type="hidden" id="formPageUrl" name="pageUrl" />
-    <input type="hidden" id="formUserAgent" name="userAgent" />
-    <input type="text" id="formWebsite" name="website" tabindex="-1" autocomplete="off" />
-    <textarea id="formContractText" name="contractText"></textarea>
-  </form>
-
-  <iframe
-    id="contractSaveFrame"
-    name="contractSaveFrame"
-    title="Contract save response"
-    style="display:none;"
-  ></iframe>
-
-  <div class="terms-modal" id="termsModal" aria-hidden="true">
-    <div class="terms-overlay" id="termsOverlay"></div>
-
-    <div class="terms-content">
-      <button type="button" class="close-terms" id="closeTerms" aria-label="Close terms">✕</button>
-
-      <div class="terms-wrapper" id="contractDocument">
-<h3>Subscription Service Agreement</h3>
-<p>
-      By checking the box below, you (“Customer”) confirm that you have read,
-      understood, and agree to this Subscription Service Agreement with
-      Quantitative Midwest doing business as Sigma Wash, a Kansas limited
-      liability company (the “Company”).
-    </p>
-<p>
-      You understand and agree that checking the box is your electronic signature
-      and has the same legal effect as signing this Agreement by hand, to the
-      fullest extent permitted by law.
-    </p>
-<ol>
-<li>
-<strong>Parties and Agreement:</strong>
-        This Subscription Service Agreement (the “Agreement”) is entered into by
-        and between Quantitative Midwest doing business as Sigma Wash, a Kansas
-        limited liability company (the “Company”), and the customer
-        (“Customer”). This Agreement becomes effective on the date Customer
-        checks the box, electronically signs, or otherwise accepts this
-        Agreement.
-      </li>
-<li>
-<strong>Subscription Enrollment and Automatic Renewal:</strong>
-        Customer agrees to enroll in the subscription service identified in the
-        Subscription Summary. The subscription automatically renews according to
-        the Billing Frequency unless canceled under this Agreement.
-        <br/><br/>
-        Customer authorizes Company and/or its payment processor to charge
-        Customer’s selected payment method on a recurring basis for all
-        subscription charges, fees, taxes, and other amounts due under this
-        Agreement.
-      </li>
-<li>
-<strong>Service Scope; Company Discretion:</strong>
-        The services provided under the subscription are limited to the services,
-        scope, frequency, availability, location, and conditions determined by
-        Company. Company may modify, limit, substitute, discontinue, or refuse
-        any service to the fullest extent permitted by law.
-        <br/><br/>
-        Services are not guaranteed to be available at all times and may depend
-        on scheduling, staffing, location, weather, equipment, customer demand,
-        safety, business operations, third-party providers, or other conditions.
-      </li>
-<li>
-<strong>Expiration of Unused Services:</strong>
-        Any unused services, credits, sessions, visits, benefits, appointments,
-        or service rights expire at the end of each monthly billing period and
-        do not roll over unless Company expressly agrees in writing.
-        <br/><br/>
-        For purposes of this Agreement, a monthly billing period means the
-        recurring subscription period beginning on the charge date and ending
-        immediately before the next recurring billing date, unless Company states
-        a different billing cycle in writing.
-      </li>
-<li>
-<strong>Price Changes and Plan Changes:</strong>
-        Company may increase, decrease, modify, or otherwise change the
-        subscription price, billing frequency, included services, or plan terms
-        at any time, subject to any notice required by applicable law.
-        <br/><br/>
-        If Company gives notice of a material price change, Customer’s continued
-        use of the service after the updated price becomes effective constitutes
-        acceptance of the updated price. Customer’s sole remedy if Customer does
-        not accept a price change is to cancel the subscription before the
-        updated price is charged.
-      </li>
-<li>
-<strong>Cancellation by Customer:</strong>
-        Customer may cancel the subscription using the Cancellation Method listed
-        in the Subscription Summary. A cancellation request must include enough
-        information for Company to identify the subscription account.
-        <br/><br/>
-        Unless Company states otherwise in writing, cancellation becomes
-        effective at the end of the then-current paid billing period.
-        Cancellation does not automatically entitle Customer to a refund for
-        amounts already paid.
-      </li>
-<li>
-<strong>No Refunds; Failed Payments; Chargebacks:</strong>
-        Payments are non-refundable except where required by applicable law or
-        expressly approved in writing by Company.
-        <br/><br/>
-        Company may suspend, limit, or cancel services if payment fails, is
-        disputed, is reversed, is charged back, or is not received. Customer
-        agrees to contact Company first regarding any billing concern, duplicate
-        charge, cancellation issue, or service dispute. Customer remains
-        responsible for all valid charges and amounts owed under this Agreement.
-      </li>
-<li>
-<strong>Personal Use; No Resale; Sharing Responsibility:</strong>
-        The subscription is personal to the individual Customer who accepts this
-        Agreement. Customer may not transfer, assign, sell, sublicense, resell,
-        repackage, broker, market, or commercially exploit any services provided
-        under the subscription.
-        <br/><br/>
-        The service is intended only for the Customer accepting this Agreement.
-        If Customer shares, gifts, donates, transfers, permits access to, or
-        allows another person to use any portion of the service, Customer assumes
-        full responsibility and liability to the fullest extent permitted by law
-        for that person’s use, including payment obligations, conduct, damages,
-        misuse, claims, losses, injuries, disputes, and consequences arising
-        from that use.
-      </li>
-<li>
-<strong>Customer Responsibilities:</strong>
-        Customer agrees to provide accurate information, keep payment and contact
-        information current, comply with Company rules and policies, use the
-        service appropriately, pay all amounts due, cooperate with scheduling and
-        access requirements, and avoid misuse, unauthorized sharing, or
-        unauthorized resale of the service.
-        <br/><br/>
-        Customer is responsible for the conduct of any person Customer allows to
-        access or receive the service.
-      </li>
-<li>
-<strong>Company Right to Suspend, Refuse, or Terminate Service:</strong>
-        Company may cancel, suspend, refuse, limit, or terminate Customer’s
-        subscription or any services at any time, for any reason, including
-        nonpayment, safety concerns, misuse, inappropriate conduct, operational
-        limitations, scheduling limitations, violation of this Agreement, or any
-        other business reason, to the fullest extent permitted by law.
-        <br/><br/>
-        If Company terminates the subscription without cause before the end of a
-        paid billing period, Company may provide a prorated refund, credit,
-        substitute service, or no refund, except where otherwise required by
-        applicable law.
-      </li>
-<li>
-<strong>Prior Terms, Service Rules, and Policies:</strong>
-        This Agreement does not replace, negate, waive, override, amend, or alter
-        any prior Terms of Service, website terms, service policies, waivers,
-        disclaimers, rules, or other agreements that Customer has previously
-        accepted or may accept when receiving the service. All such terms remain
-        fully valid and enforceable to the extent permitted by law.
-        <br/><br/>
-        If there is a direct conflict between this Agreement and another written
-        Company policy, Company may determine which provision controls unless
-        applicable law requires otherwise.
-      </li>
-<li>
-<strong>Communications and Notices:</strong>
-        Customer agrees that Company may contact Customer by phone, email, text
-        message, or other reasonable method regarding the subscription,
-        appointments, scheduling, billing, account updates, cancellation, and
-        service-related matters. Customer is responsible for maintaining current
-        contact information.
-        <br/><br/>
-        Notices sent to the contact information provided by Customer will be
-        considered received by Customer unless prohibited by applicable law.
-      </li>
-<li>
-<strong>Disclaimer; Limitation of Liability:</strong>
-        To the fullest extent permitted by law, Company disclaims all warranties
-        not expressly stated in this Agreement, including implied warranties of
-        merchantability, fitness for a particular purpose, and uninterrupted
-        availability.
-        <br/><br/>
-        To the fullest extent permitted by law, Company’s total liability arising
-        out of or relating to this Agreement or the services will not exceed the
-        amount Customer paid to Company for the subscription during the one-month
-        period immediately preceding the event giving rise to the claim. Company
-        will not be liable for indirect, incidental, consequential, special,
-        punitive, or lost-profit damages.
-      </li>
-<li>
-<strong>Indemnification:</strong>
-        Customer agrees to defend, indemnify, and hold harmless Company, its
-        owners, employees, contractors, agents, representatives, successors, and
-        assigns from any claims, losses, damages, liabilities, costs, and
-        expenses, including reasonable attorney fees, arising out of or related
-        to Customer’s use or misuse of the services, violation of this Agreement,
-        unauthorized sharing, gifting, transfer, resale, or the conduct of any
-        person Customer allows to access or receive the service, to the fullest
-        extent permitted by law.
-      </li>
-<li>
-<strong>Reviews and Public Statements:</strong>
-        Nothing in this Agreement prohibits Customer from making an honest review
-        or truthful statement about Customer’s experience as permitted by
-        applicable law. Customer may not make statements that are knowingly
-        false, misleading, defamatory, harassing, or that improperly disclose
-        private, confidential, or legally protected information.
-      </li>
-<li>
-<strong>Electronic Signature; Copy of Agreement:</strong>
-        Customer agrees that this Agreement may be presented, reviewed, accepted,
-        signed, and stored electronically. Customer agrees that Customer’s
-        electronic signature, typed name, touchscreen signature, checkbox
-        acceptance, or other electronic indication of agreement has the same
-        effect as a handwritten signature to the fullest extent permitted by law.
-        <br/><br/>
-        Customer acknowledges that Customer had the opportunity to read this
-        Agreement before accepting it and may request a paper or electronic copy
-        of this Agreement.
-      </li>
-<li>
-<strong>Governing Law; Venue; General Terms:</strong>
-        This Agreement is governed by the laws of the State of Kansas, without
-        regard to conflict-of-law rules. Any dispute arising from or relating to
-        this Agreement shall be brought in the state or federal courts located in
-        Kansas, unless another venue is required by applicable law.
-        <br/><br/>
-        If any provision of this Agreement is found unenforceable, the remaining
-        provisions will remain in effect. This Agreement, together with any
-        applicable Company terms, service rules, waivers, policies, and accepted
-        service terms, represents the agreement between the parties regarding the
-        subscription. Company’s failure to enforce a provision is not a waiver.
-        Customer may not assign this Agreement without Company’s written consent.
-        Company may assign this Agreement as part of a sale, transfer,
-        reorganization, or business transaction. Headings are for convenience
-        only.
-      </li>
-<li>
-<strong>Minimum Customer Acknowledgment:</strong>
-        Customer confirms that Customer has read this Agreement, understands this
-        is a recurring subscription, authorizes recurring charges, understands
-        unused services expire at the end of each monthly billing period,
-        understands cancellation does not automatically create a refund,
-        understands prices and services may change, and agrees not to resell or
-        commercially exploit the services.
-      </li>
-<li>
-<strong>Signatures:</strong>
-  By checking the box below, Customer accepts and agrees to this
-  Subscription Service Agreement and authorizes Quantitative Midwest doing
-  business as Sigma Wash to provide and bill for the subscription service
-  according to the terms stated above.
-
-  <br/><br/>
-<strong>No Company Signature Required:</strong>
-  Customer acknowledges that this Agreement becomes effective when Customer
-  checks the box, electronically signs, accepts this Agreement, and
-  Quantitative Midwest doing business as Sigma Wash accepts Customer’s
-  subscription, processes Customer’s payment, schedules services, provides
-  services, or otherwise begins performance. A separate signature by
-  Quantitative Midwest doing business as Sigma Wash is not required for
-  this Agreement to be valid or enforceable.
-
-
-<br/> <br/><br/><div>
-<strong>I have read, understood, and agree to the Subscription Service Agreement.
-    I understand that checking this box is my electronic signature and has
-    the same legal effect as signing this Agreement by hand.</strong>
-<br/><br/><br/></div>
-<strong>By providing your phone number, you agree to receive text messages from
-    Quantitative Midwest doing business as Sigma Wash related to your inquiry,
-    appointments, services, orders, customer support, and promotional offers.
-    Message and data rates may apply. Message frequency may vary. Reply STOP
-    to unsubscribe or HELP for assistance. Consent is not a condition of
-    purchase. Mobile opt-in data will not be shared with third parties for
-    marketing or promotional purposes. See our Privacy Policy for details.</strong>
-
-</li>
-</ol>
-      </div>
     </div>
+
+    <div class="header-actions">
+
+      <button
+        id="editModeBtn"
+        class="btn btn-secondary"
+        type="button"
+      >
+        ☰
+        <span class="mobile-hide">
+          Edit
+        </span>
+      </button>
+
+      <button
+        id="newFolderBtn"
+        class="btn btn-secondary"
+        type="button"
+      >
+        📁
+        <span class="mobile-hide">
+          Folder
+        </span>
+      </button>
+
+      <button
+        id="newAppBtn"
+        class="btn btn-primary"
+        type="button"
+      >
+        ＋
+        <span class="mobile-hide">
+          App
+        </span>
+      </button>
+
+    </div>
+
+  </header>
+
+  <!-- CONTENT -->
+
+  <div class="content-header">
+
+    <div>
+
+      <h2 class="content-title">
+        Applications
+      </h2>
+
+      <p class="description">
+        Open an app or folder.
+      </p>
+
+    </div>
+
+    <p
+      id="itemCount"
+      class="count hidden"
+    ></p>
+
   </div>
 
-  <script>
-    "use strict";
+  <!-- EDIT MODE -->
 
-    /*
-      ================================================================
-      ONLY REQUIRED HTML SETTING
-      ================================================================
-      After deploying Code.gs as a Google Apps Script Web App, paste the
-      deployment URL ending in /exec below.
+  <div
+    id="editBanner"
+    class="edit-banner hidden"
+  >
 
-      Example:
-      https://script.google.com/macros/s/AKfycbxxxxxxxxxxxxxxxx/exec
+    <div>
 
-      The page submits directly to Google Apps Script.
-    */
-    const APPS_SCRIPT_WEB_APP_URL = "https://script.google.com/macros/s/AKfycbzaBwrSI6stmK4L6XxF2GXsyBjj31ZQ0dTN2-Nkh3CUl8YLecFC0oE_BecAGFvQdzjIkQ/exec";
+      <strong>
+        Edit mode
+      </strong>
 
-    const services = [
-      {
-        id: "exterior-monthly",
-        serviceName: "Monthly",
-        categoryName: "Exterior Fresh Subscriptions",
-        price: 9.95,
-        individualSquareLink: "https://square.link/u/vVxASFQ3",
-        description: "An affordable way to keep things fresh."
-      },
-      {
-        id: "exterior-every-other-week",
-        serviceName: "Every other week",
-        categoryName: "Exterior Fresh Subscriptions",
-        price: 17.95,
-        individualSquareLink: "https://square.link/u/5BnrZ7Eo",
-        description: "A good option for the average driver."
-      },
-      {
-        id: "exterior-weekly",
-        serviceName: "Weekly",
-        categoryName: "Exterior Fresh Subscriptions",
-        price: 29.95,
-        individualSquareLink: "https://square.link/u/zyBKzo45",
-        description: "For those who want a serious clean."
-      },
-      {
-        id: "interior-monthly",
-        serviceName: "Monthly",
-        categoryName: "Interior Fresh Subscriptions",
-        price: 24.95,
-        individualSquareLink: "https://square.link/u/QcBCLX4M",
-        description: "An affordable way to keep things fresh."
-      },
-      {
-        id: "interior-every-other-week",
-        serviceName: "Every other week",
-        categoryName: "Interior Fresh Subscriptions",
-        price: 44.95,
-        individualSquareLink: "https://square.link/u/5BnrZ7Eo",
-        description: "A good option for the average driver."
-      },
-      {
-        id: "interior-weekly",
-        serviceName: "Weekly",
-        categoryName: "Interior Fresh Subscriptions",
-        price: 59.95,
-        individualSquareLink: "https://square.link/u/fQjKc3ST",
-        description: "For those who want a serious clean."
+      <span>
+        Drop on the left or right side of a card to reorder it. Drop in the center of an app to create a folder. Drop in the center of a folder to move the app inside.
+      </span>
+
+    </div>
+
+    <div class="header-actions">
+
+      <button
+        id="cancelEditBtn"
+        class="btn btn-secondary"
+        type="button"
+      >
+        Cancel
+      </button>
+
+      <button
+        id="saveEditBtn"
+        class="btn btn-success"
+        type="button"
+      >
+        Save
+      </button>
+
+    </div>
+
+  </div>
+
+  <!-- LOADING -->
+
+  <div
+    id="loading"
+    class="status"
+  >
+
+    <div>
+
+      <div class="spinner"></div>
+
+      <strong>
+        Loading applications
+      </strong>
+
+    </div>
+
+  </div>
+
+  <!-- ERROR -->
+
+  <div
+    id="errorPanel"
+    class="status hidden"
+  >
+
+    <div>
+
+      <strong>
+        Unable to load applications
+      </strong>
+
+      <p
+        id="errorMessage"
+        class="description"
+      ></p>
+
+      <br>
+
+      <button
+        id="retryBtn"
+        class="btn btn-primary"
+        type="button"
+      >
+        Try Again
+      </button>
+
+    </div>
+
+  </div>
+
+  <!-- EMPTY -->
+
+  <div
+    id="emptyPanel"
+    class="status hidden"
+  >
+
+    <div>
+
+      <strong>
+        No apps yet
+      </strong>
+
+      <p class="description">
+        Click Add App to create your first application.
+      </p>
+
+    </div>
+
+  </div>
+
+  <!-- GRID -->
+
+  <div
+    id="mainGrid"
+    class="grid"
+  ></div>
+
+</main>
+
+<!-- =====================================================
+     APP MODAL
+     ===================================================== -->
+
+<div
+  id="appModal"
+  class="overlay hidden"
+>
+
+  <div class="modal">
+
+    <div class="modal-header">
+
+      <div>
+
+        <h2
+          id="appModalTitle"
+          class="modal-title"
+        >
+          Add App
+        </h2>
+
+        <p class="modal-subtitle">
+          Enter the application information.
+        </p>
+
+      </div>
+
+      <button
+        id="closeAppModalBtn"
+        class="close"
+        type="button"
+      >
+        ✕
+      </button>
+
+    </div>
+
+    <div class="field">
+
+      <label class="label">
+        App Name
+      </label>
+
+      <input
+        id="appNameInput"
+        class="input"
+        type="text"
+        maxlength="300"
+        placeholder="Example: Google Calendar"
+      >
+
+    </div>
+
+    <div class="field">
+
+      <label class="label">
+        App Link
+      </label>
+
+      <input
+        id="appUrlInput"
+        class="input"
+        type="url"
+        maxlength="4096"
+        placeholder="https://..."
+      >
+
+    </div>
+
+    <div class="field">
+
+      <label class="label">
+        Image Link
+      </label>
+
+      <input
+        id="imageUrlInput"
+        class="input"
+        type="url"
+        maxlength="4096"
+        placeholder="https://..."
+      >
+
+    </div>
+
+    <div
+      id="appFormError"
+      class="form-error"
+    ></div>
+
+    <div class="modal-actions">
+
+      <button
+        id="cancelAppModalBtn"
+        class="btn btn-secondary"
+        type="button"
+      >
+        Cancel
+      </button>
+
+      <button
+        id="saveAppModalBtn"
+        class="btn btn-primary"
+        type="button"
+      >
+        Save App
+      </button>
+
+    </div>
+
+  </div>
+
+</div>
+
+<!-- =====================================================
+     FOLDER NAME MODAL
+     ===================================================== -->
+
+<div
+  id="folderNameModal"
+  class="overlay hidden"
+>
+
+  <div class="modal">
+
+    <div class="modal-header">
+
+      <div>
+
+        <h2
+          id="folderNameTitle"
+          class="modal-title"
+        >
+          New Folder
+        </h2>
+
+        <p class="modal-subtitle">
+          Choose a name for this folder.
+        </p>
+
+      </div>
+
+      <button
+        id="closeFolderNameBtn"
+        class="close"
+        type="button"
+      >
+        ✕
+      </button>
+
+    </div>
+
+    <div class="field">
+
+      <label class="label">
+        Folder Name
+      </label>
+
+      <input
+        id="folderNameInput"
+        class="input"
+        type="text"
+        maxlength="100"
+        placeholder="Example: Pharmacy Apps"
+      >
+
+    </div>
+
+    <div
+      id="folderNameError"
+      class="form-error"
+    ></div>
+
+    <div class="modal-actions">
+
+      <button
+        id="cancelFolderNameBtn"
+        class="btn btn-secondary"
+        type="button"
+      >
+        Cancel
+      </button>
+
+      <button
+        id="saveFolderNameBtn"
+        class="btn btn-primary"
+        type="button"
+      >
+        Save Folder
+      </button>
+
+    </div>
+
+  </div>
+
+</div>
+
+<!-- =====================================================
+     FOLDER WINDOW
+     ===================================================== -->
+
+<div
+  id="folderWindowOverlay"
+  class="overlay hidden"
+>
+
+  <div class="modal folder-window">
+
+    <div class="modal-header">
+
+      <div>
+
+        <h2
+          id="openFolderTitle"
+          class="modal-title"
+        ></h2>
+
+        <p
+          id="openFolderSubtitle"
+          class="modal-subtitle"
+        ></p>
+
+      </div>
+
+      <button
+        id="closeFolderWindowBtn"
+        class="close"
+        type="button"
+      >
+        ✕
+      </button>
+
+    </div>
+
+    <div
+      id="folderContentGrid"
+      class="folder-grid"
+    ></div>
+
+  </div>
+
+</div>
+
+<!-- =====================================================
+     DELETE MODAL
+     ===================================================== -->
+
+<div
+  id="deleteModal"
+  class="overlay hidden"
+>
+
+  <div class="modal">
+
+    <h2 class="modal-title">
+      Delete?
+    </h2>
+
+    <p
+      id="deleteText"
+      class="modal-subtitle"
+    ></p>
+
+    <div class="modal-actions">
+
+      <button
+        id="cancelDeleteBtn"
+        class="btn btn-secondary"
+        type="button"
+      >
+        Cancel
+      </button>
+
+      <button
+        id="confirmDeleteBtn"
+        class="btn btn-danger"
+        type="button"
+      >
+        Delete
+      </button>
+
+    </div>
+
+  </div>
+
+</div>
+
+<!-- SAVING -->
+
+<div
+  id="savingOverlay"
+  class="saving hidden"
+>
+
+  <div class="saving-card">
+
+    <div class="saving-spinner"></div>
+
+    Saving changes...
+
+  </div>
+
+</div>
+
+<!-- TOAST -->
+
+<div
+  id="toastArea"
+  class="toast-area"
+></div>
+
+<script>
+'use strict';
+
+/* =========================================================
+   STATE
+   ========================================================= */
+
+let items = [];
+
+let originalItems = [];
+
+let editMode = false;
+
+let editingAppId = null;
+
+let openFolderId = null;
+
+let draggedId = null;
+
+let currentDropAction = null;
+
+let pendingFolderAction = null;
+
+let pendingDeleteId = null;
+
+
+const DEFAULT_ICON =
+  createDefaultIcon();
+
+
+/* =========================================================
+   ELEMENTS
+   ========================================================= */
+
+const mainGrid =
+  document.getElementById('mainGrid');
+
+const loading =
+  document.getElementById('loading');
+
+const errorPanel =
+  document.getElementById('errorPanel');
+
+const errorMessage =
+  document.getElementById('errorMessage');
+
+const emptyPanel =
+  document.getElementById('emptyPanel');
+
+const itemCount =
+  document.getElementById('itemCount');
+
+const editBanner =
+  document.getElementById('editBanner');
+
+const editModeBtn =
+  document.getElementById('editModeBtn');
+
+const saveEditBtn =
+  document.getElementById('saveEditBtn');
+
+const cancelEditBtn =
+  document.getElementById('cancelEditBtn');
+
+const newAppBtn =
+  document.getElementById('newAppBtn');
+
+const newFolderBtn =
+  document.getElementById('newFolderBtn');
+
+const retryBtn =
+  document.getElementById('retryBtn');
+
+const savingOverlay =
+  document.getElementById('savingOverlay');
+
+const toastArea =
+  document.getElementById('toastArea');
+
+
+/* APP MODAL */
+
+const appModal =
+  document.getElementById('appModal');
+
+const appModalTitle =
+  document.getElementById('appModalTitle');
+
+const appNameInput =
+  document.getElementById('appNameInput');
+
+const appUrlInput =
+  document.getElementById('appUrlInput');
+
+const imageUrlInput =
+  document.getElementById('imageUrlInput');
+
+const appFormError =
+  document.getElementById('appFormError');
+
+const saveAppModalBtn =
+  document.getElementById('saveAppModalBtn');
+
+const cancelAppModalBtn =
+  document.getElementById('cancelAppModalBtn');
+
+const closeAppModalBtn =
+  document.getElementById('closeAppModalBtn');
+
+
+/* FOLDER NAME */
+
+const folderNameModal =
+  document.getElementById('folderNameModal');
+
+const folderNameTitle =
+  document.getElementById('folderNameTitle');
+
+const folderNameInput =
+  document.getElementById('folderNameInput');
+
+const folderNameError =
+  document.getElementById('folderNameError');
+
+const saveFolderNameBtn =
+  document.getElementById('saveFolderNameBtn');
+
+const cancelFolderNameBtn =
+  document.getElementById('cancelFolderNameBtn');
+
+const closeFolderNameBtn =
+  document.getElementById('closeFolderNameBtn');
+
+
+/* FOLDER WINDOW */
+
+const folderWindowOverlay =
+  document.getElementById('folderWindowOverlay');
+
+const openFolderTitle =
+  document.getElementById('openFolderTitle');
+
+const openFolderSubtitle =
+  document.getElementById('openFolderSubtitle');
+
+const folderContentGrid =
+  document.getElementById('folderContentGrid');
+
+const closeFolderWindowBtn =
+  document.getElementById('closeFolderWindowBtn');
+
+
+/* DELETE */
+
+const deleteModal =
+  document.getElementById('deleteModal');
+
+const deleteText =
+  document.getElementById('deleteText');
+
+const cancelDeleteBtn =
+  document.getElementById('cancelDeleteBtn');
+
+const confirmDeleteBtn =
+  document.getElementById('confirmDeleteBtn');
+
+
+/* =========================================================
+   START
+   ========================================================= */
+
+document.addEventListener(
+  'DOMContentLoaded',
+  function() {
+
+    bindEvents();
+
+    loadLauncher();
+
+  }
+);
+
+
+/* =========================================================
+   EVENTS
+   ========================================================= */
+
+function bindEvents() {
+
+  retryBtn.onclick =
+    loadLauncher;
+
+
+  editModeBtn.onclick =
+    function() {
+
+      if (editMode) {
+
+        cancelEditing();
+
+        return;
+
       }
+
+
+      originalItems =
+        cloneItems(items);
+
+
+      editMode =
+        true;
+
+
+      render();
+
+    };
+
+
+  saveEditBtn.onclick =
+    function() {
+
+      saveAll(
+        'Layout saved.'
+      );
+
+    };
+
+
+  cancelEditBtn.onclick =
+    cancelEditing;
+
+
+  newAppBtn.onclick =
+    function() {
+
+      openAppEditor(
+        null
+      );
+
+    };
+
+
+  newFolderBtn.onclick =
+    function() {
+
+      pendingFolderAction = {
+        type:
+          'empty-folder'
+      };
+
+
+      openFolderNameModal(
+        'New Folder',
+        ''
+      );
+
+    };
+
+
+  saveAppModalBtn.onclick =
+    saveAppFromModal;
+
+
+  cancelAppModalBtn.onclick =
+    closeAppModal;
+
+
+  closeAppModalBtn.onclick =
+    closeAppModal;
+
+
+  saveFolderNameBtn.onclick =
+    saveFolderName;
+
+
+  cancelFolderNameBtn.onclick =
+    closeFolderNameModal;
+
+
+  closeFolderNameBtn.onclick =
+    closeFolderNameModal;
+
+
+  closeFolderWindowBtn.onclick =
+    closeFolderWindow;
+
+
+  cancelDeleteBtn.onclick =
+    closeDeleteModal;
+
+
+  confirmDeleteBtn.onclick =
+    performDelete;
+
+
+  document.addEventListener(
+    'keydown',
+    function(event) {
+
+      if (
+        event.key !==
+        'Escape'
+      ) {
+        return;
+      }
+
+
+      closeAppModal();
+
+      closeFolderNameModal();
+
+      closeDeleteModal();
+
+      closeFolderWindow();
+
+    }
+  );
+
+}
+
+
+/* =========================================================
+   LOAD DATA
+   ========================================================= */
+
+function loadLauncher() {
+
+  loading.classList.remove(
+    'hidden'
+  );
+
+
+  errorPanel.classList.add(
+    'hidden'
+  );
+
+
+  emptyPanel.classList.add(
+    'hidden'
+  );
+
+
+  mainGrid.replaceChildren();
+
+
+  google.script.run
+
+    .withSuccessHandler(
+      function(response) {
+
+        loading.classList.add(
+          'hidden'
+        );
+
+
+        if (
+          !response ||
+          response.success !==
+          true
+        ) {
+
+          showError(
+            response &&
+            response.message
+              ? response.message
+              : 'Unable to load launcher.'
+          );
+
+
+          return;
+
+        }
+
+
+        items =
+          Array.isArray(
+            response.items
+          )
+            ? dedupeItems(
+                response.items
+              )
+            : [];
+
+
+        sortItems();
+
+
+        originalItems =
+          cloneItems(
+            items
+          );
+
+
+        editMode =
+          false;
+
+
+        render();
+
+      }
+    )
+
+    .withFailureHandler(
+      function(error) {
+
+        loading.classList.add(
+          'hidden'
+        );
+
+
+        showError(
+          error &&
+          error.message
+            ? error.message
+            : 'Unable to communicate with Google Apps Script.'
+        );
+
+      }
+    )
+
+    .getLauncherData();
+
+}
+
+
+/* =========================================================
+   RENDER
+   ========================================================= */
+
+function render() {
+
+  clearDropStyles();
+
+
+  mainGrid.replaceChildren();
+
+
+  editBanner.classList.toggle(
+    'hidden',
+    !editMode
+  );
+
+
+  const rootItems =
+    getRootItems();
+
+
+  if (
+    !rootItems.length
+  ) {
+
+    emptyPanel.classList.remove(
+      'hidden'
+    );
+
+
+    itemCount.classList.add(
+      'hidden'
+    );
+
+
+    return;
+
+  }
+
+
+  emptyPanel.classList.add(
+    'hidden'
+  );
+
+
+  itemCount.textContent =
+    rootItems.length +
+    (
+      rootItems.length === 1
+        ? ' item'
+        : ' items'
+    );
+
+
+  itemCount.classList.remove(
+    'hidden'
+  );
+
+
+  const fragment =
+    document.createDocumentFragment();
+
+
+  rootItems.forEach(
+    function(item,index) {
+
+      const card =
+        item.type ===
+        'folder'
+          ? createFolderCard(
+              item,
+              index,
+              rootItems
+            )
+          : createAppCard(
+              item,
+              index,
+              rootItems
+            );
+
+
+      fragment.appendChild(
+        card
+      );
+
+    }
+  );
+
+
+  mainGrid.appendChild(
+    fragment
+  );
+
+}
+
+
+/* =========================================================
+   CREATE APP CARD
+   ========================================================= */
+
+function createAppCard(
+  app,
+  rootIndex,
+  rootItems
+) {
+
+  const card =
+    document.createElement(
+      'div'
+    );
+
+
+  card.className =
+    'card';
+
+
+  card.dataset.id =
+    app.id;
+
+
+  if (editMode) {
+
+    card.classList.add(
+      'editing'
+    );
+
+
+    card.draggable =
+      true;
+
+
+    attachRootDragEvents(
+      card,
+      app
+    );
+
+  } else {
+
+    card.onclick =
+      function() {
+
+        openApp(
+          app.url
+        );
+
+      };
+
+  }
+
+
+  const iconWrap =
+    document.createElement(
+      'div'
+    );
+
+
+  iconWrap.className =
+    'icon-wrap';
+
+
+  const image =
+    document.createElement(
+      'img'
+    );
+
+
+  image.className =
+    'app-image';
+
+
+  image.alt =
+    app.name;
+
+
+  image.loading =
+    'lazy';
+
+
+  image.src =
+    validUrl(
+      app.imageUrl
+    )
+      ? app.imageUrl
+      : DEFAULT_ICON;
+
+
+  image.onerror =
+    function() {
+
+      image.onerror =
+        null;
+
+
+      image.src =
+        DEFAULT_ICON;
+
+    };
+
+
+  iconWrap.appendChild(
+    image
+  );
+
+
+  const name =
+    document.createElement(
+      'p'
+    );
+
+
+  name.className =
+    'card-name';
+
+
+  name.textContent =
+    app.name;
+
+
+  card.appendChild(
+    iconWrap
+  );
+
+
+  card.appendChild(
+    name
+  );
+
+
+  if (editMode) {
+
+    card.appendChild(
+      createCardTools(
+        app
+      )
+    );
+
+
+    card.appendChild(
+      createRootOrderTools(
+        app,
+        rootIndex,
+        rootItems
+      )
+    );
+
+  }
+
+
+  return card;
+
+}
+
+
+/* =========================================================
+   CREATE FOLDER CARD
+   ========================================================= */
+
+function createFolderCard(
+  folder,
+  rootIndex,
+  rootItems
+) {
+
+  const card =
+    document.createElement(
+      'div'
+    );
+
+
+  card.className =
+    'card folder-card';
+
+
+  card.dataset.id =
+    folder.id;
+
+
+  if (editMode) {
+
+    card.classList.add(
+      'editing'
+    );
+
+
+    card.draggable =
+      true;
+
+
+    attachRootDragEvents(
+      card,
+      folder
+    );
+
+  }
+
+
+  card.onclick =
+    function(event) {
+
+      if (
+        event.target.closest(
+          '.tool-button'
+        ) ||
+        event.target.closest(
+          '.order-btn'
+        )
+      ) {
+        return;
+      }
+
+
+      if (draggedId) {
+        return;
+      }
+
+
+      openFolderWindow(
+        folder.id
+      );
+
+    };
+
+
+  card.appendChild(
+    createFolderIcon(
+      folder.id
+    )
+  );
+
+
+  const name =
+    document.createElement(
+      'p'
+    );
+
+
+  name.className =
+    'card-name';
+
+
+  name.textContent =
+    folder.name;
+
+
+  card.appendChild(
+    name
+  );
+
+
+  if (editMode) {
+
+    card.appendChild(
+      createCardTools(
+        folder
+      )
+    );
+
+
+    card.appendChild(
+      createRootOrderTools(
+        folder,
+        rootIndex,
+        rootItems
+      )
+    );
+
+  }
+
+
+  return card;
+
+}
+
+
+/* =========================================================
+   OPEN APP
+   ========================================================= */
+
+function openApp(url) {
+
+  if (
+    !validUrl(url)
+  ) {
+    return;
+  }
+
+
+  window.open(
+    url,
+    '_blank',
+    'noopener,noreferrer'
+  );
+
+}
+
+
+/* =========================================================
+   ROOT DRAG
+   ========================================================= */
+
+function attachRootDragEvents(
+  card,
+  targetItem
+) {
+
+  card.addEventListener(
+    'dragstart',
+    function(event) {
+
+      draggedId =
+        targetItem.id;
+
+
+      card.classList.add(
+        'dragging'
+      );
+
+
+      event.dataTransfer.effectAllowed =
+        'move';
+
+
+      event.dataTransfer.setData(
+        'text/plain',
+        targetItem.id
+      );
+
+    }
+  );
+
+
+  card.addEventListener(
+    'dragend',
+    function() {
+
+      draggedId =
+        null;
+
+
+      currentDropAction =
+        null;
+
+
+      clearDropStyles();
+
+    }
+  );
+
+
+  card.addEventListener(
+    'dragover',
+    function(event) {
+
+      if (
+        !draggedId ||
+        draggedId ===
+        targetItem.id
+      ) {
+        return;
+      }
+
+
+      const dragged =
+        getItem(
+          draggedId
+        );
+
+
+      if (!dragged) {
+        return;
+      }
+
+
+      event.preventDefault();
+
+
+      clearDropStyles(
+        card
+      );
+
+
+      const action =
+        determineDropAction(
+          event,
+          card,
+          dragged,
+          targetItem
+        );
+
+
+      currentDropAction =
+        action;
+
+
+      if (
+        action ===
+        'before'
+      ) {
+
+        card.classList.add(
+          'drop-before'
+        );
+
+
+        addDropMessage(
+          card,
+          'Move before'
+        );
+
+      } else if (
+        action ===
+        'after'
+      ) {
+
+        card.classList.add(
+          'drop-after'
+        );
+
+
+        addDropMessage(
+          card,
+          'Move after'
+        );
+
+      } else if (
+        action ===
+        'folder'
+      ) {
+
+        card.classList.add(
+          'drop-folder'
+        );
+
+
+        addDropMessage(
+          card,
+          targetItem.type ===
+          'folder'
+            ? 'Move into folder'
+            : 'Create folder'
+        );
+
+      }
+
+    }
+  );
+
+
+  card.addEventListener(
+    'dragleave',
+    function(event) {
+
+      if (
+        !card.contains(
+          event.relatedTarget
+        )
+      ) {
+
+        removeCardDropStyles(
+          card
+        );
+
+      }
+
+    }
+  );
+
+
+  card.addEventListener(
+    'drop',
+    function(event) {
+
+      event.preventDefault();
+
+
+      event.stopPropagation();
+
+
+      const dragged =
+        getItem(
+          draggedId
+        );
+
+
+      const action =
+        currentDropAction ||
+        determineDropAction(
+          event,
+          card,
+          dragged,
+          targetItem
+        );
+
+
+      removeCardDropStyles(
+        card
+      );
+
+
+      draggedId =
+        null;
+
+
+      currentDropAction =
+        null;
+
+
+      if (
+        !dragged ||
+        dragged.id ===
+        targetItem.id
+      ) {
+        return;
+      }
+
+
+      if (
+        action ===
+        'before'
+      ) {
+
+        moveRootItem(
+          dragged.id,
+          targetItem.id,
+          true
+        );
+
+
+        render();
+
+
+        showToast(
+          'Order changed. Click Save to keep it.',
+          ''
+        );
+
+
+        return;
+
+      }
+
+
+      if (
+        action ===
+        'after'
+      ) {
+
+        moveRootItem(
+          dragged.id,
+          targetItem.id,
+          false
+        );
+
+
+        render();
+
+
+        showToast(
+          'Order changed. Click Save to keep it.',
+          ''
+        );
+
+
+        return;
+
+      }
+
+
+      if (
+        action ===
+        'folder' &&
+        targetItem.type ===
+        'folder'
+      ) {
+
+        if (
+          dragged.type !==
+          'app'
+        ) {
+
+          showToast(
+            'Folders cannot be placed inside other folders.',
+            'error'
+          );
+
+
+          return;
+
+        }
+
+
+        dragged.parentId =
+          targetItem.id;
+
+
+        moveItemToEndOfFolder(
+          dragged.id,
+          targetItem.id
+        );
+
+
+        render();
+
+
+        showToast(
+          'Moved into "' +
+          targetItem.name +
+          '". Click Save to keep it.',
+          ''
+        );
+
+
+        return;
+
+      }
+
+
+      if (
+        action ===
+        'folder' &&
+        targetItem.type ===
+        'app'
+      ) {
+
+        if (
+          dragged.type !==
+          'app'
+        ) {
+
+          showToast(
+            'A folder cannot be combined with an app.',
+            'error'
+          );
+
+
+          return;
+
+        }
+
+
+        pendingFolderAction = {
+          type:
+            'combine-apps',
+
+          firstAppId:
+            dragged.id,
+
+          secondAppId:
+            targetItem.id
+        };
+
+
+        openFolderNameModal(
+          'Create Folder',
+          'New Folder'
+        );
+
+      }
+
+    }
+  );
+
+}
+
+
+/* =========================================================
+   DROP ACTION
+   ========================================================= */
+
+function determineDropAction(
+  event,
+  card,
+  dragged,
+  target
+) {
+
+  const rect =
+    card.getBoundingClientRect();
+
+
+  const relativeX =
+    event.clientX -
+    rect.left;
+
+
+  const ratio =
+    relativeX /
+    rect.width;
+
+
+  if (
+    ratio < .28
+  ) {
+    return 'before';
+  }
+
+
+  if (
+    ratio > .72
+  ) {
+    return 'after';
+  }
+
+
+  if (
+    dragged &&
+    dragged.type ===
+    'app' &&
+    (
+      target.type ===
+      'app' ||
+      target.type ===
+      'folder'
+    )
+  ) {
+    return 'folder';
+  }
+
+
+  return 'after';
+
+}
+
+
+/* =========================================================
+   ROOT REORDER
+   ========================================================= */
+
+function moveRootItem(
+  sourceId,
+  targetId,
+  before
+) {
+
+  const root =
+    getRootItems();
+
+
+  const sourceIndex =
+    root.findIndex(
+      function(item) {
+
+        return (
+          item.id ===
+          sourceId
+        );
+
+      }
+    );
+
+
+  if (
+    sourceIndex ===
+    -1
+  ) {
+    return;
+  }
+
+
+  const moved =
+    root.splice(
+      sourceIndex,
+      1
+    )[0];
+
+
+  let targetIndex =
+    root.findIndex(
+      function(item) {
+
+        return (
+          item.id ===
+          targetId
+        );
+
+      }
+    );
+
+
+  if (
+    targetIndex ===
+    -1
+  ) {
+    return;
+  }
+
+
+  if (!before) {
+
+    targetIndex +=
+      1;
+
+  }
+
+
+  root.splice(
+    targetIndex,
+    0,
+    moved
+  );
+
+
+  applyRootOrder(
+    root
+  );
+
+}
+
+
+/* =========================================================
+   SAFE ROOT ORDER
+   ========================================================= */
+
+function applyRootOrder(
+  rootItems
+) {
+
+  const rebuilt =
+    [];
+
+
+  const addedIds =
+    new Set();
+
+
+  function addItem(item) {
+
+    if (
+      !item ||
+      !item.id ||
+      addedIds.has(
+        item.id
+      )
+    ) {
+      return;
+    }
+
+
+    rebuilt.push(
+      item
+    );
+
+
+    addedIds.add(
+      item.id
+    );
+
+  }
+
+
+  rootItems.forEach(
+    function(rootItem) {
+
+      addItem(
+        rootItem
+      );
+
+
+      if (
+        rootItem.type ===
+        'folder'
+      ) {
+
+        const children =
+          getFolderApps(
+            rootItem.id
+          );
+
+
+        children.forEach(
+          function(child) {
+
+            addItem(
+              child
+            );
+
+          }
+        );
+
+      }
+
+    }
+  );
+
+
+  items.forEach(
+    function(item) {
+
+      addItem(
+        item
+      );
+
+    }
+  );
+
+
+  rebuilt.forEach(
+    function(item,index) {
+
+      item.order =
+        index;
+
+    }
+  );
+
+
+  items =
+    rebuilt;
+
+}
+
+
+/* =========================================================
+   ROOT ARROWS
+   ========================================================= */
+
+function createRootOrderTools(
+  item,
+  index,
+  rootItems
+) {
+
+  const wrap =
+    document.createElement(
+      'div'
+    );
+
+
+  wrap.className =
+    'order-tools';
+
+
+  const left =
+    document.createElement(
+      'button'
+    );
+
+
+  left.type =
+    'button';
+
+
+  left.className =
+    'order-btn';
+
+
+  left.textContent =
+    '←';
+
+
+  left.title =
+    'Move earlier';
+
+
+  left.disabled =
+    index === 0;
+
+
+  left.onclick =
+    function(event) {
+
+      event.stopPropagation();
+
+
+      event.preventDefault();
+
+
+      if (
+        index <= 0
+      ) {
+        return;
+      }
+
+
+      moveRootItem(
+        item.id,
+        rootItems[
+          index - 1
+        ].id,
+        true
+      );
+
+
+      render();
+
+
+      showToast(
+        'Order changed. Click Save to keep it.',
+        ''
+      );
+
+    };
+
+
+  const right =
+    document.createElement(
+      'button'
+    );
+
+
+  right.type =
+    'button';
+
+
+  right.className =
+    'order-btn';
+
+
+  right.textContent =
+    '→';
+
+
+  right.title =
+    'Move later';
+
+
+  right.disabled =
+    index ===
+    rootItems.length - 1;
+
+
+  right.onclick =
+    function(event) {
+
+      event.stopPropagation();
+
+
+      event.preventDefault();
+
+
+      if (
+        index >=
+        rootItems.length - 1
+      ) {
+        return;
+      }
+
+
+      moveRootItem(
+        item.id,
+        rootItems[
+          index + 1
+        ].id,
+        false
+      );
+
+
+      render();
+
+
+      showToast(
+        'Order changed. Click Save to keep it.',
+        ''
+      );
+
+    };
+
+
+  wrap.appendChild(
+    left
+  );
+
+
+  wrap.appendChild(
+    right
+  );
+
+
+  return wrap;
+
+}
+
+
+/* =========================================================
+   DROP VISUALS
+   ========================================================= */
+
+function addDropMessage(
+  card,
+  text
+) {
+
+  const existing =
+    card.querySelector(
+      '.drop-message'
+    );
+
+
+  if (existing) {
+
+    existing.textContent =
+      text;
+
+
+    return;
+
+  }
+
+
+  const message =
+    document.createElement(
+      'div'
+    );
+
+
+  message.className =
+    'drop-message';
+
+
+  message.textContent =
+    text;
+
+
+  card.appendChild(
+    message
+  );
+
+}
+
+
+function removeCardDropStyles(
+  card
+) {
+
+  card.classList.remove(
+    'drop-before',
+    'drop-after',
+    'drop-folder'
+  );
+
+
+  const message =
+    card.querySelector(
+      '.drop-message'
+    );
+
+
+  if (message) {
+
+    message.remove();
+
+  }
+
+}
+
+
+function clearDropStyles(
+  except
+) {
+
+  document
+    .querySelectorAll(
+      '.card'
+    )
+    .forEach(
+      function(card) {
+
+        if (
+          except &&
+          card ===
+          except
+        ) {
+          return;
+        }
+
+
+        removeCardDropStyles(
+          card
+        );
+
+
+        card.classList.remove(
+          'dragging'
+        );
+
+      }
+    );
+
+}
+
+
+/* =========================================================
+   FOLDER ICON
+   ========================================================= */
+
+function createFolderIcon(
+  folderId
+) {
+
+  const icon =
+    document.createElement(
+      'div'
+    );
+
+
+  icon.className =
+    'folder-icon';
+
+
+  const preview =
+    document.createElement(
+      'div'
+    );
+
+
+  preview.className =
+    'folder-preview';
+
+
+  const children =
+    getFolderApps(
+      folderId
+    ).slice(
+      0,
+      4
+    );
+
+
+  for (
+    let i = 0;
+    i < 4;
+    i++
+  ) {
+
+    const cell =
+      document.createElement(
+        'div'
+      );
+
+
+    cell.className =
+      'folder-preview-cell';
+
+
+    if (
+      children[i]
+    ) {
+
+      const image =
+        document.createElement(
+          'img'
+        );
+
+
+      image.src =
+        validUrl(
+          children[i].imageUrl
+        )
+          ? children[i].imageUrl
+          : DEFAULT_ICON;
+
+
+      image.onerror =
+        function() {
+
+          image.onerror =
+            null;
+
+
+          image.src =
+            DEFAULT_ICON;
+
+        };
+
+
+      cell.appendChild(
+        image
+      );
+
+    } else {
+
+      const dot =
+        document.createElement(
+          'div'
+        );
+
+
+      dot.className =
+        'folder-empty-dot';
+
+
+      cell.appendChild(
+        dot
+      );
+
+    }
+
+
+    preview.appendChild(
+      cell
+    );
+
+  }
+
+
+  icon.appendChild(
+    preview
+  );
+
+
+  return icon;
+
+}
+
+
+/* =========================================================
+   EDIT / DELETE TOOLS
+   ========================================================= */
+
+function createCardTools(
+  item
+) {
+
+  const tools =
+    document.createElement(
+      'div'
+    );
+
+
+  tools.className =
+    'card-tools';
+
+
+  const edit =
+    document.createElement(
+      'button'
+    );
+
+
+  edit.className =
+    'tool-button';
+
+
+  edit.type =
+    'button';
+
+
+  edit.title =
+    item.type ===
+    'folder'
+      ? 'Rename folder'
+      : 'Edit app';
+
+
+  edit.textContent =
+    '✎';
+
+
+  edit.onclick =
+    function(event) {
+
+      event.stopPropagation();
+
+
+      event.preventDefault();
+
+
+      if (
+        item.type ===
+        'folder'
+      ) {
+
+        pendingFolderAction = {
+          type:
+            'rename',
+
+          folderId:
+            item.id
+        };
+
+
+        openFolderNameModal(
+          'Rename Folder',
+          item.name
+        );
+
+      } else {
+
+        openAppEditor(
+          item.id
+        );
+
+      }
+
+    };
+
+
+  const remove =
+    document.createElement(
+      'button'
+    );
+
+
+  remove.className =
+    'tool-button delete';
+
+
+  remove.type =
+    'button';
+
+
+  remove.title =
+    'Delete';
+
+
+  remove.textContent =
+    '🗑';
+
+
+  remove.onclick =
+    function(event) {
+
+      event.stopPropagation();
+
+
+      event.preventDefault();
+
+
+      openDeleteModal(
+        item.id
+      );
+
+    };
+
+
+  tools.appendChild(
+    edit
+  );
+
+
+  tools.appendChild(
+    remove
+  );
+
+
+  return tools;
+
+}
+
+
+/* =========================================================
+   FOLDER NAME MODAL
+   ========================================================= */
+
+function openFolderNameModal(
+  title,
+  value
+) {
+
+  folderNameTitle.textContent =
+    title;
+
+
+  folderNameInput.value =
+    value ||
+    '';
+
+
+  folderNameError.textContent =
+    '';
+
+
+  folderNameModal.classList.remove(
+    'hidden'
+  );
+
+
+  setTimeout(
+    function() {
+
+      folderNameInput.focus();
+
+
+      folderNameInput.select();
+
+    },
+    50
+  );
+
+}
+
+
+function closeFolderNameModal() {
+
+  folderNameModal.classList.add(
+    'hidden'
+  );
+
+
+  folderNameError.textContent =
+    '';
+
+}
+
+
+/* =========================================================
+   SAVE FOLDER
+   ========================================================= */
+
+function saveFolderName() {
+
+  const name =
+    folderNameInput.value.trim();
+
+
+  if (!name) {
+
+    folderNameError.textContent =
+      'Enter a folder name.';
+
+
+    return;
+
+  }
+
+
+  if (
+    !pendingFolderAction
+  ) {
+
+    closeFolderNameModal();
+
+
+    return;
+
+  }
+
+
+  if (
+    pendingFolderAction.type ===
+    'empty-folder'
+  ) {
+
+    items.push({
+      id:
+        createId(
+          'folder'
+        ),
+
+      type:
+        'folder',
+
+      name:
+        name,
+
+      url:
+        '',
+
+      imageUrl:
+        '',
+
+      parentId:
+        '',
+
+      order:
+        items.length
+    });
+
+
+    closeFolderNameModal();
+
+
+    pendingFolderAction =
+      null;
+
+
+    sortItems();
+
+
+    render();
+
+
+    saveAll(
+      'Folder created.'
+    );
+
+
+    return;
+
+  }
+
+
+  if (
+    pendingFolderAction.type ===
+    'combine-apps'
+  ) {
+
+    const first =
+      getItem(
+        pendingFolderAction.firstAppId
+      );
+
+
+    const second =
+      getItem(
+        pendingFolderAction.secondAppId
+      );
+
+
+    if (
+      !first ||
+      !second
+    ) {
+
+      pendingFolderAction =
+        null;
+
+
+      closeFolderNameModal();
+
+
+      return;
+
+    }
+
+
+    const rootBefore =
+      getRootItems();
+
+
+    const firstIndex =
+      rootBefore.findIndex(
+        function(item) {
+
+          return (
+            item.id ===
+            first.id
+          );
+
+        }
+      );
+
+
+    const secondIndex =
+      rootBefore.findIndex(
+        function(item) {
+
+          return (
+            item.id ===
+            second.id
+          );
+
+        }
+      );
+
+
+    const insertionIndex =
+      Math.max(
+        0,
+        Math.min(
+          firstIndex,
+          secondIndex
+        )
+      );
+
+
+    const folder = {
+      id:
+        createId(
+          'folder'
+        ),
+
+      type:
+        'folder',
+
+      name:
+        name,
+
+      url:
+        '',
+
+      imageUrl:
+        '',
+
+      parentId:
+        '',
+
+      order:
+        0
+    };
+
+
+    first.parentId =
+      folder.id;
+
+
+    second.parentId =
+      folder.id;
+
+
+    const newRoot =
+      rootBefore.filter(
+        function(item) {
+
+          return (
+            item.id !==
+            first.id &&
+            item.id !==
+            second.id
+          );
+
+        }
+      );
+
+
+    newRoot.splice(
+      insertionIndex,
+      0,
+      folder
+    );
+
+
+    items.push(
+      folder
+    );
+
+
+    applyRootOrder(
+      newRoot
+    );
+
+
+    closeFolderNameModal();
+
+
+    pendingFolderAction =
+      null;
+
+
+    render();
+
+
+    showToast(
+      'Folder created. Click Save to keep it.',
+      ''
+    );
+
+
+    return;
+
+  }
+
+
+  if (
+    pendingFolderAction.type ===
+    'rename'
+  ) {
+
+    const folder =
+      getItem(
+        pendingFolderAction.folderId
+      );
+
+
+    if (folder) {
+
+      folder.name =
+        name;
+
+    }
+
+
+    closeFolderNameModal();
+
+
+    pendingFolderAction =
+      null;
+
+
+    render();
+
+
+    saveAll(
+      'Folder renamed.'
+    );
+
+  }
+
+}
+
+
+/* =========================================================
+   OPEN FOLDER
+   ========================================================= */
+
+function openFolderWindow(
+  folderId
+) {
+
+  const folder =
+    getItem(
+      folderId
+    );
+
+
+  if (
+    !folder ||
+    folder.type !==
+    'folder'
+  ) {
+    return;
+  }
+
+
+  openFolderId =
+    folderId;
+
+
+  openFolderTitle.textContent =
+    folder.name;
+
+
+  renderFolderContent();
+
+
+  folderWindowOverlay.classList.remove(
+    'hidden'
+  );
+
+}
+
+
+function closeFolderWindow() {
+
+  folderWindowOverlay.classList.add(
+    'hidden'
+  );
+
+
+  openFolderId =
+    null;
+
+}
+
+
+/* =========================================================
+   FOLDER CONTENT
+   ========================================================= */
+
+function renderFolderContent() {
+
+  if (
+    !openFolderId
+  ) {
+    return;
+  }
+
+
+  const folderApps =
+    getFolderApps(
+      openFolderId
+    );
+
+
+  openFolderSubtitle.textContent =
+    folderApps.length +
+    (
+      folderApps.length === 1
+        ? ' app'
+        : ' apps'
+    );
+
+
+  folderContentGrid.replaceChildren();
+
+
+  if (
+    !folderApps.length
+  ) {
+
+    const message =
+      document.createElement(
+        'p'
+      );
+
+
+    message.className =
+      'description';
+
+
+    message.textContent =
+      'This folder is empty.';
+
+
+    folderContentGrid.appendChild(
+      message
+    );
+
+
+    return;
+
+  }
+
+
+  folderApps.forEach(
+    function(app,index) {
+
+      const card =
+        document.createElement(
+          'div'
+        );
+
+
+      card.className =
+        'folder-app';
+
+
+      if (editMode) {
+
+        card.classList.add(
+          'edit-folder-app'
+        );
+
+      }
+
+
+      const icon =
+        document.createElement(
+          'div'
+        );
+
+
+      icon.className =
+        'icon-wrap';
+
+
+      const image =
+        document.createElement(
+          'img'
+        );
+
+
+      image.className =
+        'app-image';
+
+
+      image.alt =
+        app.name;
+
+
+      image.src =
+        validUrl(
+          app.imageUrl
+        )
+          ? app.imageUrl
+          : DEFAULT_ICON;
+
+
+      image.onerror =
+        function() {
+
+          image.onerror =
+            null;
+
+
+          image.src =
+            DEFAULT_ICON;
+
+        };
+
+
+      icon.appendChild(
+        image
+      );
+
+
+      const name =
+        document.createElement(
+          'p'
+        );
+
+
+      name.className =
+        'card-name';
+
+
+      name.textContent =
+        app.name;
+
+
+      card.appendChild(
+        icon
+      );
+
+
+      card.appendChild(
+        name
+      );
+
+
+      if (!editMode) {
+
+        card.onclick =
+          function() {
+
+            openApp(
+              app.url
+            );
+
+          };
+
+      } else {
+
+        const tools =
+          document.createElement(
+            'div'
+          );
+
+
+        tools.className =
+          'folder-tools';
+
+
+        const edit =
+          document.createElement(
+            'button'
+          );
+
+
+        edit.className =
+          'folder-tool';
+
+
+        edit.type =
+          'button';
+
+
+        edit.title =
+          'Edit app';
+
+
+        edit.textContent =
+          '✎';
+
+
+        edit.onclick =
+          function(event) {
+
+            event.stopPropagation();
+
+
+            openAppEditor(
+              app.id
+            );
+
+          };
+
+
+        const out =
+          document.createElement(
+            'button'
+          );
+
+
+        out.className =
+          'folder-tool';
+
+
+        out.type =
+          'button';
+
+
+        out.title =
+          'Move out of folder';
+
+
+        out.textContent =
+          '↗';
+
+
+        out.onclick =
+          function(event) {
+
+            event.stopPropagation();
+
+
+            moveAppOutOfFolder(
+              app.id
+            );
+
+
+            render();
+
+
+            renderFolderContent();
+
+
+            showToast(
+              'Moved out of folder. Click Save to keep it.',
+              ''
+            );
+
+          };
+
+
+        tools.appendChild(
+          edit
+        );
+
+
+        tools.appendChild(
+          out
+        );
+
+
+        card.appendChild(
+          tools
+        );
+
+
+        const order =
+          document.createElement(
+            'div'
+          );
+
+
+        order.className =
+          'folder-order-tools';
+
+
+        const left =
+          document.createElement(
+            'button'
+          );
+
+
+        left.className =
+          'folder-tool';
+
+
+        left.type =
+          'button';
+
+
+        left.textContent =
+          '←';
+
+
+        left.disabled =
+          index === 0;
+
+
+        left.onclick =
+          function(event) {
+
+            event.stopPropagation();
+
+
+            moveFolderApp(
+              openFolderId,
+              app.id,
+              -1
+            );
+
+
+            renderFolderContent();
+
+
+            render();
+
+          };
+
+
+        const right =
+          document.createElement(
+            'button'
+          );
+
+
+        right.className =
+          'folder-tool';
+
+
+        right.type =
+          'button';
+
+
+        right.textContent =
+          '→';
+
+
+        right.disabled =
+          index ===
+          folderApps.length - 1;
+
+
+        right.onclick =
+          function(event) {
+
+            event.stopPropagation();
+
+
+            moveFolderApp(
+              openFolderId,
+              app.id,
+              1
+            );
+
+
+            renderFolderContent();
+
+
+            render();
+
+          };
+
+
+        order.appendChild(
+          left
+        );
+
+
+        order.appendChild(
+          right
+        );
+
+
+        card.appendChild(
+          order
+        );
+
+      }
+
+
+      folderContentGrid.appendChild(
+        card
+      );
+
+    }
+  );
+
+}
+
+
+/* =========================================================
+   FOLDER ORDER
+   ========================================================= */
+
+function moveFolderApp(
+  folderId,
+  appId,
+  direction
+) {
+
+  const folderApps =
+    getFolderApps(
+      folderId
+    );
+
+
+  const currentIndex =
+    folderApps.findIndex(
+      function(app) {
+
+        return (
+          app.id ===
+          appId
+        );
+
+      }
+    );
+
+
+  const nextIndex =
+    currentIndex +
+    direction;
+
+
+  if (
+    currentIndex < 0 ||
+    nextIndex < 0 ||
+    nextIndex >=
+    folderApps.length
+  ) {
+    return;
+  }
+
+
+  const temp =
+    folderApps[
+      currentIndex
     ];
 
-    const combinationLinks = {
-      "exterior-monthly+interior-monthly": {
-        totalPrice: 34.90,
-        squareCheckoutLink: "https://square.link/u/3ZNFiIl6"
-      },
-      "exterior-monthly+interior-every-other-week": {
-        totalPrice: 54.90,
-        squareCheckoutLink: "https://square.link/u/I50ia3pV"
-      },
-      "exterior-monthly+interior-weekly": {
-        totalPrice: 69.90,
-        squareCheckoutLink: "https://square.link/u/Y5919yH4"
-      },
-      "exterior-every-other-week+interior-monthly": {
-        totalPrice: 42.90,
-        squareCheckoutLink: "https://square.link/u/UGTrKp5f"
-      },
-      "exterior-every-other-week+interior-every-other-week": {
-        totalPrice: 62.90,
-        squareCheckoutLink: "https://square.link/u/VDco6bVF"
-      },
-      "exterior-every-other-week+interior-weekly": {
-        totalPrice: 77.90,
-        squareCheckoutLink: "https://square.link/u/di4No0G7"
-      },
-      "exterior-weekly+interior-monthly": {
-        totalPrice: 54.90,
-        squareCheckoutLink: "https://square.link/u/dGHjmJdz"
-      },
-      "exterior-weekly+interior-every-other-week": {
-        totalPrice: 74.90,
-        squareCheckoutLink: "https://square.link/u/bRpplnW1"
-      },
-      "exterior-weekly+interior-weekly": {
-        totalPrice: 89.90,
-        squareCheckoutLink: "https://square.link/u/9lKt4m2q"
-      }
-    };
 
-    const categoryDescriptions = {
-      "Exterior Fresh Subscriptions": "We offer three types of subscription plans for exterior washes.",
-      "Interior Fresh Subscriptions": "We offer three types of subscription plans for interior washes."
-    };
+  folderApps[
+    currentIndex
+  ] =
+    folderApps[
+      nextIndex
+    ];
 
-    const sidebar = document.getElementById("sidebar");
-    const overlay = document.getElementById("overlay");
-    const menuToggle = document.getElementById("menuToggle");
-    const serviceSections = document.getElementById("serviceSections");
-    const selectedServicesList = document.getElementById("selectedServicesList");
-    const totalPrice = document.getElementById("totalPrice");
-    const checkoutButton = document.getElementById("checkoutButton");
-    const checkoutHelp = document.getElementById("checkoutHelp");
-    const saveStatus = document.getElementById("saveStatus");
-    const customerName = document.getElementById("customerName");
-    const customerPhone = document.getElementById("customerPhone");
-    const agreeTerms = document.getElementById("agreeTerms");
-    const openTerms = document.getElementById("openTerms");
-    const closeTerms = document.getElementById("closeTerms");
-    const termsModal = document.getElementById("termsModal");
-    const termsOverlay = document.getElementById("termsOverlay");
-    const contractDocument = document.getElementById("contractDocument");
 
-    const contractSaveForm = document.getElementById("contractSaveForm");
-    const contractSaveFrame = document.getElementById("contractSaveFrame");
-    const formRequestId = document.getElementById("formRequestId");
-    const formContractId = document.getElementById("formContractId");
-    const formCustomerName = document.getElementById("formCustomerName");
-    const formPhoneNumber = document.getElementById("formPhoneNumber");
-    const formSelectedServiceIds = document.getElementById("formSelectedServiceIds");
-    const formAgreeTerms = document.getElementById("formAgreeTerms");
-    const formElectronicSignature = document.getElementById("formElectronicSignature");
-    const formAcceptedAtBrowser = document.getElementById("formAcceptedAtBrowser");
-    const formAcceptedAtLocal = document.getElementById("formAcceptedAtLocal");
-    const formPageUrl = document.getElementById("formPageUrl");
-    const formUserAgent = document.getElementById("formUserAgent");
-    const formContractText = document.getElementById("formContractText");
-    const formWebsite = document.getElementById("formWebsite");
+  folderApps[
+    nextIndex
+  ] =
+    temp;
 
-    let currentCheckoutLink = "";
-    let currentCheckoutIsValid = false;
-    let checkoutSubmissionInProgress = false;
-    let pendingContractSnapshot = null;
-    let pendingAppsScriptRequest = null;
 
-    function openSidebar() {
-      sidebar.classList.add("open");
-      overlay.classList.add("show");
+  applyFolderOrder(
+    folderId,
+    folderApps
+  );
+
+
+  showToast(
+    'Order changed. Click Save to keep it.',
+    ''
+  );
+
+}
+
+
+/* =========================================================
+   APPLY FOLDER ORDER
+   ========================================================= */
+
+function applyFolderOrder(
+  folderId,
+  orderedChildren
+) {
+
+  const root =
+    getRootItems();
+
+
+  const rebuilt =
+    [];
+
+
+  const addedIds =
+    new Set();
+
+
+  function addItem(item) {
+
+    if (
+      !item ||
+      !item.id ||
+      addedIds.has(
+        item.id
+      )
+    ) {
+      return;
     }
 
-    function closeSidebarNow() {
-      sidebar.classList.remove("open");
-      overlay.classList.remove("show");
-    }
 
-    function showTerms() {
-      termsModal.classList.add("show");
-      termsModal.setAttribute("aria-hidden", "false");
-      document.body.classList.add("modal-open");
-    }
+    rebuilt.push(
+      item
+    );
 
-    function hideTerms() {
-      termsModal.classList.remove("show");
-      termsModal.setAttribute("aria-hidden", "true");
-      document.body.classList.remove("modal-open");
-    }
 
-    function roundCurrency(value) {
-      return Math.round((Number(value) + Number.EPSILON) * 100) / 100;
-    }
+    addedIds.add(
+      item.id
+    );
 
-    function formatCurrency(value) {
-      return "$" + roundCurrency(value).toFixed(2);
-    }
+  }
 
-    function slugify(value) {
-      return String(value)
-        .toLowerCase()
-        .replace(/[^a-z0-9]+/g, "-")
-        .replace(/^-+|-+$/g, "");
-    }
 
-    function hasRealSquareLink(link) {
-      return Boolean(link) &&
-        !String(link).startsWith("PASTE_") &&
-        !String(link).includes("PLACEHOLDER");
-    }
+  root.forEach(
+    function(rootItem) {
 
-    function hasRealAppsScriptUrl() {
-      return /^https:\/\/script\.google\.com\/macros\/s\/.+\/exec(?:\?.*)?$/i.test(
-        String(APPS_SCRIPT_WEB_APP_URL || "").trim()
+      addItem(
+        rootItem
       );
-    }
 
-    function normalizePhone(value) {
-      return String(value).replace(/\D/g, "");
-    }
-
-    function isCustomerInfoValid() {
-      const nameValue = customerName.value.trim();
-      const phoneDigits = normalizePhone(customerPhone.value);
-
-      return nameValue.length >= 2 &&
-        phoneDigits.length >= 10 &&
-        phoneDigits.length <= 15;
-    }
-
-    function getCategories() {
-      return [...new Set(services.map(service => service.categoryName))];
-    }
-
-    function createCombinationKey(selectedServices) {
-      return selectedServices
-        .map(service => service.id)
-        .sort()
-        .join("+");
-    }
-
-    function getSelectedServices() {
-      return Array.from(document.querySelectorAll(".service-option:checked"))
-        .map(input => services.find(service => service.id === input.value))
-        .filter(Boolean);
-    }
-
-    function getSelectedTotal(selectedServices) {
-      return roundCurrency(
-        selectedServices.reduce((total, service) => total + service.price, 0)
-      );
-    }
-
-    function getCheckoutStatus(selectedServices) {
-      if (!selectedServices.length) {
-        return { checkoutLink: "", isValid: false };
-      }
-
-      if (selectedServices.length === 1) {
-        return {
-          checkoutLink: selectedServices[0].individualSquareLink,
-          isValid: hasRealSquareLink(selectedServices[0].individualSquareLink)
-        };
-      }
-
-      const combinationKey = createCombinationKey(selectedServices);
-      const matchedCombination = combinationLinks[combinationKey];
 
       if (
-        matchedCombination &&
-        hasRealSquareLink(matchedCombination.squareCheckoutLink)
+        rootItem.type ===
+        'folder'
       ) {
-        return {
-          checkoutLink: matchedCombination.squareCheckoutLink,
-          isValid: true
-        };
-      }
 
-      return { checkoutLink: "", isValid: false };
-    }
+        const children =
+          rootItem.id ===
+          folderId
+            ? orderedChildren
+            : getFolderApps(
+                rootItem.id
+              );
 
-    function resetPendingContractSnapshot() {
-      if (!checkoutSubmissionInProgress) {
-        pendingContractSnapshot = null;
-      }
 
-      hideSaveStatus();
-    }
+        children.forEach(
+          function(child) {
 
-    function showSaveStatus(message, type = "") {
-      if (!saveStatus) {
-        return;
-      }
+            addItem(
+              child
+            );
 
-      saveStatus.textContent = message;
-      saveStatus.className = "save-status show" + (type ? " " + type : "");
-    }
-
-    function hideSaveStatus() {
-      if (!saveStatus) {
-        return;
-      }
-
-      saveStatus.textContent = "";
-      saveStatus.className = "save-status";
-    }
-
-    function renderServiceSections() {
-      const categories = getCategories();
-
-      serviceSections.innerHTML = categories.map(category => {
-        const categoryId = "category-" + slugify(category);
-        const inputName = slugify(category);
-        const categoryServices = services.filter(
-          service => service.categoryName === category
+          }
         );
 
-        return `
-          <section class="glass-card selection-card" id="${categoryId}">
-            <div class="selection-header">
-              <div>
-                <h2>${category}</h2>
-                <p class="subtext">${categoryDescriptions[category] || "Choose one option from this category."}</p>
-              </div>
-
-              <button type="button" class="category-clear" data-category="${category}">
-                Clear Selection
-              </button>
-            </div>
-
-            <div class="radio-group service-slider">
-              ${categoryServices.map(service => `
-                <label class="radio-card">
-                  <input
-                    type="radio"
-                    class="service-option"
-                    name="${inputName}"
-                    value="${service.id}"
-                    data-category="${service.categoryName}"
-                  />
-                  <span>
-                    <strong class="radio-price">${formatCurrency(service.price)}</strong>
-                    <strong class="service-title">${service.serviceName}</strong>
-                    <small>${service.description}</small>
-                  </span>
-                </label>
-              `).join("")}
-            </div>
-          </section>
-        `;
-      }).join("");
-
-      document.querySelectorAll(".service-option").forEach(input => {
-        input.addEventListener("change", () => {
-          resetPendingContractSnapshot();
-          updateSummary();
-        });
-      });
-
-      document.querySelectorAll(".category-clear").forEach(button => {
-        button.addEventListener("click", () => {
-          const category = button.dataset.category;
-
-          document
-            .querySelectorAll(`.service-option[data-category="${category}"]`)
-            .forEach(input => {
-              input.checked = false;
-            });
-
-          resetPendingContractSnapshot();
-          updateSummary();
-        });
-      });
-    }
-
-    function renderSelectedServices(selectedServices) {
-      if (!selectedServices.length) {
-        selectedServicesList.innerHTML =
-          `<div class="summary-empty">No services selected yet.</div>`;
-        return;
       }
 
-      selectedServicesList.innerHTML = selectedServices.map(service => `
-        <div class="summary-item">
-          <div>
-            <strong>${service.serviceName}</strong>
-            <small>${service.categoryName} · ${service.description}</small>
-          </div>
-          <div class="summary-price">${formatCurrency(service.price)}</div>
-        </div>
-      `).join("");
     }
+  );
 
-    function updateCheckoutHelp(isReady) {
-      if (checkoutSubmissionInProgress) {
-        checkoutHelp.textContent =
-          "Saving your signed subscription contract to Google Sheets before checkout...";
-        checkoutHelp.classList.add("show");
-        return;
-      }
 
-      if (!hasRealAppsScriptUrl()) {
-        checkoutHelp.textContent =
-          "Website setup is incomplete. Add your Google Apps Script /exec URL in the HTML.";
-        checkoutHelp.classList.add("show");
-        return;
-      }
+  items.forEach(
+    function(item) {
 
-      checkoutHelp.textContent =
-        "Please select a service, add your name and phone number, and agree to the terms before checkout.";
-      checkoutHelp.classList.toggle("show", !isReady);
-    }
-
-    function updateSummary() {
-      const selectedServices = getSelectedServices();
-      const selectedTotal = getSelectedTotal(selectedServices);
-      const checkoutStatus = getCheckoutStatus(selectedServices);
-
-      currentCheckoutLink = checkoutStatus.checkoutLink;
-      currentCheckoutIsValid = checkoutStatus.isValid;
-
-      renderSelectedServices(selectedServices);
-      totalPrice.textContent = formatCurrency(selectedTotal);
-
-      const checkoutIsReady = Boolean(
-        selectedServices.length &&
-        agreeTerms.checked &&
-        checkoutStatus.isValid &&
-        isCustomerInfoValid() &&
-        hasRealAppsScriptUrl()
+      addItem(
+        item
       );
 
-      checkoutButton.disabled = !checkoutIsReady || checkoutSubmissionInProgress;
-      updateCheckoutHelp(checkoutIsReady);
+    }
+  );
+
+
+  rebuilt.forEach(
+    function(item,index) {
+
+      item.order =
+        index;
+
+    }
+  );
+
+
+  items =
+    rebuilt;
+
+}
+
+
+/* =========================================================
+   MOVE INTO FOLDER
+   ========================================================= */
+
+function moveItemToEndOfFolder(
+  appId,
+  folderId
+) {
+
+  const app =
+    getItem(
+      appId
+    );
+
+
+  const folder =
+    getItem(
+      folderId
+    );
+
+
+  if (
+    !app ||
+    !folder
+  ) {
+    return;
+  }
+
+
+  app.parentId =
+    folderId;
+
+
+  const root =
+    getRootItems();
+
+
+  applyRootOrder(
+    root
+  );
+
+}
+
+
+/* =========================================================
+   MOVE OUT OF FOLDER
+   FIXED — NO DUPLICATION
+   ========================================================= */
+
+function moveAppOutOfFolder(
+  appId
+) {
+
+  const app =
+    getItem(
+      appId
+    );
+
+
+  if (!app) {
+    return;
+  }
+
+
+  const previousFolderId =
+    app.parentId;
+
+
+  const previousFolder =
+    previousFolderId
+      ? getItem(
+          previousFolderId
+        )
+      : null;
+
+
+  /*
+   * Root is obtained BEFORE parentId changes.
+   * This prevents duplication.
+   */
+  const root =
+    getRootItems();
+
+
+  app.parentId =
+    '';
+
+
+  const folderIndex =
+    previousFolder
+      ? root.findIndex(
+          function(item) {
+
+            return (
+              item.id ===
+              previousFolder.id
+            );
+
+          }
+        )
+      : -1;
+
+
+  if (
+    folderIndex >= 0
+  ) {
+
+    root.splice(
+      folderIndex + 1,
+      0,
+      app
+    );
+
+  } else {
+
+    root.push(
+      app
+    );
+
+  }
+
+
+  applyRootOrder(
+    root
+  );
+
+}
+
+
+/* =========================================================
+   APP EDITOR
+   ========================================================= */
+
+function openAppEditor(
+  id
+) {
+
+  editingAppId =
+    id;
+
+
+  const app =
+    id
+      ? getItem(
+          id
+        )
+      : null;
+
+
+  appModalTitle.textContent =
+    app
+      ? 'Edit App'
+      : 'Add App';
+
+
+  appNameInput.value =
+    app
+      ? app.name
+      : '';
+
+
+  appUrlInput.value =
+    app
+      ? app.url
+      : '';
+
+
+  imageUrlInput.value =
+    app
+      ? app.imageUrl
+      : '';
+
+
+  appFormError.textContent =
+    '';
+
+
+  appModal.classList.remove(
+    'hidden'
+  );
+
+
+  setTimeout(
+    function() {
+
+      appNameInput.focus();
+
+    },
+    50
+  );
+
+}
+
+
+function closeAppModal() {
+
+  appModal.classList.add(
+    'hidden'
+  );
+
+
+  editingAppId =
+    null;
+
+
+  appFormError.textContent =
+    '';
+
+}
+
+
+/* =========================================================
+   SAVE APP
+   ========================================================= */
+
+function saveAppFromModal() {
+
+  const name =
+    appNameInput.value.trim();
+
+
+  const url =
+    appUrlInput.value.trim();
+
+
+  const imageUrl =
+    imageUrlInput.value.trim();
+
+
+  if (!name) {
+
+    appFormError.textContent =
+      'Enter an app name.';
+
+
+    return;
+
+  }
+
+
+  if (
+    !validUrl(
+      url
+    )
+  ) {
+
+    appFormError.textContent =
+      'Enter a valid http:// or https:// app link.';
+
+
+    return;
+
+  }
+
+
+  if (
+    imageUrl &&
+    !validUrl(
+      imageUrl
+    )
+  ) {
+
+    appFormError.textContent =
+      'The image link must start with http:// or https://';
+
+
+    return;
+
+  }
+
+
+  const existingId =
+    editingAppId;
+
+
+  const wasEditing =
+    Boolean(
+      existingId
+    );
+
+
+  if (
+    existingId
+  ) {
+
+    const app =
+      getItem(
+        existingId
+      );
+
+
+    if (app) {
+
+      app.name =
+        name;
+
+
+      app.url =
+        url;
+
+
+      app.imageUrl =
+        imageUrl;
+
     }
 
-    function randomHex(byteCount) {
-      const randomBytes = new Uint8Array(byteCount);
-      crypto.getRandomValues(randomBytes);
+  } else {
 
-      return Array.from(randomBytes)
-        .map(value => value.toString(16).padStart(2, "0"))
-        .join("")
-        .toUpperCase();
+    items.push({
+      id:
+        createId(
+          'app'
+        ),
+
+      type:
+        'app',
+
+      name:
+        name,
+
+      url:
+        url,
+
+      imageUrl:
+        imageUrl,
+
+      parentId:
+        '',
+
+      order:
+        items.length
+    });
+
+  }
+
+
+  closeAppModal();
+
+
+  sortItems();
+
+
+  render();
+
+
+  if (
+    openFolderId
+  ) {
+
+    renderFolderContent();
+
+  }
+
+
+  saveAll(
+    wasEditing
+      ? 'App updated.'
+      : 'App added.'
+  );
+
+}
+
+
+/* =========================================================
+   DELETE
+   ========================================================= */
+
+function openDeleteModal(
+  id
+) {
+
+  const item =
+    getItem(
+      id
+    );
+
+
+  if (!item) {
+    return;
+  }
+
+
+  pendingDeleteId =
+    id;
+
+
+  if (
+    item.type ===
+    'folder'
+  ) {
+
+    deleteText.textContent =
+      'Delete folder "' +
+      item.name +
+      '"? Apps inside it will not be deleted. They will return to the main launcher.';
+
+  } else {
+
+    deleteText.textContent =
+      'Delete "' +
+      item.name +
+      '"?';
+
+  }
+
+
+  deleteModal.classList.remove(
+    'hidden'
+  );
+
+}
+
+
+function closeDeleteModal() {
+
+  deleteModal.classList.add(
+    'hidden'
+  );
+
+
+  pendingDeleteId =
+    null;
+
+}
+
+
+function performDelete() {
+
+  if (
+    !pendingDeleteId
+  ) {
+    return;
+  }
+
+
+  const item =
+    getItem(
+      pendingDeleteId
+    );
+
+
+  if (!item) {
+
+    closeDeleteModal();
+
+
+    return;
+
+  }
+
+
+  if (
+    item.type ===
+    'folder'
+  ) {
+
+    const children =
+      getFolderApps(
+        item.id
+      );
+
+
+    children.forEach(
+      function(child) {
+
+        child.parentId =
+          '';
+
+      }
+    );
+
+  }
+
+
+  items =
+    items.filter(
+      function(current) {
+
+        return (
+          current.id !==
+          item.id
+        );
+
+      }
+    );
+
+
+  closeDeleteModal();
+
+
+  sortItems();
+
+
+  render();
+
+
+  closeFolderWindow();
+
+
+  saveAll(
+    item.type ===
+    'folder'
+      ? 'Folder deleted. Apps returned to launcher.'
+      : 'App deleted.'
+  );
+
+}
+
+
+/* =========================================================
+   SAVE
+   ========================================================= */
+
+function saveAll(
+  message
+) {
+
+  showSaving(
+    true
+  );
+
+
+  items =
+    dedupeItems(
+      items
+    );
+
+
+  sortItems();
+
+
+  const payload =
+    items.map(
+      function(item) {
+
+        return {
+          id:
+            item.id,
+
+          type:
+            item.type,
+
+          name:
+            item.name,
+
+          url:
+            item.url ||
+            '',
+
+          imageUrl:
+            item.imageUrl ||
+            '',
+
+          parentId:
+            item.parentId ||
+            '',
+
+          order:
+            item.order
+        };
+
+      }
+    );
+
+
+  google.script.run
+
+    .withSuccessHandler(
+      function(response) {
+
+        showSaving(
+          false
+        );
+
+
+        if (
+          !response ||
+          response.success !==
+          true
+        ) {
+
+          showToast(
+            response &&
+            response.message
+              ? response.message
+              : 'Unable to save.',
+            'error'
+          );
+
+
+          return;
+
+        }
+
+
+        items =
+          Array.isArray(
+            response.items
+          )
+            ? dedupeItems(
+                response.items
+              )
+            : dedupeItems(
+                payload
+              );
+
+
+        sortItems();
+
+
+        originalItems =
+          cloneItems(
+            items
+          );
+
+
+        editMode =
+          false;
+
+
+        render();
+
+
+        if (
+          openFolderId
+        ) {
+
+          renderFolderContent();
+
+        }
+
+
+        showToast(
+          message ||
+          'Changes saved.',
+          'success'
+        );
+
+      }
+    )
+
+    .withFailureHandler(
+      function(error) {
+
+        showSaving(
+          false
+        );
+
+
+        showToast(
+          error &&
+          error.message
+            ? error.message
+            : 'Unable to save.',
+          'error'
+        );
+
+      }
+    )
+
+    .saveLauncherData(
+      payload
+    );
+
+}
+
+
+/* =========================================================
+   CANCEL EDIT
+   ========================================================= */
+
+function cancelEditing() {
+
+  items =
+    cloneItems(
+      originalItems
+    );
+
+
+  editMode =
+    false;
+
+
+  render();
+
+
+  if (
+    openFolderId
+  ) {
+
+    renderFolderContent();
+
+  }
+
+
+  showToast(
+    'Changes canceled.',
+    ''
+  );
+
+}
+
+
+/* =========================================================
+   HELPERS
+   ========================================================= */
+
+function getItem(
+  id
+) {
+
+  return items.find(
+    function(item) {
+
+      return (
+        item.id ===
+        id
+      );
+
     }
+  ) || null;
 
-    function generateContractId() {
-      const now = new Date();
-      const yyyy = now.getFullYear();
-      const mm = String(now.getMonth() + 1).padStart(2, "0");
-      const dd = String(now.getDate()).padStart(2, "0");
+}
 
-      return `SW-${yyyy}${mm}${dd}-${randomHex(5)}`;
-    }
 
-    function generateRequestId() {
-      return `REQ-${Date.now()}-${randomHex(6)}`;
-    }
+function getRootItems() {
 
-    function getNormalizedContractText() {
-      return contractDocument.innerText
-        .replace(/\u00a0/g, " ")
-        .replace(/[ \t]+\n/g, "\n")
-        .replace(/\n{3,}/g, "\n\n")
-        .trim();
-    }
+  return items
+    .filter(
+      function(item) {
 
-    function getReadableLocalDate(isoDate) {
-      const date = new Date(isoDate);
+        return (
+          !item.parentId
+        );
 
-      return new Intl.DateTimeFormat("en-US", {
-        year: "numeric",
-        month: "long",
-        day: "numeric",
-        hour: "numeric",
-        minute: "2-digit",
-        second: "2-digit",
-        timeZoneName: "short"
-      }).format(date);
-    }
+      }
+    )
+    .sort(
+      function(a,b) {
 
-    function getOrCreateContractSnapshot() {
-      if (pendingContractSnapshot) {
-        return pendingContractSnapshot;
+        return (
+          Number(a.order) -
+          Number(b.order)
+        );
+
+      }
+    );
+
+}
+
+
+function getFolderApps(
+  folderId
+) {
+
+  return items
+    .filter(
+      function(item) {
+
+        return (
+          item.type ===
+          'app' &&
+          item.parentId ===
+          folderId
+        );
+
+      }
+    )
+    .sort(
+      function(a,b) {
+
+        return (
+          Number(a.order) -
+          Number(b.order)
+        );
+
+      }
+    );
+
+}
+
+
+/* =========================================================
+   DEDUPE
+   ========================================================= */
+
+function dedupeItems(
+  list
+) {
+
+  const seen =
+    new Set();
+
+
+  const cleaned =
+    [];
+
+
+  list.forEach(
+    function(item) {
+
+      if (
+        !item ||
+        !item.id ||
+        seen.has(
+          item.id
+        )
+      ) {
+        return;
       }
 
-      const acceptedAtBrowser = new Date().toISOString();
 
-      pendingContractSnapshot = {
-        contractId: generateContractId(),
-        acceptedAtBrowser,
-        acceptedAtLocal: getReadableLocalDate(acceptedAtBrowser)
-      };
+      seen.add(
+        item.id
+      );
 
-      return pendingContractSnapshot;
+
+      cleaned.push({
+        id:
+          item.id,
+
+        type:
+          item.type ||
+          'app',
+
+        name:
+          item.name ||
+          '',
+
+        url:
+          item.url ||
+          '',
+
+        imageUrl:
+          item.imageUrl ||
+          '',
+
+        parentId:
+          item.parentId ||
+          '',
+
+        order:
+          Number(
+            item.order
+          ) || 0
+      });
+
     }
+  );
 
-    function buildContractRecord() {
-      const selectedServices = getSelectedServices();
-      const selectedTotal = getSelectedTotal(selectedServices);
-      const snapshot = getOrCreateContractSnapshot();
+
+  return cleaned;
+
+}
+
+
+/* =========================================================
+   SORT
+   ========================================================= */
+
+function sortItems() {
+
+  items =
+    dedupeItems(
+      items
+    );
+
+
+  items.sort(
+    function(a,b) {
+
+      return (
+        Number(a.order) -
+        Number(b.order)
+      );
+
+    }
+  );
+
+
+  items.forEach(
+    function(item,index) {
+
+      item.order =
+        index;
+
+    }
+  );
+
+}
+
+
+/* =========================================================
+   URL
+   ========================================================= */
+
+function validUrl(
+  value
+) {
+
+  if (
+    typeof value !==
+    'string' ||
+    !value.trim()
+  ) {
+    return false;
+  }
+
+
+  try {
+
+    const parsed =
+      new URL(
+        value.trim()
+      );
+
+
+    return (
+      parsed.protocol ===
+      'https:' ||
+      parsed.protocol ===
+      'http:'
+    );
+
+  } catch (error) {
+
+    return false;
+
+  }
+
+}
+
+
+/* =========================================================
+   CLONE
+   ========================================================= */
+
+function cloneItems(
+  list
+) {
+
+  return list.map(
+    function(item) {
 
       return {
-        requestId: generateRequestId(),
-        contractId: snapshot.contractId,
-        customerName: customerName.value.trim(),
-        phoneNumber: customerPhone.value.trim(),
-        selectedServiceIds: selectedServices.map(service => service.id),
-        selectedServices: selectedServices.map(service => ({
-          id: service.id,
-          serviceName: service.serviceName,
-          categoryName: service.categoryName,
-          price: roundCurrency(service.price)
-        })),
-        totalPrice: selectedTotal,
-        totalPriceFormatted: formatCurrency(selectedTotal),
-        agreeTerms: agreeTerms.checked ? "Yes" : "No",
-        electronicSignature: customerName.value.trim(),
-        acceptedAtBrowser: snapshot.acceptedAtBrowser,
-        acceptedAtLocal: snapshot.acceptedAtLocal,
-        status: "Accepted / Checkout Started",
-        contractText: getNormalizedContractText(),
-        pageUrl: window.location.href,
-        userAgent: navigator.userAgent
+        id:
+          item.id,
+
+        type:
+          item.type,
+
+        name:
+          item.name,
+
+        url:
+          item.url ||
+          '',
+
+        imageUrl:
+          item.imageUrl ||
+          '',
+
+        parentId:
+          item.parentId ||
+          '',
+
+        order:
+          Number(
+            item.order
+          ) || 0
       };
+
     }
+  );
 
-    function buildCheckoutUrl(link, contractRecord) {
-      const checkoutUrl = new URL(link, window.location.href);
+}
 
-      // These are matching/reference values only. Square remains responsible
-      // for the actual payment and recurring subscription processing.
-      checkoutUrl.searchParams.set("customer_name", contractRecord.customerName);
-      checkoutUrl.searchParams.set("customer_phone", contractRecord.phoneNumber);
-      checkoutUrl.searchParams.set("original_price", contractRecord.totalPriceFormatted);
-      checkoutUrl.searchParams.set("agreed_to_terms", contractRecord.agreeTerms);
-      checkoutUrl.searchParams.set("contract_id", contractRecord.contractId);
 
-      return checkoutUrl.toString();
-    }
+/* =========================================================
+   CREATE ID
+   ========================================================= */
 
-    function populateContractSaveForm(contractRecord) {
-      contractSaveForm.action = APPS_SCRIPT_WEB_APP_URL.trim();
+function createId(
+  prefix
+) {
 
-      formRequestId.value = contractRecord.requestId;
-      formContractId.value = contractRecord.contractId;
-      formCustomerName.value = contractRecord.customerName;
-      formPhoneNumber.value = contractRecord.phoneNumber;
-      formSelectedServiceIds.value = JSON.stringify(contractRecord.selectedServiceIds);
-      formAgreeTerms.value = contractRecord.agreeTerms;
-      formElectronicSignature.value = contractRecord.electronicSignature;
-      formAcceptedAtBrowser.value = contractRecord.acceptedAtBrowser;
-      formAcceptedAtLocal.value = contractRecord.acceptedAtLocal;
-      formPageUrl.value = contractRecord.pageUrl;
-      formUserAgent.value = contractRecord.userAgent;
-      formContractText.value = contractRecord.contractText;
-      formWebsite.value = "";
-    }
+  return (
+    prefix +
+    '_' +
+    Date.now()
+      .toString(36) +
+    '_' +
+    Math.random()
+      .toString(36)
+      .slice(2,10)
+  );
 
-    function saveContractDirectlyToAppsScript(contractRecord) {
-      if (!hasRealAppsScriptUrl()) {
-        return Promise.reject(
-          new Error("Google Apps Script Web App URL has not been configured in the HTML.")
-        );
-      }
+}
 
-      if (pendingAppsScriptRequest) {
-        return Promise.reject(
-          new Error("A contract save request is already in progress.")
-        );
-      }
 
-      populateContractSaveForm(contractRecord);
+/* =========================================================
+   ERROR
+   ========================================================= */
 
-      return new Promise((resolve, reject) => {
-        const timeoutId = window.setTimeout(() => {
-          if (
-            pendingAppsScriptRequest &&
-            pendingAppsScriptRequest.requestId === contractRecord.requestId
-          ) {
-            pendingAppsScriptRequest = null;
-            reject(
-              new Error(
-                "Google Sheets did not confirm the save. Please try again."
-              )
-            );
-          }
-        }, 30000);
+function showError(
+  message
+) {
 
-        pendingAppsScriptRequest = {
-          requestId: contractRecord.requestId,
-          resolve,
-          reject,
-          timeoutId
-        };
+  loading.classList.add(
+    'hidden'
+  );
 
-        HTMLFormElement.prototype.submit.call(contractSaveForm);
-      });
-    }
 
-    function handleAppsScriptMessage(event) {
-      if (!pendingAppsScriptRequest) {
-        return;
-      }
+  mainGrid.replaceChildren();
 
-      // The response must come from the iframe used for the Apps Script form.
-      if (event.source !== contractSaveFrame.contentWindow) {
-        return;
-      }
 
-      const data = event.data;
+  errorMessage.textContent =
+    String(
+      message ||
+      ''
+    );
 
-      if (!data || typeof data !== "object") {
-        return;
-      }
 
-      if (data.type !== "SIGMA_WASH_CONTRACT_SAVE_RESULT") {
-        return;
-      }
+  errorPanel.classList.remove(
+    'hidden'
+  );
 
-      if (data.requestId !== pendingAppsScriptRequest.requestId) {
-        return;
-      }
+}
 
-      const currentRequest = pendingAppsScriptRequest;
-      pendingAppsScriptRequest = null;
-      window.clearTimeout(currentRequest.timeoutId);
 
-      if (data.success) {
-        currentRequest.resolve(data);
-      } else {
-        currentRequest.reject(
-          new Error(data.error || "Google Sheets could not save the contract.")
-        );
-      }
-    }
+/* =========================================================
+   SAVING
+   ========================================================= */
 
-    window.addEventListener("message", handleAppsScriptMessage);
+function showSaving(
+  value
+) {
 
-    menuToggle.addEventListener("click", () => {
-      if (sidebar.classList.contains("open")) {
-        closeSidebarNow();
-      } else {
-        openSidebar();
-      }
-    });
+  savingOverlay.classList.toggle(
+    'hidden',
+    !value
+  );
 
-    overlay.addEventListener("click", closeSidebarNow);
+}
 
-    document.querySelectorAll(".sidebar a").forEach(link => {
-      link.addEventListener("click", () => {
-        if (window.innerWidth <= 920) {
-          closeSidebarNow();
-        }
-      });
-    });
 
-    openTerms.addEventListener("click", showTerms);
-    closeTerms.addEventListener("click", hideTerms);
-    termsOverlay.addEventListener("click", hideTerms);
+/* =========================================================
+   TOAST
+   ========================================================= */
 
-    agreeTerms.addEventListener("change", () => {
-      resetPendingContractSnapshot();
-      updateSummary();
-    });
+function showToast(
+  message,
+  type
+) {
 
-    customerName.addEventListener("input", () => {
-      resetPendingContractSnapshot();
-      updateSummary();
-    });
+  const toast =
+    document.createElement(
+      'div'
+    );
 
-    customerPhone.addEventListener("input", () => {
-      resetPendingContractSnapshot();
-      updateSummary();
-    });
 
-    checkoutButton.addEventListener("click", async () => {
-      if (
-        !currentCheckoutIsValid ||
-        !currentCheckoutLink ||
-        !isCustomerInfoValid() ||
-        !agreeTerms.checked ||
-        !hasRealAppsScriptUrl() ||
-        checkoutSubmissionInProgress
-      ) {
-        updateSummary();
-        return;
-      }
+  toast.className =
+    'toast';
 
-      const originalButtonText = checkoutButton.textContent;
 
-      checkoutSubmissionInProgress = true;
-      checkoutButton.disabled = true;
-      checkoutButton.textContent = "Saving Contract...";
-      updateCheckoutHelp(false);
-      showSaveStatus("Saving the full signed contract to Google Sheets...");
+  if (type) {
 
-      try {
-        const contractRecord = buildContractRecord();
-        const saveResult = await saveContractDirectlyToAppsScript(contractRecord);
+    toast.classList.add(
+      type
+    );
 
-        const serverCheckoutUrl = String(saveResult.checkoutUrl || "").trim();
+  }
 
-        if (!hasRealSquareLink(serverCheckoutUrl)) {
-          throw new Error(
-            "The contract was saved, but the Square checkout link returned by Google Apps Script is missing."
-          );
-        }
 
-        showSaveStatus(
-          saveResult.duplicate
-            ? "Contract was already saved. Opening checkout..."
-            : "Contract saved to Google Sheets. Opening checkout...",
-          "success"
-        );
+  toast.textContent =
+    message;
 
-        checkoutButton.textContent = "Opening Checkout...";
 
-        window.location.href = buildCheckoutUrl(
-          serverCheckoutUrl,
-          contractRecord
-        );
+  toastArea.appendChild(
+    toast
+  );
 
-      } catch (error) {
-        console.error("Contract save error:", error);
 
-        const readableMessage =
-          error && error.message
-            ? error.message
-            : "The contract could not be saved. Please try again.";
+  setTimeout(
+    function() {
 
-        showSaveStatus(
-          "Checkout was stopped because the contract was not confirmed as saved. " +
-          readableMessage,
-          "error"
-        );
+      toast.remove();
 
-        checkoutSubmissionInProgress = false;
-        checkoutButton.textContent = originalButtonText;
-        updateSummary();
-      }
-    });
+    },
+    3200
+  );
 
-    document.addEventListener("keydown", event => {
-      if (event.key === "Escape") {
-        closeSidebarNow();
-        hideTerms();
-      }
-    });
+}
 
-    renderServiceSections();
-    updateSummary();
-  </script>
+
+/* =========================================================
+   DEFAULT ICON
+   ========================================================= */
+
+function createDefaultIcon() {
+
+  const svg =
+    '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 96 96">' +
+
+    '<defs>' +
+
+    '<linearGradient id="g" x1="0" y1="0" x2="1" y2="1">' +
+
+    '<stop offset="0" stop-color="#3478f6"/>' +
+
+    '<stop offset="1" stop-color="#7359eb"/>' +
+
+    '</linearGradient>' +
+
+    '</defs>' +
+
+    '<rect width="96" height="96" rx="24" fill="#edf4ff"/>' +
+
+    '<rect x="20" y="20" width="23" height="23" rx="7" fill="url(#g)"/>' +
+
+    '<rect x="53" y="20" width="23" height="23" rx="7" fill="url(#g)"/>' +
+
+    '<rect x="20" y="53" width="23" height="23" rx="7" fill="url(#g)"/>' +
+
+    '<rect x="53" y="53" width="23" height="23" rx="7" fill="url(#g)"/>' +
+
+    '</svg>';
+
+
+  return (
+    'data:image/svg+xml;charset=UTF-8,' +
+    encodeURIComponent(
+      svg
+    )
+  );
+
+}
+
+</script>
+
 </body>
 </html>
