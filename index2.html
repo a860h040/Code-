@@ -1,31 +1,28 @@
 /**
  * ============================================================
- * GOOGLE APPS SCRIPT — APP LAUNCHER + APP MANAGER
+ * APP LAUNCHER WITH FOLDERS
  * ============================================================
  *
- * Google Sheet format:
+ * Google Sheet structure:
  *
- * Column A = App Name
- * Column B = App URL
- * Column C = Image URL
+ * A = Name
+ * B = App URL
+ * C = Image URL
+ * D = Type
+ * E = Parent Folder ID
+ * F = Item ID
+ * G = Order
  *
- * Row 1 = headings
- * Data begins on row 2.
- *
- * The HTML page can:
- * - Add apps
- * - Edit apps
- * - Delete apps
- * - Reorder apps
- *
- * Every change is permanently saved back to Google Sheets.
+ * Existing sheets using only A-C are automatically migrated.
  */
 
+
 /* ============================================================
-   CONFIGURATION
+   SETTINGS
    ============================================================ */
 
-const SPREADSHEET_ID = '1NX6KrxghXH7Cs7jI9aYzd73nxgpzXwxfUVxYh5lMveA';
+const SPREADSHEET_ID = 'PASTE_YOUR_SPREADSHEET_ID_HERE';
+
 const SHEET_NAME = 'Apps';
 
 
@@ -33,38 +30,8 @@ const SHEET_NAME = 'Apps';
    WEB APP
    ============================================================ */
 
-/**
- * Opens Index.html.
- *//**
- * ============================================================
- * APP LAUNCHER WITH FOLDERS
- * ============================================================
- *
- * Sheet structure:
- *
- * A = Name
- * B = App URL
- * C = Image URL
- * D = Type          ("app" or "folder")
- * E = Parent ID     (folder ID, blank for root)
- * F = Item ID       (unique identifier)
- * G = Order
- *
- * Existing A-C sheets are automatically migrated.
- */
-
-
-/* ============================================================
-   CONFIGURATION
-   ============================================================ */
-
-
-
-/* ============================================================
-   WEB APP
-   ============================================================ */
-
 function doGet() {
+
   return HtmlService
     .createHtmlOutputFromFile('Index')
     .setTitle('App Launcher')
@@ -72,225 +39,534 @@ function doGet() {
       'viewport',
       'width=device-width, initial-scale=1, maximum-scale=5'
     );
+
 }
 
 
 /* ============================================================
-   GET DATA
+   LOAD LAUNCHER DATA
    ============================================================ */
 
 function getLauncherData() {
-  const lock = LockService.getScriptLock();
+
+  const lock =
+    LockService.getScriptLock();
 
   try {
+
     lock.waitLock(30000);
 
-    const sheet = getSheet_();
+
+    const sheet =
+      getSheet_();
+
 
     ensureHeaders_(sheet);
 
+
     migrateExistingApps_(sheet);
 
-    const lastRow = sheet.getLastRow();
+
+    const lastRow =
+      sheet.getLastRow();
+
 
     if (lastRow < 2) {
+
       return {
         success: true,
         items: []
       };
+
     }
 
-    const rows = sheet
-      .getRange(
-        2,
-        1,
-        lastRow - 1,
-        7
-      )
-      .getDisplayValues();
+
+    const rows =
+      sheet
+        .getRange(
+          2,
+          1,
+          lastRow - 1,
+          7
+        )
+        .getDisplayValues();
+
 
     const items = [];
 
-    rows.forEach(function(row) {
-      const name = cleanText_(row[0]);
-      const url = cleanUrlOptional_(row[1]);
-      const imageUrl = cleanUrlOptional_(row[2]);
-      const type = normalizeType_(row[3]);
-      const parentId = cleanId_(row[4]);
-      const id = cleanId_(row[5]);
+    const usedIds =
+      new Set();
 
-      let order = Number(row[6]);
 
-      if (!Number.isFinite(order)) {
-        order = 0;
+    rows.forEach(
+      function(row, index) {
+
+        const name =
+          cleanText_(
+            row[0]
+          );
+
+
+        const url =
+          cleanUrlOptional_(
+            row[1]
+          );
+
+
+        const imageUrl =
+          cleanUrlOptional_(
+            row[2]
+          );
+
+
+        const type =
+          normalizeType_(
+            row[3]
+          );
+
+
+        const parentId =
+          cleanId_(
+            row[4]
+          );
+
+
+        const id =
+          cleanId_(
+            row[5]
+          );
+
+
+        let order =
+          Number(
+            row[6]
+          );
+
+
+        if (
+          !Number.isFinite(
+            order
+          )
+        ) {
+
+          order =
+            index;
+
+        }
+
+
+        const empty =
+          !name &&
+          !url &&
+          !imageUrl &&
+          !id;
+
+
+        if (empty) {
+          return;
+        }
+
+
+        if (
+          !name ||
+          !id
+        ) {
+          return;
+        }
+
+
+        /*
+         * Protect against duplicate IDs.
+         */
+        if (
+          usedIds.has(
+            id
+          )
+        ) {
+          return;
+        }
+
+
+        usedIds.add(
+          id
+        );
+
+
+        items.push({
+          id: id,
+
+          type: type,
+
+          name: name,
+
+          url:
+            type === 'app'
+              ? url
+              : '',
+
+          imageUrl:
+            type === 'app'
+              ? imageUrl
+              : '',
+
+          parentId:
+            type === 'app'
+              ? parentId
+              : '',
+
+          order: order
+        });
+
       }
+    );
 
-      if (
-        !name &&
-        !url &&
-        !imageUrl &&
-        !id
-      ) {
-        return;
+
+    /*
+     * Validate parent folders.
+     */
+    const folderIds =
+      new Set(
+        items
+          .filter(
+            function(item) {
+
+              return (
+                item.type ===
+                'folder'
+              );
+
+            }
+          )
+          .map(
+            function(item) {
+
+              return item.id;
+
+            }
+          )
+      );
+
+
+    items.forEach(
+      function(item) {
+
+        if (
+          item.type ===
+          'folder'
+        ) {
+
+          item.parentId =
+            '';
+
+          return;
+
+        }
+
+
+        if (
+          item.parentId &&
+          !folderIds.has(
+            item.parentId
+          )
+        ) {
+
+          item.parentId =
+            '';
+
+        }
+
       }
+    );
 
-      if (!id || !name) {
-        return;
+
+    items.sort(
+      function(a, b) {
+
+        return (
+          a.order -
+          b.order
+        );
+
       }
+    );
 
-      items.push({
-        id: id,
-        type: type,
-        name: name,
-        url: type === 'app' ? url : '',
-        imageUrl: type === 'app' ? imageUrl : '',
-        parentId: parentId,
-        order: order
-      });
-    });
-
-    items.sort(function(a, b) {
-      return a.order - b.order;
-    });
 
     return {
       success: true,
       items: items
     };
 
+
   } catch (error) {
-    console.error(error);
+
+    console.error(
+      error
+    );
+
 
     return {
       success: false,
+
       items: [],
-      message: error.message || 'Unable to load launcher.'
+
+      message:
+        error &&
+        error.message
+          ? error.message
+          : 'Unable to load launcher.'
     };
 
+
   } finally {
+
     try {
+
       lock.releaseLock();
+
     } catch (ignore) {}
+
   }
+
 }
 
 
 /* ============================================================
-   SAVE COMPLETE STRUCTURE
+   SAVE COMPLETE LAUNCHER
    ============================================================ */
 
 function saveLauncherData(items) {
-  const lock = LockService.getScriptLock();
+
+  const lock =
+    LockService.getScriptLock();
+
 
   try {
-    lock.waitLock(30000);
 
-    if (!Array.isArray(items)) {
+    lock.waitLock(
+      30000
+    );
+
+
+    if (
+      !Array.isArray(
+        items
+      )
+    ) {
+
       throw new Error(
         'Invalid launcher data.'
       );
+
     }
 
-    if (items.length > 1000) {
+
+    if (
+      items.length >
+      1000
+    ) {
+
       throw new Error(
-        'Too many launcher items.'
+        'A maximum of 1000 launcher items is supported.'
       );
+
     }
 
-    const cleaned = [];
-    const ids = {};
-    const folders = {};
+
+    const cleaned =
+      [];
+
+
+    const usedIds =
+      new Set();
+
+
+    const folderIds =
+      new Set();
+
 
     /*
-     * First pass:
-     * validate IDs and folder definitions.
+     * FIRST PASS
      */
-    items.forEach(function(item, index) {
-      if (!item || typeof item !== 'object') {
-        throw new Error(
-          'Invalid item #' + (index + 1)
+    items.forEach(
+      function(item, index) {
+
+        if (
+          !item ||
+          typeof item !==
+          'object'
+        ) {
+
+          throw new Error(
+            'Invalid item #' +
+            (index + 1)
+          );
+
+        }
+
+
+        const id =
+          cleanId_(
+            item.id
+          );
+
+
+        const type =
+          normalizeType_(
+            item.type
+          );
+
+
+        const name =
+          cleanText_(
+            item.name
+          );
+
+
+        if (!id) {
+
+          throw new Error(
+            'An item is missing its ID.'
+          );
+
+        }
+
+
+        if (
+          usedIds.has(
+            id
+          )
+        ) {
+
+          throw new Error(
+            'Duplicate launcher item ID detected.'
+          );
+
+        }
+
+
+        if (!name) {
+
+          throw new Error(
+            'An item is missing its name.'
+          );
+
+        }
+
+
+        usedIds.add(
+          id
         );
+
+
+        if (
+          type ===
+          'folder'
+        ) {
+
+          folderIds.add(
+            id
+          );
+
+        }
+
+
+        const url =
+          type === 'app'
+            ? cleanRequiredUrl_(
+                item.url
+              )
+            : '';
+
+
+        const imageUrl =
+          type === 'app'
+            ? cleanUrlOptional_(
+                item.imageUrl
+              )
+            : '';
+
+
+        cleaned.push({
+          id: id,
+
+          type: type,
+
+          name: name,
+
+          url: url,
+
+          imageUrl: imageUrl,
+
+          parentId:
+            cleanId_(
+              item.parentId
+            ),
+
+          order: index
+        });
+
       }
-
-      const id = cleanId_(item.id);
-      const name = cleanText_(item.name);
-      const type = normalizeType_(item.type);
-      const parentId = cleanId_(item.parentId);
-
-      if (!id) {
-        throw new Error(
-          'An item is missing its ID.'
-        );
-      }
-
-      if (ids[id]) {
-        throw new Error(
-          'Duplicate launcher item ID.'
-        );
-      }
-
-      if (!name) {
-        throw new Error(
-          'An item is missing its name.'
-        );
-      }
-
-      ids[id] = true;
-
-      if (type === 'folder') {
-        folders[id] = true;
-      }
-
-      const url =
-        type === 'app'
-          ? cleanRequiredUrl_(item.url)
-          : '';
-
-      const imageUrl =
-        type === 'app'
-          ? cleanUrlOptional_(item.imageUrl)
-          : '';
-
-      cleaned.push({
-        id: id,
-        type: type,
-        name: name,
-        url: url,
-        imageUrl: imageUrl,
-        parentId: parentId,
-        order: index
-      });
-    });
+    );
 
 
     /*
-     * Second pass:
-     * verify parent folders.
+     * SECOND PASS
      *
-     * Folders themselves remain at root.
+     * Folders are root items.
+     * Apps may belong to folders.
      */
-    cleaned.forEach(function(item) {
-      if (item.type === 'folder') {
-        item.parentId = '';
-        return;
+    cleaned.forEach(
+      function(item) {
+
+        if (
+          item.type ===
+          'folder'
+        ) {
+
+          item.parentId =
+            '';
+
+          return;
+
+        }
+
+
+        if (
+          item.parentId &&
+          !folderIds.has(
+            item.parentId
+          )
+        ) {
+
+          item.parentId =
+            '';
+
+        }
+
       }
-
-      if (
-        item.parentId &&
-        !folders[item.parentId]
-      ) {
-        item.parentId = '';
-      }
-    });
+    );
 
 
-    const sheet = getSheet_();
+    const sheet =
+      getSheet_();
 
-    ensureHeaders_(sheet);
 
-    const lastRow = sheet.getLastRow();
+    ensureHeaders_(
+      sheet
+    );
 
-    if (lastRow > 1) {
+
+    const lastRow =
+      sheet.getLastRow();
+
+
+    /*
+     * Clear old launcher rows.
+     */
+    if (
+      lastRow > 1
+    ) {
+
       sheet
         .getRange(
           2,
@@ -299,20 +575,34 @@ function saveLauncherData(items) {
           7
         )
         .clearContent();
+
     }
 
-    if (cleaned.length) {
-      const rows = cleaned.map(function(item) {
-        return [
-          item.name,
-          item.url,
-          item.imageUrl,
-          item.type,
-          item.parentId,
-          item.id,
-          item.order
-        ];
-      });
+
+    /*
+     * Save new data.
+     */
+    if (
+      cleaned.length
+    ) {
+
+      const rows =
+        cleaned.map(
+          function(item) {
+
+            return [
+              item.name,
+              item.url,
+              item.imageUrl,
+              item.type,
+              item.parentId,
+              item.id,
+              item.order
+            ];
+
+          }
+        );
+
 
       sheet
         .getRange(
@@ -321,143 +611,250 @@ function saveLauncherData(items) {
           rows.length,
           7
         )
-        .setValues(rows);
+        .setValues(
+          rows
+        );
+
     }
 
+
     SpreadsheetApp.flush();
+
 
     return {
       success: true,
+
       items: cleaned,
-      message: 'Changes saved.'
+
+      message:
+        'Changes saved successfully.'
     };
 
+
   } catch (error) {
-    console.error(error);
+
+    console.error(
+      error
+    );
+
 
     return {
       success: false,
+
       message:
-        error.message ||
-        'Unable to save launcher.'
+        error &&
+        error.message
+          ? error.message
+          : 'Unable to save launcher.'
     };
 
+
   } finally {
+
     try {
+
       lock.releaseLock();
+
     } catch (ignore) {}
+
   }
+
 }
 
 
 /* ============================================================
-   MIGRATE EXISTING A-C APPS
+   MIGRATE OLD A-C SHEET
    ============================================================ */
 
-/**
- * Existing apps that only use columns A-C are automatically
- * assigned:
- *
- * D = app
- * E = blank
- * F = unique ID
- * G = order
- */
-function migrateExistingApps_(sheet) {
-  const lastRow = sheet.getLastRow();
+function migrateExistingApps_(
+  sheet
+) {
 
-  if (lastRow < 2) {
+  const lastRow =
+    sheet.getLastRow();
+
+
+  if (
+    lastRow < 2
+  ) {
     return;
   }
 
-  const range = sheet.getRange(
-    2,
-    1,
-    lastRow - 1,
-    7
+
+  const range =
+    sheet.getRange(
+      2,
+      1,
+      lastRow - 1,
+      7
+    );
+
+
+  const rows =
+    range.getDisplayValues();
+
+
+  let changed =
+    false;
+
+
+  rows.forEach(
+    function(row, index) {
+
+      const name =
+        cleanText_(
+          row[0]
+        );
+
+
+      const url =
+        cleanText_(
+          row[1]
+        );
+
+
+      const image =
+        cleanText_(
+          row[2]
+        );
+
+
+      const existingType =
+        cleanText_(
+          row[3]
+        );
+
+
+      const existingId =
+        cleanText_(
+          row[5]
+        );
+
+
+      const completelyEmpty =
+        !name &&
+        !url &&
+        !image &&
+        !existingType &&
+        !existingId;
+
+
+      if (
+        completelyEmpty
+      ) {
+        return;
+      }
+
+
+      if (
+        !row[3]
+      ) {
+
+        row[3] =
+          'app';
+
+        changed =
+          true;
+
+      }
+
+
+      if (
+        !row[5]
+      ) {
+
+        row[5] =
+          'item_' +
+          Utilities.getUuid();
+
+
+        changed =
+          true;
+
+      }
+
+
+      if (
+        row[6] === '' ||
+        row[6] === null ||
+        row[6] === undefined
+      ) {
+
+        row[6] =
+          index;
+
+
+        changed =
+          true;
+
+      }
+
+    }
   );
 
-  const rows = range.getDisplayValues();
 
-  let changed = false;
+  if (
+    changed
+  ) {
 
-  rows.forEach(function(row, index) {
-    const name = cleanText_(row[0]);
-    const url = cleanText_(row[1]);
-    const image = cleanText_(row[2]);
+    range.setValues(
+      rows
+    );
 
-    const completelyEmpty =
-      !name &&
-      !url &&
-      !image &&
-      !cleanText_(row[3]) &&
-      !cleanText_(row[4]) &&
-      !cleanText_(row[5]);
 
-    if (completelyEmpty) {
-      return;
-    }
-
-    if (!row[3]) {
-      row[3] = 'app';
-      changed = true;
-    }
-
-    if (!row[5]) {
-      row[5] =
-        'item_' +
-        Utilities.getUuid();
-
-      changed = true;
-    }
-
-    if (
-      row[6] === '' ||
-      row[6] === null
-    ) {
-      row[6] = index;
-      changed = true;
-    }
-  });
-
-  if (changed) {
-    range.setValues(rows);
     SpreadsheetApp.flush();
+
   }
+
 }
 
 
 /* ============================================================
-   SHEET
+   GET SHEET
    ============================================================ */
 
 function getSheet_() {
+
   validateSettings_();
+
 
   const spreadsheet =
     SpreadsheetApp.openById(
       SPREADSHEET_ID
     );
 
+
   const sheet =
     spreadsheet.getSheetByName(
       SHEET_NAME
     );
 
+
   if (!sheet) {
+
     throw new Error(
       'The sheet "' +
       SHEET_NAME +
       '" was not found.'
     );
+
   }
 
+
   return sheet;
+
 }
 
 
-function ensureHeaders_(sheet) {
-  const headers = [
+/* ============================================================
+   HEADERS
+   ============================================================ */
+
+function ensureHeaders_(
+  sheet
+) {
+
+  const desiredHeaders = [
     'Name',
     'App URL',
     'Image URL',
@@ -467,24 +864,8 @@ function ensureHeaders_(sheet) {
     'Order'
   ];
 
-  const current = sheet
-    .getRange(
-      1,
-      1,
-      1,
-      7
-    )
-    .getDisplayValues()[0];
 
-  let needsUpdate = false;
-
-  headers.forEach(function(header, i) {
-    if (!current[i]) {
-      needsUpdate = true;
-    }
-  });
-
-  if (needsUpdate) {
+  const existing =
     sheet
       .getRange(
         1,
@@ -492,113 +873,248 @@ function ensureHeaders_(sheet) {
         1,
         7
       )
-      .setValues([headers]);
+      .getDisplayValues()[0];
+
+
+  const updated =
+    existing.slice();
+
+
+  let changed =
+    false;
+
+
+  desiredHeaders.forEach(
+    function(header, index) {
+
+      if (
+        !updated[index]
+      ) {
+
+        updated[index] =
+          header;
+
+
+        changed =
+          true;
+
+      }
+
+    }
+  );
+
+
+  if (
+    changed
+  ) {
 
     sheet
-      .getRange('A1:G1')
-      .setFontWeight('bold');
+      .getRange(
+        1,
+        1,
+        1,
+        7
+      )
+      .setValues([
+        updated
+      ]);
+
   }
+
+
+  sheet
+    .getRange(
+      1,
+      1,
+      1,
+      7
+    )
+    .setFontWeight(
+      'bold'
+    );
+
 }
 
 
 /* ============================================================
-   VALIDATION
+   SETTINGS VALIDATION
    ============================================================ */
 
 function validateSettings_() {
+
   if (
     !SPREADSHEET_ID ||
     SPREADSHEET_ID ===
       'PASTE_YOUR_SPREADSHEET_ID_HERE'
   ) {
+
     throw new Error(
-      'Enter your spreadsheet ID in Code.gs.'
+      'Enter your Google Spreadsheet ID in Code.gs.'
     );
+
   }
+
 
   if (
     !SHEET_NAME ||
-    !String(SHEET_NAME).trim()
+    !String(
+      SHEET_NAME
+    ).trim()
   ) {
+
     throw new Error(
-      'Enter your sheet name in Code.gs.'
+      'Enter your sheet tab name in Code.gs.'
     );
+
   }
+
 }
 
 
-function cleanText_(value) {
+/* ============================================================
+   CLEAN TEXT
+   ============================================================ */
+
+function cleanText_(
+  value
+) {
+
   return String(
-    value == null ? '' : value
+    value === null ||
+    value === undefined
+      ? ''
+      : value
   )
     .replace(
       /[\u0000-\u0008\u000B\u000C\u000E-\u001F\u007F]/g,
       ''
     )
     .trim()
-    .substring(0, 300);
+    .substring(
+      0,
+      300
+    );
+
 }
 
 
-function cleanId_(value) {
+/* ============================================================
+   CLEAN ID
+   ============================================================ */
+
+function cleanId_(
+  value
+) {
+
   return String(
-    value == null ? '' : value
+    value === null ||
+    value === undefined
+      ? ''
+      : value
   )
     .trim()
     .replace(
       /[^a-zA-Z0-9_\-]/g,
       ''
     )
-    .substring(0, 200);
-}
-
-
-function normalizeType_(value) {
-  return String(value || '')
-    .toLowerCase()
-    .trim() === 'folder'
-      ? 'folder'
-      : 'app';
-}
-
-
-function cleanRequiredUrl_(value) {
-  const url =
-    cleanUrlOptional_(value);
-
-  if (!url) {
-    throw new Error(
-      'An application has an invalid URL.'
+    .substring(
+      0,
+      200
     );
-  }
 
-  return url;
-}
-
-
-function cleanUrlOptional_(value) {
-  const url =
-    String(value || '').trim();
-
-  if (!url) {
-    return '';
-  }
-
-  if (
-    !/^https?:\/\/\S+$/i.test(url)
-  ) {
-    return '';
-  }
-
-  return url.substring(0, 4096);
 }
 
 
 /* ============================================================
-   TEST
+   TYPE
+   ============================================================ */
+
+function normalizeType_(
+  value
+) {
+
+  return String(
+    value ||
+    ''
+  )
+    .toLowerCase()
+    .trim() ===
+    'folder'
+      ? 'folder'
+      : 'app';
+
+}
+
+
+/* ============================================================
+   URL VALIDATION
+   ============================================================ */
+
+function cleanRequiredUrl_(
+  value
+) {
+
+  const url =
+    cleanUrlOptional_(
+      value
+    );
+
+
+  if (!url) {
+
+    throw new Error(
+      'An application has an invalid URL.'
+    );
+
+  }
+
+
+  return url;
+
+}
+
+
+function cleanUrlOptional_(
+  value
+) {
+
+  const url =
+    String(
+      value ||
+      ''
+    ).trim();
+
+
+  if (!url) {
+    return '';
+  }
+
+
+  if (
+    !/^https?:\/\/\S+$/i.test(
+      url
+    )
+  ) {
+
+    return '';
+
+  }
+
+
+  return url.substring(
+    0,
+    4096
+  );
+
+}
+
+
+/* ============================================================
+   OPTIONAL TEST
    ============================================================ */
 
 function testGetLauncherData() {
+
   console.log(
     JSON.stringify(
       getLauncherData(),
@@ -606,6 +1122,7 @@ function testGetLauncherData() {
       2
     )
   );
+
 }
 
 
@@ -636,9 +1153,14 @@ function testGetLauncherData() {
 
 
 
-    <!DOCTYPE html>
+
+
+
+
+       <!DOCTYPE html>
 <html lang="en">
 <head>
+
   <base target="_top">
 
   <meta charset="UTF-8">
@@ -651,41 +1173,55 @@ function testGetLauncherData() {
   <title>App Launcher</title>
 
   <style>
+
     :root {
       --blue: #3478f6;
       --blue-dark: #225dcc;
+
       --navy: #17283f;
 
       --background: #f3f6fb;
 
       --text: #172337;
+
       --muted: #748197;
 
-      --border: rgba(25,45,72,.10);
+      --border:
+        rgba(25,45,72,.10);
 
       --red: #cc3c4b;
+
       --red-light: #fff0f2;
 
       --green: #128565;
 
       --shadow:
-        0 8px 24px rgba(30,48,76,.08);
+        0 8px 24px
+        rgba(30,48,76,.08);
 
       --shadow-hover:
-        0 18px 40px rgba(30,48,76,.16);
+        0 18px 40px
+        rgba(30,48,76,.16);
     }
+
 
     * {
       box-sizing: border-box;
     }
 
+
     html {
       min-height: 100%;
     }
 
+
     body {
       min-height: 100vh;
+
       margin: 0;
+
+      color:
+        var(--text);
 
       font-family:
         -apple-system,
@@ -695,8 +1231,6 @@ function testGetLauncherData() {
         Helvetica,
         Arial,
         sans-serif;
-
-      color: var(--text);
 
       background:
         radial-gradient(
@@ -712,26 +1246,34 @@ function testGetLauncherData() {
         var(--background);
     }
 
+
     button,
     input {
       font: inherit;
     }
 
+
     button {
-      -webkit-tap-highlight-color: transparent;
+      -webkit-tap-highlight-color:
+        transparent;
     }
+
 
     .hidden {
       display: none !important;
     }
+
 
     /* =====================================================
        PAGE
        ===================================================== */
 
     .page {
-      width: min(1450px,100%);
-      margin: 0 auto;
+      width:
+        min(1450px,100%);
+
+      margin:
+        0 auto;
 
       padding:
         24px
@@ -739,55 +1281,93 @@ function testGetLauncherData() {
         55px;
     }
 
+
     /* =====================================================
        HEADER
        ===================================================== */
 
     .header {
-      position: sticky;
-      top: 10px;
-      z-index: 100;
+      position:
+        sticky;
 
-      display: flex;
-      align-items: center;
-      justify-content: space-between;
+      top:
+        10px;
 
-      gap: 15px;
+      z-index:
+        100;
 
-      margin-bottom: 30px;
-      padding: 16px 18px;
+      display:
+        flex;
 
-      border: 1px solid var(--border);
-      border-radius: 24px;
+      align-items:
+        center;
+
+      justify-content:
+        space-between;
+
+      gap:
+        15px;
+
+      margin-bottom:
+        30px;
+
+      padding:
+        16px 18px;
+
+      border:
+        1px solid
+        var(--border);
+
+      border-radius:
+        24px;
 
       background:
-        rgba(255,255,255,.91);
+        rgba(255,255,255,.92);
 
-      backdrop-filter: blur(20px);
-      -webkit-backdrop-filter: blur(20px);
+      box-shadow:
+        var(--shadow);
 
-      box-shadow: var(--shadow);
+      backdrop-filter:
+        blur(20px);
+
+      -webkit-backdrop-filter:
+        blur(20px);
     }
+
 
     .brand {
-      display: flex;
-      align-items: center;
-      gap: 12px;
+      display:
+        flex;
+
+      align-items:
+        center;
+
+      gap:
+        12px;
     }
 
+
     .brand-icon {
-      display: grid;
+      display:
+        grid;
 
-      width: 48px;
-      height: 48px;
+      width:
+        48px;
 
-      flex: 0 0 48px;
+      height:
+        48px;
 
-      place-items: center;
+      flex:
+        0 0 48px;
 
-      color: white;
+      place-items:
+        center;
 
-      border-radius: 15px;
+      color:
+        white;
+
+      border-radius:
+        15px;
 
       background:
         linear-gradient(
@@ -801,185 +1381,300 @@ function testGetLauncherData() {
         rgba(52,120,246,.25);
     }
 
+
     .brand-icon svg {
-      width: 25px;
-      height: 25px;
+      width:
+        25px;
+
+      height:
+        25px;
     }
+
 
     .brand-title {
-      margin: 0;
+      margin:
+        0;
 
-      font-size: 1.08rem;
-      font-weight: 760;
+      font-size:
+        1.08rem;
+
+      font-weight:
+        760;
     }
+
 
     .brand-subtitle {
-      margin: 3px 0 0;
+      margin:
+        3px 0 0;
 
-      color: var(--muted);
+      color:
+        var(--muted);
 
-      font-size: .8rem;
+      font-size:
+        .8rem;
     }
+
 
     .header-actions {
-      display: flex;
-      align-items: center;
-      gap: 8px;
+      display:
+        flex;
+
+      align-items:
+        center;
+
+      gap:
+        8px;
     }
+
 
     /* =====================================================
        BUTTONS
        ===================================================== */
 
     .btn {
-      display: inline-flex;
-      align-items: center;
-      justify-content: center;
+      display:
+        inline-flex;
 
-      gap: 7px;
+      align-items:
+        center;
 
-      min-height: 42px;
+      justify-content:
+        center;
 
-      padding: 9px 14px;
+      gap:
+        7px;
 
-      border: 0;
-      border-radius: 12px;
+      min-height:
+        42px;
 
-      cursor: pointer;
+      padding:
+        9px 14px;
 
-      font-size: .86rem;
-      font-weight: 700;
+      border:
+        0;
+
+      border-radius:
+        12px;
+
+      cursor:
+        pointer;
+
+      font-size:
+        .86rem;
+
+      font-weight:
+        700;
 
       transition:
         transform .15s ease,
         background .15s ease;
     }
 
+
     .btn:hover {
-      transform: translateY(-1px);
+      transform:
+        translateY(-1px);
     }
+
 
     .btn-primary {
-      color: white;
-      background: var(--blue);
+      color:
+        white;
+
+      background:
+        var(--blue);
     }
+
 
     .btn-primary:hover {
-      background: var(--blue-dark);
+      background:
+        var(--blue-dark);
     }
+
 
     .btn-secondary {
-      color: var(--navy);
-      background: #edf2f8;
+      color:
+        var(--navy);
+
+      background:
+        #edf2f8;
     }
+
 
     .btn-success {
-      color: white;
-      background: var(--green);
+      color:
+        white;
+
+      background:
+        var(--green);
     }
 
+
     .btn-danger {
-      color: var(--red);
-      background: var(--red-light);
+      color:
+        var(--red);
+
+      background:
+        var(--red-light);
     }
+
 
     /* =====================================================
        CONTENT
        ===================================================== */
 
     .content-header {
-      display: flex;
-      align-items: flex-end;
-      justify-content: space-between;
+      display:
+        flex;
 
-      gap: 15px;
+      align-items:
+        flex-end;
 
-      margin-bottom: 19px;
+      justify-content:
+        space-between;
+
+      gap:
+        15px;
+
+      margin-bottom:
+        19px;
     }
+
 
     .content-title {
-      margin: 0;
+      margin:
+        0;
 
       font-size:
-        clamp(1.5rem,2.4vw,2rem);
+        clamp(
+          1.5rem,
+          2.4vw,
+          2rem
+        );
 
-      font-weight: 780;
+      font-weight:
+        780;
 
-      letter-spacing: -.035em;
+      letter-spacing:
+        -.035em;
     }
+
 
     .description {
-      margin: 6px 0 0;
+      margin:
+        6px 0 0;
 
-      color: var(--muted);
+      color:
+        var(--muted);
 
-      font-size: .9rem;
-      line-height: 1.5;
+      font-size:
+        .9rem;
+
+      line-height:
+        1.5;
     }
 
+
     .count {
-      flex: 0 0 auto;
+      flex:
+        0 0 auto;
 
-      margin: 0;
-      padding: 7px 11px;
+      margin:
+        0;
 
-      border: 1px solid var(--border);
-      border-radius: 100px;
+      padding:
+        7px 11px;
+
+      border:
+        1px solid
+        var(--border);
+
+      border-radius:
+        100px;
 
       background:
         rgba(255,255,255,.65);
 
-      color: var(--muted);
+      color:
+        var(--muted);
 
-      font-size: .8rem;
-      font-weight: 700;
+      font-size:
+        .8rem;
+
+      font-weight:
+        700;
     }
+
 
     /* =====================================================
        EDIT BANNER
        ===================================================== */
 
     .edit-banner {
-      display: flex;
-      align-items: center;
-      justify-content: space-between;
+      display:
+        flex;
 
-      gap: 15px;
+      align-items:
+        center;
 
-      margin-bottom: 19px;
-      padding: 13px 15px;
+      justify-content:
+        space-between;
+
+      gap:
+        15px;
+
+      margin-bottom:
+        19px;
+
+      padding:
+        13px 15px;
 
       border:
         1px solid
         rgba(52,120,246,.20);
 
-      border-radius: 14px;
+      border-radius:
+        14px;
 
-      background: #edf4ff;
+      background:
+        #edf4ff;
     }
+
 
     .edit-banner strong {
-      display: block;
-      font-size: .88rem;
+      display:
+        block;
+
+      font-size:
+        .88rem;
     }
+
 
     .edit-banner span {
-      display: block;
+      display:
+        block;
 
-      margin-top: 3px;
+      margin-top:
+        3px;
 
-      color: #61728b;
+      color:
+        #61728b;
 
-      font-size: .77rem;
-      line-height: 1.5;
+      font-size:
+        .77rem;
+
+      line-height:
+        1.5;
     }
+
 
     /* =====================================================
        MAIN GRID
        ===================================================== */
 
     .grid {
-      display: grid;
+      display:
+        grid;
 
       grid-template-columns:
         repeat(
@@ -990,36 +1685,55 @@ function testGetLauncherData() {
           )
         );
 
-      gap: 18px;
+      gap:
+        18px;
     }
+
 
     /* =====================================================
        CARD
        ===================================================== */
 
     .card {
-      position: relative;
+      position:
+        relative;
 
-      display: flex;
-      flex-direction: column;
+      display:
+        flex;
 
-      min-width: 0;
-      min-height: 245px;
+      flex-direction:
+        column;
 
-      padding: 0;
+      min-width:
+        0;
 
-      overflow: hidden;
+      min-height:
+        245px;
 
-      border: 1px solid var(--border);
-      border-radius: 20px;
+      padding:
+        0;
 
-      background: #ffffff;
+      overflow:
+        hidden;
 
-      box-shadow: var(--shadow);
+      border:
+        1px solid
+        var(--border);
 
-      cursor: pointer;
+      border-radius:
+        20px;
 
-      user-select: none;
+      background:
+        #ffffff;
+
+      box-shadow:
+        var(--shadow);
+
+      cursor:
+        pointer;
+
+      user-select:
+        none;
 
       transition:
         transform .16s ease,
@@ -1028,169 +1742,258 @@ function testGetLauncherData() {
         background .16s ease;
     }
 
+
     .card:hover {
-      transform: translateY(-4px);
+      transform:
+        translateY(-4px);
 
       box-shadow:
         var(--shadow-hover);
     }
 
+
     .card.editing {
-      cursor: grab;
-      padding-bottom: 42px;
+      cursor:
+        grab;
+
+      padding-bottom:
+        42px;
     }
+
 
     .card.dragging {
-      opacity: .3;
+      opacity:
+        .3;
     }
 
+
     /* =====================================================
-       IMAGE AREA
+       LARGE IMAGE AREA
        ===================================================== */
 
     .icon-wrap {
-      position: relative;
+      position:
+        relative;
 
-      display: flex;
-      align-items: center;
-      justify-content: center;
+      display:
+        flex;
 
-      width: 100%;
-      height: 190px;
+      align-items:
+        center;
 
-      margin: 0;
-      padding: 0;
+      justify-content:
+        center;
 
-      overflow: hidden;
+      width:
+        100%;
 
-      border: 0;
-      border-radius: 0;
+      height:
+        190px;
 
-      background: #ffffff;
+      margin:
+        0;
 
-      box-shadow: none;
+      padding:
+        0;
+
+      overflow:
+        hidden;
+
+      border:
+        0;
+
+      border-radius:
+        0;
+
+      background:
+        #ffffff;
     }
 
+
     /* =====================================================
-       FULL IMAGE — NO CROPPING
+       LOGO — 25% SMALLER
        ===================================================== */
 
     .app-image {
-      display: block;
+      display:
+        block;
 
-      width: 100%;
-      height: 100%;
+      /*
+       * 75% = 25% reduction
+       */
+      width:
+        75%;
 
-      margin: 0;
-      padding: 0;
+      height:
+        75%;
 
-      border: 0;
+      margin:
+        auto;
 
-      background: transparent;
+      padding:
+        0;
 
-      object-fit: contain;
-      object-position: center;
+      border:
+        0;
+
+      background:
+        transparent;
+
+      object-fit:
+        contain;
+
+      object-position:
+        center;
     }
 
+
     /* =====================================================
-       NAME UNDER IMAGE
+       APP NAME
        ===================================================== */
 
     .card-name {
-      display: flex;
-      align-items: center;
-      justify-content: center;
+      display:
+        flex;
 
-      width: 100%;
-      min-height: 55px;
+      align-items:
+        center;
 
-      margin: 0;
+      justify-content:
+        center;
 
-      padding: 10px 12px;
+      width:
+        100%;
 
-      text-align: center;
+      min-height:
+        55px;
 
-      color: var(--text);
+      margin:
+        0;
 
-      background: #ffffff;
+      padding:
+        10px 12px;
 
-      font-size: .95rem;
-      font-weight: 720;
-      line-height: 1.3;
+      text-align:
+        center;
 
-      overflow-wrap: anywhere;
+      color:
+        var(--text);
+
+      background:
+        #ffffff;
+
+      font-size:
+        .95rem;
+
+      font-weight:
+        720;
+
+      line-height:
+        1.3;
+
+      overflow-wrap:
+        anywhere;
 
       border-top:
         1px solid
         rgba(25,45,72,.06);
     }
 
+
     /* =====================================================
-       DRAG DROP
+       DROP INDICATORS
        ===================================================== */
 
     .card.drop-before {
       box-shadow:
-        inset 7px 0 0 var(--blue),
+        inset 7px 0 0
+        var(--blue),
         var(--shadow-hover);
 
-      background: #f4f8ff;
+      background:
+        #f4f8ff;
     }
+
 
     .card.drop-after {
       box-shadow:
-        inset -7px 0 0 var(--blue),
+        inset -7px 0 0
+        var(--blue),
         var(--shadow-hover);
 
-      background: #f4f8ff;
+      background:
+        #f4f8ff;
     }
+
 
     .card.drop-folder {
       border:
-        3px solid var(--blue);
+        3px solid
+        var(--blue);
 
-      background: #eaf2ff;
+      background:
+        #eaf2ff;
 
-      transform: scale(1.03);
+      transform:
+        scale(1.03);
     }
 
+
     .drop-message {
-      position: absolute;
+      position:
+        absolute;
 
-      left: 50%;
-      bottom: 7px;
+      left:
+        50%;
 
-      z-index: 25;
+      bottom:
+        7px;
+
+      z-index:
+        30;
 
       transform:
         translateX(-50%);
 
-      padding: 4px 8px;
+      padding:
+        4px 8px;
 
-      border-radius: 8px;
+      border-radius:
+        8px;
 
-      color: white;
+      color:
+        white;
 
       background:
         rgba(34,59,96,.90);
 
-      font-size: .65rem;
-      font-weight: 700;
+      font-size:
+        .65rem;
 
-      white-space: nowrap;
+      font-weight:
+        700;
 
-      pointer-events: none;
+      white-space:
+        nowrap;
+
+      pointer-events:
+        none;
     }
+
 
     /* =====================================================
        FOLDER
        ===================================================== */
 
     .folder-card {
-      justify-content: center;
-      align-items: center;
+      justify-content:
+        center;
 
-      padding: 30px 15px 20px;
+      align-items:
+        center;
+
+      padding:
+        30px 15px 20px;
 
       background:
         linear-gradient(
@@ -1200,19 +2003,28 @@ function testGetLauncherData() {
         );
     }
 
+
     .folder-card.editing {
-      padding-bottom: 48px;
+      padding-bottom:
+        48px;
     }
 
+
     .folder-icon {
-      position: relative;
+      position:
+        relative;
 
-      width: 112px;
-      height: 90px;
+      width:
+        112px;
 
-      padding: 12px;
+      height:
+        90px;
 
-      margin-top: 12px;
+      padding:
+        12px;
+
+      margin-top:
+        12px;
 
       border-radius:
         14px 20px 20px 20px;
@@ -1229,109 +2041,173 @@ function testGetLauncherData() {
         rgba(52,120,246,.24);
     }
 
+
     .folder-icon::before {
-      position: absolute;
+      position:
+        absolute;
 
-      top: -8px;
-      left: 10px;
+      top:
+        -8px;
 
-      width: 42px;
-      height: 14px;
+      left:
+        10px;
 
-      content: "";
+      width:
+        42px;
+
+      height:
+        14px;
+
+      content:
+        "";
 
       border-radius:
         8px 8px 0 0;
 
-      background: #6fa5ff;
+      background:
+        #6fa5ff;
     }
 
-    .folder-preview {
-      display: grid;
 
-      width: 100%;
-      height: 100%;
+    .folder-preview {
+      display:
+        grid;
+
+      width:
+        100%;
+
+      height:
+        100%;
 
       grid-template-columns:
         repeat(2,1fr);
 
-      gap: 6px;
+      gap:
+        6px;
     }
 
+
     .folder-preview-cell {
-      display: flex;
-      align-items: center;
-      justify-content: center;
+      display:
+        flex;
 
-      overflow: hidden;
+      align-items:
+        center;
 
-      border-radius: 8px;
+      justify-content:
+        center;
+
+      overflow:
+        hidden;
+
+      border-radius:
+        8px;
 
       background:
         rgba(255,255,255,.95);
     }
 
+
+    /*
+     * Folder preview logos also reduced 25%.
+     */
     .folder-preview-cell img {
-      width: 100%;
-      height: 100%;
+      width:
+        75%;
 
-      padding: 2px;
+      height:
+        75%;
 
-      object-fit: contain;
-      object-position: center;
+      padding:
+        0;
+
+      object-fit:
+        contain;
+
+      object-position:
+        center;
     }
 
-    .folder-empty-dot {
-      width: 10px;
-      height: 10px;
 
-      border-radius: 50%;
+    .folder-empty-dot {
+      width:
+        10px;
+
+      height:
+        10px;
+
+      border-radius:
+        50%;
 
       background:
         rgba(63,99,160,.25);
     }
 
+
     .folder-card .card-name {
-      margin-top: 18px;
+      margin-top:
+        18px;
 
-      border: 0;
+      border:
+        0;
 
-      background: transparent;
+      background:
+        transparent;
     }
+
 
     /* =====================================================
        CARD TOOLS
        ===================================================== */
 
     .card-tools {
-      position: absolute;
+      position:
+        absolute;
 
-      top: 8px;
-      right: 8px;
+      top:
+        8px;
 
-      z-index: 30;
+      right:
+        8px;
 
-      display: flex;
+      z-index:
+        40;
 
-      gap: 5px;
+      display:
+        flex;
+
+      gap:
+        5px;
     }
 
+
     .tool-button {
-      display: grid;
+      display:
+        grid;
 
-      width: 32px;
-      height: 32px;
+      width:
+        32px;
 
-      place-items: center;
+      height:
+        32px;
 
-      padding: 0;
+      place-items:
+        center;
 
-      border: 0;
-      border-radius: 9px;
+      padding:
+        0;
 
-      cursor: pointer;
+      border:
+        0;
 
-      color: #5c697c;
+      border-radius:
+        9px;
+
+      cursor:
+        pointer;
+
+      color:
+        #5c697c;
 
       background:
         rgba(240,244,249,.97);
@@ -1341,87 +2217,127 @@ function testGetLauncherData() {
         rgba(20,40,70,.10);
     }
 
-    .tool-button.delete {
-      color: var(--red);
 
-      background: var(--red-light);
+    .tool-button.delete {
+      color:
+        var(--red);
+
+      background:
+        var(--red-light);
     }
+
 
     /* =====================================================
        ORDER BUTTONS
        ===================================================== */
 
     .order-tools {
-      position: absolute;
+      position:
+        absolute;
 
-      left: 50%;
-      bottom: 7px;
+      left:
+        50%;
 
-      z-index: 30;
+      bottom:
+        7px;
 
-      display: flex;
+      z-index:
+        40;
 
-      gap: 5px;
+      display:
+        flex;
+
+      gap:
+        5px;
 
       transform:
         translateX(-50%);
     }
 
+
     .order-btn {
-      display: grid;
+      display:
+        grid;
 
-      width: 34px;
-      height: 29px;
+      width:
+        34px;
 
-      place-items: center;
+      height:
+        29px;
 
-      padding: 0;
+      place-items:
+        center;
 
-      border: 0;
-      border-radius: 8px;
+      padding:
+        0;
 
-      cursor: pointer;
+      border:
+        0;
 
-      color: var(--navy);
+      border-radius:
+        8px;
 
-      background: #eaf0f8;
+      cursor:
+        pointer;
 
-      font-weight: 800;
+      color:
+        var(--navy);
+
+      background:
+        #eaf0f8;
+
+      font-weight:
+        800;
     }
+
 
     .order-btn:disabled {
-      opacity: .3;
-      cursor: default;
+      opacity:
+        .3;
+
+      cursor:
+        default;
     }
+
 
     /* =====================================================
        STATUS
        ===================================================== */
 
     .status {
-      display: grid;
+      display:
+        grid;
 
-      min-height: 270px;
+      min-height:
+        270px;
 
-      place-items: center;
+      place-items:
+        center;
 
-      padding: 35px 20px;
+      padding:
+        35px 20px;
 
       border:
         1px dashed
         rgba(31,50,78,.16);
 
-      border-radius: 19px;
+      border-radius:
+        19px;
 
       background:
         rgba(255,255,255,.6);
 
-      text-align: center;
+      text-align:
+        center;
     }
 
+
     .spinner {
-      width: 44px;
-      height: 44px;
+      width:
+        44px;
+
+      height:
+        44px;
 
       margin:
         0 auto 16px;
@@ -1433,180 +2349,269 @@ function testGetLauncherData() {
       border-top-color:
         var(--blue);
 
-      border-radius: 50%;
+      border-radius:
+        50%;
 
       animation:
-        spin .8s linear infinite;
+        spin .8s
+        linear infinite;
     }
+
 
     @keyframes spin {
       to {
-        transform: rotate(360deg);
+        transform:
+          rotate(360deg);
       }
     }
 
+
     /* =====================================================
-       MODALS
+       MODAL
        ===================================================== */
 
     .overlay {
-      position: fixed;
+      position:
+        fixed;
 
-      inset: 0;
+      inset:
+        0;
 
-      z-index: 1000;
+      z-index:
+        1000;
 
-      display: grid;
-      place-items: center;
+      display:
+        grid;
 
-      padding: 18px;
+      place-items:
+        center;
+
+      padding:
+        18px;
 
       background:
         rgba(19,31,48,.5);
 
-      backdrop-filter: blur(6px);
-      -webkit-backdrop-filter: blur(6px);
+      backdrop-filter:
+        blur(6px);
+
+      -webkit-backdrop-filter:
+        blur(6px);
     }
 
+
     .modal {
-      width: min(500px,100%);
+      width:
+        min(500px,100%);
 
       max-height:
         calc(100vh - 36px);
 
-      overflow-y: auto;
+      overflow-y:
+        auto;
 
-      padding: 24px;
+      padding:
+        24px;
 
-      border-radius: 22px;
+      border-radius:
+        22px;
 
-      background: white;
+      background:
+        white;
 
       box-shadow:
         0 30px 80px
         rgba(18,31,48,.3);
     }
 
+
     .folder-window {
       width:
         min(900px,100%);
     }
 
+
     .modal-header {
-      display: flex;
-      align-items: flex-start;
-      justify-content: space-between;
+      display:
+        flex;
 
-      gap: 15px;
+      align-items:
+        flex-start;
 
-      margin-bottom: 20px;
+      justify-content:
+        space-between;
+
+      gap:
+        15px;
+
+      margin-bottom:
+        20px;
     }
+
 
     .modal-title {
-      margin: 0;
+      margin:
+        0;
 
-      font-size: 1.3rem;
-      font-weight: 780;
+      font-size:
+        1.3rem;
+
+      font-weight:
+        780;
     }
+
 
     .modal-subtitle {
-      margin: 5px 0 0;
+      margin:
+        5px 0 0;
 
-      color: var(--muted);
+      color:
+        var(--muted);
 
-      font-size: .82rem;
-      line-height: 1.45;
+      font-size:
+        .82rem;
+
+      line-height:
+        1.45;
     }
+
 
     .close {
-      display: grid;
+      display:
+        grid;
 
-      width: 35px;
-      height: 35px;
+      width:
+        35px;
 
-      flex: 0 0 35px;
+      height:
+        35px;
 
-      place-items: center;
+      flex:
+        0 0 35px;
 
-      border: 0;
-      border-radius: 10px;
+      place-items:
+        center;
 
-      cursor: pointer;
+      border:
+        0;
 
-      color: var(--muted);
+      border-radius:
+        10px;
 
-      background: #eef2f7;
+      cursor:
+        pointer;
+
+      color:
+        var(--muted);
+
+      background:
+        #eef2f7;
     }
 
+
     /* =====================================================
-       FORM
+       FORMS
        ===================================================== */
 
     .field {
-      margin-bottom: 16px;
+      margin-bottom:
+        16px;
     }
+
 
     .label {
-      display: block;
+      display:
+        block;
 
-      margin-bottom: 7px;
+      margin-bottom:
+        7px;
 
-      font-size: .83rem;
-      font-weight: 700;
+      font-size:
+        .83rem;
+
+      font-weight:
+        700;
     }
+
 
     .input {
-      width: 100%;
-      height: 47px;
+      width:
+        100%;
 
-      padding: 0 13px;
+      height:
+        47px;
+
+      padding:
+        0 13px;
 
       border:
-        1px solid #dce3ec;
+        1px solid
+        #dce3ec;
 
-      border-radius: 11px;
+      border-radius:
+        11px;
 
-      outline: 0;
+      outline:
+        0;
 
-      background: #fbfcfe;
+      background:
+        #fbfcfe;
     }
 
+
     .input:focus {
-      border-color: var(--blue);
+      border-color:
+        var(--blue);
 
       box-shadow:
         0 0 0 4px
         rgba(52,120,246,.1);
 
-      background: white;
+      background:
+        white;
     }
+
 
     .form-error {
-      min-height: 18px;
+      min-height:
+        18px;
 
-      margin-top: 6px;
+      margin-top:
+        6px;
 
-      color: var(--red);
+      color:
+        var(--red);
 
-      font-size: .78rem;
-      font-weight: 600;
+      font-size:
+        .78rem;
+
+      font-weight:
+        600;
     }
+
 
     .modal-actions {
-      display: flex;
-      justify-content: flex-end;
+      display:
+        flex;
 
-      gap: 8px;
+      justify-content:
+        flex-end;
 
-      margin-top: 20px;
+      gap:
+        8px;
+
+      margin-top:
+        20px;
     }
 
+
     /* =====================================================
-       FOLDER CONTENT
+       APPS INSIDE FOLDER
        ===================================================== */
 
     .folder-grid {
-      display: grid;
+      display:
+        grid;
 
       grid-template-columns:
         repeat(
@@ -1614,201 +2619,310 @@ function testGetLauncherData() {
           minmax(170px,1fr)
         );
 
-      gap: 14px;
+      gap:
+        14px;
     }
 
+
     .folder-app {
-      position: relative;
+      position:
+        relative;
 
-      display: flex;
-      flex-direction: column;
+      display:
+        flex;
 
-      align-items: stretch;
-      justify-content: flex-start;
+      flex-direction:
+        column;
 
-      min-height: 200px;
+      align-items:
+        stretch;
 
-      overflow: hidden;
+      min-height:
+        200px;
+
+      overflow:
+        hidden;
 
       border:
-        1px solid var(--border);
+        1px solid
+        var(--border);
 
-      border-radius: 16px;
+      border-radius:
+        16px;
 
-      cursor: pointer;
+      cursor:
+        pointer;
 
-      background: white;
+      background:
+        white;
 
       box-shadow:
         0 6px 18px
         rgba(30,48,76,.07);
     }
 
+
     .folder-app:hover {
-      background: #f8fbff;
+      background:
+        #f8fbff;
     }
+
 
     .folder-app .icon-wrap {
-      width: 100%;
-      height: 145px;
+      width:
+        100%;
+
+      height:
+        145px;
     }
 
+
+    /*
+     * Apps inside folders are also
+     * reduced by 25%.
+     */
     .folder-app .app-image {
-      width: 100%;
-      height: 100%;
+      width:
+        75%;
 
-      padding: 0;
+      height:
+        75%;
 
-      object-fit: contain;
-      object-position: center;
+      margin:
+        auto;
+
+      padding:
+        0;
+
+      object-fit:
+        contain;
+
+      object-position:
+        center;
     }
+
 
     .folder-app .card-name {
-      min-height: 48px;
+      min-height:
+        48px;
 
-      font-size: .85rem;
+      font-size:
+        .85rem;
     }
+
 
     .folder-app.edit-folder-app {
-      padding-bottom: 39px;
+      padding-bottom:
+        39px;
     }
+
 
     .folder-tools {
-      position: absolute;
+      position:
+        absolute;
 
-      top: 6px;
-      right: 6px;
+      top:
+        6px;
 
-      z-index: 30;
+      right:
+        6px;
 
-      display: flex;
+      z-index:
+        30;
 
-      gap: 4px;
+      display:
+        flex;
+
+      gap:
+        4px;
     }
 
+
     .folder-order-tools {
-      position: absolute;
+      position:
+        absolute;
 
-      bottom: 6px;
-      left: 50%;
+      bottom:
+        6px;
 
-      z-index: 30;
+      left:
+        50%;
 
-      display: flex;
+      z-index:
+        30;
 
-      gap: 4px;
+      display:
+        flex;
+
+      gap:
+        4px;
 
       transform:
         translateX(-50%);
     }
 
+
     .folder-tool {
-      display: grid;
+      display:
+        grid;
 
-      width: 29px;
-      height: 29px;
+      width:
+        29px;
 
-      place-items: center;
+      height:
+        29px;
 
-      padding: 0;
+      place-items:
+        center;
 
-      border: 0;
-      border-radius: 8px;
+      padding:
+        0;
 
-      cursor: pointer;
+      border:
+        0;
 
-      color: #59677b;
+      border-radius:
+        8px;
 
-      background: white;
+      cursor:
+        pointer;
+
+      color:
+        #59677b;
+
+      background:
+        white;
 
       box-shadow:
         0 3px 8px
         rgba(31,50,78,.12);
     }
 
+
     /* =====================================================
        TOAST
        ===================================================== */
 
     .toast-area {
-      position: fixed;
+      position:
+        fixed;
 
-      right: 17px;
-      bottom: 17px;
+      right:
+        17px;
 
-      z-index: 3000;
+      bottom:
+        17px;
+
+      z-index:
+        3000;
     }
 
+
     .toast {
-      margin-top: 7px;
+      margin-top:
+        7px;
 
-      padding: 12px 15px;
+      padding:
+        12px 15px;
 
-      border-radius: 12px;
+      border-radius:
+        12px;
 
-      color: white;
+      color:
+        white;
 
-      background: #27364e;
+      background:
+        #27364e;
 
       box-shadow:
         0 12px 35px
         rgba(18,31,48,.22);
 
-      font-size: .83rem;
-      font-weight: 650;
+      font-size:
+        .83rem;
+
+      font-weight:
+        650;
     }
+
 
     .toast.success {
-      background: var(--green);
+      background:
+        var(--green);
     }
 
+
     .toast.error {
-      background: var(--red);
+      background:
+        var(--red);
     }
+
 
     /* =====================================================
        SAVING
        ===================================================== */
 
     .saving {
-      position: fixed;
+      position:
+        fixed;
 
-      inset: 0;
+      inset:
+        0;
 
-      z-index: 4000;
+      z-index:
+        4000;
 
-      display: grid;
-      place-items: center;
+      display:
+        grid;
+
+      place-items:
+        center;
 
       background:
         rgba(243,246,251,.7);
 
-      backdrop-filter: blur(3px);
+      backdrop-filter:
+        blur(3px);
     }
 
+
     .saving-card {
-      display: flex;
-      align-items: center;
+      display:
+        flex;
 
-      gap: 11px;
+      align-items:
+        center;
 
-      padding: 14px 18px;
+      gap:
+        11px;
 
-      border-radius: 14px;
+      padding:
+        14px 18px;
 
-      background: white;
+      border-radius:
+        14px;
+
+      background:
+        white;
 
       box-shadow:
         0 20px 55px
         rgba(18,31,48,.18);
 
-      font-size: .85rem;
-      font-weight: 700;
+      font-size:
+        .85rem;
+
+      font-weight:
+        700;
     }
 
+
     .saving-spinner {
-      width: 20px;
-      height: 20px;
+      width:
+        20px;
+
+      height:
+        20px;
 
       border:
         3px solid
@@ -1817,151 +2931,233 @@ function testGetLauncherData() {
       border-top-color:
         var(--blue);
 
-      border-radius: 50%;
+      border-radius:
+        50%;
 
       animation:
-        spin .75s linear infinite;
+        spin .75s
+        linear infinite;
     }
+
 
     /* =====================================================
        MOBILE
        ===================================================== */
 
-    @media (max-width:720px) {
+    @media (
+      max-width:720px
+    ) {
 
       .page {
-        padding-top: 11px;
+        padding-top:
+          11px;
       }
+
 
       .header {
-        top: 6px;
+        top:
+          6px;
 
-        padding: 12px;
+        padding:
+          12px;
 
-        border-radius: 18px;
+        border-radius:
+          18px;
       }
+
 
       .brand-icon {
-        width: 42px;
-        height: 42px;
+        width:
+          42px;
 
-        flex-basis: 42px;
+        height:
+          42px;
+
+        flex-basis:
+          42px;
       }
+
 
       .brand-subtitle {
-        display: none;
+        display:
+          none;
       }
+
 
       .btn {
-        min-height: 39px;
+        min-height:
+          39px;
 
-        padding: 8px 10px;
+        padding:
+          8px 10px;
       }
+
 
       .mobile-hide {
-        display: none;
+        display:
+          none;
       }
+
 
       .grid {
         grid-template-columns:
-          repeat(2,minmax(0,1fr));
+          repeat(
+            2,
+            minmax(0,1fr)
+          );
 
-        gap: 12px;
+        gap:
+          12px;
       }
+
 
       .card {
-        min-height: 200px;
+        min-height:
+          200px;
 
-        border-radius: 17px;
+        border-radius:
+          17px;
       }
+
 
       .card.editing {
-        padding-bottom: 40px;
+        padding-bottom:
+          40px;
       }
+
 
       .icon-wrap {
-        width: 100%;
-        height: 150px;
+        width:
+          100%;
+
+        height:
+          150px;
       }
+
 
       .app-image {
-        width: 100%;
-        height: 100%;
+        width:
+          75%;
 
-        padding: 0;
+        height:
+          75%;
 
-        object-fit: contain;
-        object-position: center;
+        margin:
+          auto;
+
+        object-fit:
+          contain;
       }
+
 
       .card-name {
-        min-height: 50px;
+        min-height:
+          50px;
 
-        padding: 8px 9px;
+        padding:
+          8px 9px;
 
-        font-size: .86rem;
+        font-size:
+          .86rem;
       }
+
 
       .folder-card {
-        min-height: 200px;
+        min-height:
+          200px;
 
-        padding-top: 27px;
+        padding-top:
+          27px;
       }
+
 
       .folder-icon {
-        width: 85px;
-        height: 69px;
+        width:
+          85px;
+
+        height:
+          69px;
       }
+
 
       .folder-card .card-name {
-        margin-top: 15px;
+        margin-top:
+          15px;
       }
 
+
       .edit-banner {
-        align-items: flex-start;
-        flex-direction: column;
+        align-items:
+          flex-start;
+
+        flex-direction:
+          column;
       }
+
 
       .folder-grid {
         grid-template-columns:
-          repeat(2,minmax(0,1fr));
+          repeat(
+            2,
+            minmax(0,1fr)
+          );
       }
 
+
       .folder-app .icon-wrap {
-        height: 120px;
+        height:
+          120px;
       }
 
     }
 
-    @media (max-width:390px) {
+
+    @media (
+      max-width:390px
+    ) {
 
       .grid {
         grid-template-columns:
-          repeat(2,minmax(0,1fr));
+          repeat(
+            2,
+            minmax(0,1fr)
+          );
       }
+
 
       .icon-wrap {
-        height: 130px;
+        height:
+          130px;
       }
 
+
       .card {
-        min-height: 180px;
+        min-height:
+          180px;
       }
 
     }
 
   </style>
+
 </head>
+
 
 <body>
 
+
 <main class="page">
 
-  <!-- HEADER -->
+
+  <!-- =====================================================
+       HEADER
+       ===================================================== -->
 
   <header class="header">
 
+
     <div class="brand">
+
 
       <div class="brand-icon">
 
@@ -1971,13 +3167,43 @@ function testGetLauncherData() {
           stroke="currentColor"
           stroke-width="2"
         >
-          <rect x="3" y="3" width="7" height="7" rx="2"></rect>
-          <rect x="14" y="3" width="7" height="7" rx="2"></rect>
-          <rect x="3" y="14" width="7" height="7" rx="2"></rect>
-          <rect x="14" y="14" width="7" height="7" rx="2"></rect>
+
+          <rect
+            x="3"
+            y="3"
+            width="7"
+            height="7"
+            rx="2"
+          ></rect>
+
+          <rect
+            x="14"
+            y="3"
+            width="7"
+            height="7"
+            rx="2"
+          ></rect>
+
+          <rect
+            x="3"
+            y="14"
+            width="7"
+            height="7"
+            rx="2"
+          ></rect>
+
+          <rect
+            x="14"
+            y="14"
+            width="7"
+            height="7"
+            rx="2"
+          ></rect>
+
         </svg>
 
       </div>
+
 
       <div>
 
@@ -1991,9 +3217,12 @@ function testGetLauncherData() {
 
       </div>
 
+
     </div>
 
+
     <div class="header-actions">
+
 
       <button
         id="editModeBtn"
@@ -2001,40 +3230,56 @@ function testGetLauncherData() {
         type="button"
       >
         ☰
+
         <span class="mobile-hide">
           Edit
         </span>
+
       </button>
+
 
       <button
         id="newFolderBtn"
         class="btn btn-secondary"
         type="button"
       >
+
         📁
+
         <span class="mobile-hide">
           Folder
         </span>
+
       </button>
+
 
       <button
         id="newAppBtn"
         class="btn btn-primary"
         type="button"
       >
+
         ＋
+
         <span class="mobile-hide">
           App
         </span>
+
       </button>
+
 
     </div>
 
+
   </header>
 
-  <!-- CONTENT -->
+
+  <!-- =====================================================
+       CONTENT
+       ===================================================== -->
 
   <div class="content-header">
+
 
     <div>
 
@@ -2048,19 +3293,25 @@ function testGetLauncherData() {
 
     </div>
 
+
     <p
       id="itemCount"
       class="count hidden"
     ></p>
 
+
   </div>
 
-  <!-- EDIT MODE -->
+
+  <!-- =====================================================
+       EDIT MODE
+       ===================================================== -->
 
   <div
     id="editBanner"
     class="edit-banner hidden"
   >
+
 
     <div>
 
@@ -2069,12 +3320,16 @@ function testGetLauncherData() {
       </strong>
 
       <span>
-        Drop on the left or right side of a card to reorder it. Drop in the center of an app to create a folder. Drop in the center of a folder to move the app inside.
+        Drag on the left or right side of a card to reorder it.
+        Drop in the center of an app to create a folder.
+        Drop in the center of a folder to move the app inside.
       </span>
 
     </div>
 
+
     <div class="header-actions">
+
 
       <button
         id="cancelEditBtn"
@@ -2084,6 +3339,7 @@ function testGetLauncherData() {
         Cancel
       </button>
 
+
       <button
         id="saveEditBtn"
         class="btn btn-success"
@@ -2092,11 +3348,16 @@ function testGetLauncherData() {
         Save
       </button>
 
+
     </div>
+
 
   </div>
 
-  <!-- LOADING -->
+
+  <!-- =====================================================
+       LOADING
+       ===================================================== -->
 
   <div
     id="loading"
@@ -2115,7 +3376,10 @@ function testGetLauncherData() {
 
   </div>
 
-  <!-- ERROR -->
+
+  <!-- =====================================================
+       ERROR
+       ===================================================== -->
 
   <div
     id="errorPanel"
@@ -2147,7 +3411,10 @@ function testGetLauncherData() {
 
   </div>
 
-  <!-- EMPTY -->
+
+  <!-- =====================================================
+       EMPTY
+       ===================================================== -->
 
   <div
     id="emptyPanel"
@@ -2168,17 +3435,22 @@ function testGetLauncherData() {
 
   </div>
 
-  <!-- GRID -->
+
+  <!-- =====================================================
+       APP GRID
+       ===================================================== -->
 
   <div
     id="mainGrid"
     class="grid"
   ></div>
 
+
 </main>
 
+
 <!-- =====================================================
-     APP MODAL
+     ADD / EDIT APP
      ===================================================== -->
 
 <div
@@ -2188,7 +3460,9 @@ function testGetLauncherData() {
 
   <div class="modal">
 
+
     <div class="modal-header">
+
 
       <div>
 
@@ -2205,6 +3479,7 @@ function testGetLauncherData() {
 
       </div>
 
+
       <button
         id="closeAppModalBtn"
         class="close"
@@ -2213,7 +3488,9 @@ function testGetLauncherData() {
         ✕
       </button>
 
+
     </div>
+
 
     <div class="field">
 
@@ -2231,6 +3508,7 @@ function testGetLauncherData() {
 
     </div>
 
+
     <div class="field">
 
       <label class="label">
@@ -2246,6 +3524,7 @@ function testGetLauncherData() {
       >
 
     </div>
+
 
     <div class="field">
 
@@ -2263,12 +3542,15 @@ function testGetLauncherData() {
 
     </div>
 
+
     <div
       id="appFormError"
       class="form-error"
     ></div>
 
+
     <div class="modal-actions">
+
 
       <button
         id="cancelAppModalBtn"
@@ -2278,6 +3560,7 @@ function testGetLauncherData() {
         Cancel
       </button>
 
+
       <button
         id="saveAppModalBtn"
         class="btn btn-primary"
@@ -2286,14 +3569,17 @@ function testGetLauncherData() {
         Save App
       </button>
 
+
     </div>
+
 
   </div>
 
 </div>
 
+
 <!-- =====================================================
-     FOLDER NAME MODAL
+     FOLDER NAME
      ===================================================== -->
 
 <div
@@ -2303,7 +3589,9 @@ function testGetLauncherData() {
 
   <div class="modal">
 
+
     <div class="modal-header">
+
 
       <div>
 
@@ -2320,6 +3608,7 @@ function testGetLauncherData() {
 
       </div>
 
+
       <button
         id="closeFolderNameBtn"
         class="close"
@@ -2328,7 +3617,9 @@ function testGetLauncherData() {
         ✕
       </button>
 
+
     </div>
+
 
     <div class="field">
 
@@ -2346,12 +3637,15 @@ function testGetLauncherData() {
 
     </div>
 
+
     <div
       id="folderNameError"
       class="form-error"
     ></div>
 
+
     <div class="modal-actions">
+
 
       <button
         id="cancelFolderNameBtn"
@@ -2361,6 +3655,7 @@ function testGetLauncherData() {
         Cancel
       </button>
 
+
       <button
         id="saveFolderNameBtn"
         class="btn btn-primary"
@@ -2369,11 +3664,14 @@ function testGetLauncherData() {
         Save Folder
       </button>
 
+
     </div>
+
 
   </div>
 
 </div>
+
 
 <!-- =====================================================
      FOLDER WINDOW
@@ -2386,7 +3684,9 @@ function testGetLauncherData() {
 
   <div class="modal folder-window">
 
+
     <div class="modal-header">
+
 
       <div>
 
@@ -2402,6 +3702,7 @@ function testGetLauncherData() {
 
       </div>
 
+
       <button
         id="closeFolderWindowBtn"
         class="close"
@@ -2410,19 +3711,23 @@ function testGetLauncherData() {
         ✕
       </button>
 
+
     </div>
+
 
     <div
       id="folderContentGrid"
       class="folder-grid"
     ></div>
 
+
   </div>
 
 </div>
 
+
 <!-- =====================================================
-     DELETE MODAL
+     DELETE
      ===================================================== -->
 
 <div
@@ -2432,16 +3737,20 @@ function testGetLauncherData() {
 
   <div class="modal">
 
+
     <h2 class="modal-title">
       Delete?
     </h2>
+
 
     <p
       id="deleteText"
       class="modal-subtitle"
     ></p>
 
+
     <div class="modal-actions">
+
 
       <button
         id="cancelDeleteBtn"
@@ -2451,6 +3760,7 @@ function testGetLauncherData() {
         Cancel
       </button>
 
+
       <button
         id="confirmDeleteBtn"
         class="btn btn-danger"
@@ -2459,13 +3769,18 @@ function testGetLauncherData() {
         Delete
       </button>
 
+
     </div>
+
 
   </div>
 
 </div>
 
-<!-- SAVING -->
+
+<!-- =====================================================
+     SAVING
+     ===================================================== -->
 
 <div
   id="savingOverlay"
@@ -2482,15 +3797,17 @@ function testGetLauncherData() {
 
 </div>
 
-<!-- TOAST -->
 
 <div
   id="toastArea"
   class="toast-area"
 ></div>
 
+
 <script>
+
 'use strict';
+
 
 /* =========================================================
    STATE
@@ -2508,8 +3825,6 @@ let openFolderId = null;
 
 let draggedId = null;
 
-let currentDropAction = null;
-
 let pendingFolderAction = null;
 
 let pendingDeleteId = null;
@@ -2524,136 +3839,251 @@ const DEFAULT_ICON =
    ========================================================= */
 
 const mainGrid =
-  document.getElementById('mainGrid');
+  document.getElementById(
+    'mainGrid'
+  );
+
 
 const loading =
-  document.getElementById('loading');
+  document.getElementById(
+    'loading'
+  );
+
 
 const errorPanel =
-  document.getElementById('errorPanel');
+  document.getElementById(
+    'errorPanel'
+  );
+
 
 const errorMessage =
-  document.getElementById('errorMessage');
+  document.getElementById(
+    'errorMessage'
+  );
+
 
 const emptyPanel =
-  document.getElementById('emptyPanel');
+  document.getElementById(
+    'emptyPanel'
+  );
+
 
 const itemCount =
-  document.getElementById('itemCount');
+  document.getElementById(
+    'itemCount'
+  );
+
 
 const editBanner =
-  document.getElementById('editBanner');
+  document.getElementById(
+    'editBanner'
+  );
+
 
 const editModeBtn =
-  document.getElementById('editModeBtn');
+  document.getElementById(
+    'editModeBtn'
+  );
+
 
 const saveEditBtn =
-  document.getElementById('saveEditBtn');
+  document.getElementById(
+    'saveEditBtn'
+  );
+
 
 const cancelEditBtn =
-  document.getElementById('cancelEditBtn');
+  document.getElementById(
+    'cancelEditBtn'
+  );
+
 
 const newAppBtn =
-  document.getElementById('newAppBtn');
+  document.getElementById(
+    'newAppBtn'
+  );
+
 
 const newFolderBtn =
-  document.getElementById('newFolderBtn');
+  document.getElementById(
+    'newFolderBtn'
+  );
+
 
 const retryBtn =
-  document.getElementById('retryBtn');
+  document.getElementById(
+    'retryBtn'
+  );
+
 
 const savingOverlay =
-  document.getElementById('savingOverlay');
+  document.getElementById(
+    'savingOverlay'
+  );
+
 
 const toastArea =
-  document.getElementById('toastArea');
+  document.getElementById(
+    'toastArea'
+  );
 
 
 /* APP MODAL */
 
 const appModal =
-  document.getElementById('appModal');
+  document.getElementById(
+    'appModal'
+  );
+
 
 const appModalTitle =
-  document.getElementById('appModalTitle');
+  document.getElementById(
+    'appModalTitle'
+  );
+
 
 const appNameInput =
-  document.getElementById('appNameInput');
+  document.getElementById(
+    'appNameInput'
+  );
+
 
 const appUrlInput =
-  document.getElementById('appUrlInput');
+  document.getElementById(
+    'appUrlInput'
+  );
+
 
 const imageUrlInput =
-  document.getElementById('imageUrlInput');
+  document.getElementById(
+    'imageUrlInput'
+  );
+
 
 const appFormError =
-  document.getElementById('appFormError');
+  document.getElementById(
+    'appFormError'
+  );
+
 
 const saveAppModalBtn =
-  document.getElementById('saveAppModalBtn');
+  document.getElementById(
+    'saveAppModalBtn'
+  );
+
 
 const cancelAppModalBtn =
-  document.getElementById('cancelAppModalBtn');
+  document.getElementById(
+    'cancelAppModalBtn'
+  );
+
 
 const closeAppModalBtn =
-  document.getElementById('closeAppModalBtn');
+  document.getElementById(
+    'closeAppModalBtn'
+  );
 
 
 /* FOLDER NAME */
 
 const folderNameModal =
-  document.getElementById('folderNameModal');
+  document.getElementById(
+    'folderNameModal'
+  );
+
 
 const folderNameTitle =
-  document.getElementById('folderNameTitle');
+  document.getElementById(
+    'folderNameTitle'
+  );
+
 
 const folderNameInput =
-  document.getElementById('folderNameInput');
+  document.getElementById(
+    'folderNameInput'
+  );
+
 
 const folderNameError =
-  document.getElementById('folderNameError');
+  document.getElementById(
+    'folderNameError'
+  );
+
 
 const saveFolderNameBtn =
-  document.getElementById('saveFolderNameBtn');
+  document.getElementById(
+    'saveFolderNameBtn'
+  );
+
 
 const cancelFolderNameBtn =
-  document.getElementById('cancelFolderNameBtn');
+  document.getElementById(
+    'cancelFolderNameBtn'
+  );
+
 
 const closeFolderNameBtn =
-  document.getElementById('closeFolderNameBtn');
+  document.getElementById(
+    'closeFolderNameBtn'
+  );
 
 
 /* FOLDER WINDOW */
 
 const folderWindowOverlay =
-  document.getElementById('folderWindowOverlay');
+  document.getElementById(
+    'folderWindowOverlay'
+  );
+
 
 const openFolderTitle =
-  document.getElementById('openFolderTitle');
+  document.getElementById(
+    'openFolderTitle'
+  );
+
 
 const openFolderSubtitle =
-  document.getElementById('openFolderSubtitle');
+  document.getElementById(
+    'openFolderSubtitle'
+  );
+
 
 const folderContentGrid =
-  document.getElementById('folderContentGrid');
+  document.getElementById(
+    'folderContentGrid'
+  );
+
 
 const closeFolderWindowBtn =
-  document.getElementById('closeFolderWindowBtn');
+  document.getElementById(
+    'closeFolderWindowBtn'
+  );
 
 
 /* DELETE */
 
 const deleteModal =
-  document.getElementById('deleteModal');
+  document.getElementById(
+    'deleteModal'
+  );
+
 
 const deleteText =
-  document.getElementById('deleteText');
+  document.getElementById(
+    'deleteText'
+  );
+
 
 const cancelDeleteBtn =
-  document.getElementById('cancelDeleteBtn');
+  document.getElementById(
+    'cancelDeleteBtn'
+  );
+
 
 const confirmDeleteBtn =
-  document.getElementById('confirmDeleteBtn');
+  document.getElementById(
+    'confirmDeleteBtn'
+  );
 
 
 /* =========================================================
@@ -2678,6 +4108,7 @@ document.addEventListener(
 
 function bindEvents() {
 
+
   retryBtn.onclick =
     loadLauncher;
 
@@ -2685,7 +4116,9 @@ function bindEvents() {
   editModeBtn.onclick =
     function() {
 
-      if (editMode) {
+      if (
+        editMode
+      ) {
 
         cancelEditing();
 
@@ -2695,7 +4128,9 @@ function bindEvents() {
 
 
       originalItems =
-        cloneItems(items);
+        cloneItems(
+          items
+        );
 
 
       editMode =
@@ -2811,10 +4246,11 @@ function bindEvents() {
 
 
 /* =========================================================
-   LOAD DATA
+   LOAD
    ========================================================= */
 
 function loadLauncher() {
+
 
   loading.classList.remove(
     'hidden'
@@ -2838,6 +4274,7 @@ function loadLauncher() {
 
     .withSuccessHandler(
       function(response) {
+
 
         loading.classList.add(
           'hidden'
@@ -2894,6 +4331,7 @@ function loadLauncher() {
     .withFailureHandler(
       function(error) {
 
+
         loading.classList.add(
           'hidden'
         );
@@ -2919,6 +4357,7 @@ function loadLauncher() {
    ========================================================= */
 
 function render() {
+
 
   clearDropStyles();
 
@@ -2981,6 +4420,7 @@ function render() {
   rootItems.forEach(
     function(item,index) {
 
+
       const card =
         item.type ===
         'folder'
@@ -3012,7 +4452,7 @@ function render() {
 
 
 /* =========================================================
-   CREATE APP CARD
+   APP CARD
    ========================================================= */
 
 function createAppCard(
@@ -3020,6 +4460,7 @@ function createAppCard(
   rootIndex,
   rootItems
 ) {
+
 
   const card =
     document.createElement(
@@ -3035,7 +4476,10 @@ function createAppCard(
     app.id;
 
 
-  if (editMode) {
+  if (
+    editMode
+  ) {
+
 
     card.classList.add(
       'editing'
@@ -3051,7 +4495,9 @@ function createAppCard(
       app
     );
 
+
   } else {
+
 
     card.onclick =
       function() {
@@ -3143,7 +4589,10 @@ function createAppCard(
   );
 
 
-  if (editMode) {
+  if (
+    editMode
+  ) {
+
 
     card.appendChild(
       createCardTools(
@@ -3169,7 +4618,7 @@ function createAppCard(
 
 
 /* =========================================================
-   CREATE FOLDER CARD
+   FOLDER CARD
    ========================================================= */
 
 function createFolderCard(
@@ -3177,6 +4626,7 @@ function createFolderCard(
   rootIndex,
   rootItems
 ) {
+
 
   const card =
     document.createElement(
@@ -3192,7 +4642,10 @@ function createFolderCard(
     folder.id;
 
 
-  if (editMode) {
+  if (
+    editMode
+  ) {
+
 
     card.classList.add(
       'editing'
@@ -3214,6 +4667,7 @@ function createFolderCard(
   card.onclick =
     function(event) {
 
+
       if (
         event.target.closest(
           '.tool-button'
@@ -3222,11 +4676,15 @@ function createFolderCard(
           '.order-btn'
         )
       ) {
+
         return;
+
       }
 
 
-      if (draggedId) {
+      if (
+        draggedId
+      ) {
         return;
       }
 
@@ -3264,7 +4722,10 @@ function createFolderCard(
   );
 
 
-  if (editMode) {
+  if (
+    editMode
+  ) {
+
 
     card.appendChild(
       createCardTools(
@@ -3293,10 +4754,15 @@ function createFolderCard(
    OPEN APP
    ========================================================= */
 
-function openApp(url) {
+function openApp(
+  url
+) {
+
 
   if (
-    !validUrl(url)
+    !validUrl(
+      url
+    )
   ) {
     return;
   }
@@ -3312,7 +4778,7 @@ function openApp(url) {
 
 
 /* =========================================================
-   ROOT DRAG
+   DRAG / DROP
    ========================================================= */
 
 function attachRootDragEvents(
@@ -3320,9 +4786,11 @@ function attachRootDragEvents(
   targetItem
 ) {
 
+
   card.addEventListener(
     'dragstart',
     function(event) {
+
 
       draggedId =
         targetItem.id;
@@ -3350,11 +4818,8 @@ function attachRootDragEvents(
     'dragend',
     function() {
 
+
       draggedId =
-        null;
-
-
-      currentDropAction =
         null;
 
 
@@ -3367,6 +4832,7 @@ function attachRootDragEvents(
   card.addEventListener(
     'dragover',
     function(event) {
+
 
       if (
         !draggedId ||
@@ -3383,7 +4849,9 @@ function attachRootDragEvents(
         );
 
 
-      if (!dragged) {
+      if (
+        !dragged
+      ) {
         return;
       }
 
@@ -3405,14 +4873,11 @@ function attachRootDragEvents(
         );
 
 
-      currentDropAction =
-        action;
-
-
       if (
         action ===
         'before'
       ) {
+
 
         card.classList.add(
           'drop-before'
@@ -3424,10 +4889,12 @@ function attachRootDragEvents(
           'Move before'
         );
 
+
       } else if (
         action ===
         'after'
       ) {
+
 
         card.classList.add(
           'drop-after'
@@ -3439,10 +4906,9 @@ function attachRootDragEvents(
           'Move after'
         );
 
-      } else if (
-        action ===
-        'folder'
-      ) {
+
+      } else {
+
 
         card.classList.add(
           'drop-folder'
@@ -3467,11 +4933,13 @@ function attachRootDragEvents(
     'dragleave',
     function(event) {
 
+
       if (
         !card.contains(
           event.relatedTarget
         )
       ) {
+
 
         removeCardDropStyles(
           card
@@ -3487,20 +4955,24 @@ function attachRootDragEvents(
     'drop',
     function(event) {
 
+
       event.preventDefault();
 
 
       event.stopPropagation();
 
 
+      const sourceId =
+        draggedId;
+
+
       const dragged =
         getItem(
-          draggedId
+          sourceId
         );
 
 
       const action =
-        currentDropAction ||
         determineDropAction(
           event,
           card,
@@ -3509,17 +4981,13 @@ function attachRootDragEvents(
         );
 
 
-      removeCardDropStyles(
-        card
-      );
-
-
       draggedId =
         null;
 
 
-      currentDropAction =
-        null;
+      removeCardDropStyles(
+        card
+      );
 
 
       if (
@@ -3531,10 +4999,13 @@ function attachRootDragEvents(
       }
 
 
+      /* REORDER BEFORE */
+
       if (
         action ===
         'before'
       ) {
+
 
         moveRootItem(
           dragged.id,
@@ -3547,8 +5018,7 @@ function attachRootDragEvents(
 
 
         showToast(
-          'Order changed. Click Save to keep it.',
-          ''
+          'Order changed. Click Save to keep it.'
         );
 
 
@@ -3557,10 +5027,13 @@ function attachRootDragEvents(
       }
 
 
+      /* REORDER AFTER */
+
       if (
         action ===
         'after'
       ) {
+
 
         moveRootItem(
           dragged.id,
@@ -3573,8 +5046,7 @@ function attachRootDragEvents(
 
 
         showToast(
-          'Order changed. Click Save to keep it.',
-          ''
+          'Order changed. Click Save to keep it.'
         );
 
 
@@ -3583,6 +5055,8 @@ function attachRootDragEvents(
       }
 
 
+      /* MOVE APP INTO FOLDER */
+
       if (
         action ===
         'folder' &&
@@ -3590,10 +5064,12 @@ function attachRootDragEvents(
         'folder'
       ) {
 
+
         if (
           dragged.type !==
           'app'
         ) {
+
 
           showToast(
             'Folders cannot be placed inside other folders.',
@@ -3604,10 +5080,6 @@ function attachRootDragEvents(
           return;
 
         }
-
-
-        dragged.parentId =
-          targetItem.id;
 
 
         moveItemToEndOfFolder(
@@ -3622,8 +5094,7 @@ function attachRootDragEvents(
         showToast(
           'Moved into "' +
           targetItem.name +
-          '". Click Save to keep it.',
-          ''
+          '". Click Save to keep it.'
         );
 
 
@@ -3632,6 +5103,8 @@ function attachRootDragEvents(
       }
 
 
+      /* CREATE FOLDER FROM TWO APPS */
+
       if (
         action ===
         'folder' &&
@@ -3639,23 +5112,17 @@ function attachRootDragEvents(
         'app'
       ) {
 
+
         if (
           dragged.type !==
           'app'
         ) {
-
-          showToast(
-            'A folder cannot be combined with an app.',
-            'error'
-          );
-
-
           return;
-
         }
 
 
         pendingFolderAction = {
+
           type:
             'combine-apps',
 
@@ -3664,6 +5131,7 @@ function attachRootDragEvents(
 
           secondAppId:
             targetItem.id
+
         };
 
 
@@ -3681,7 +5149,7 @@ function attachRootDragEvents(
 
 
 /* =========================================================
-   DROP ACTION
+   DROP ZONES
    ========================================================= */
 
 function determineDropAction(
@@ -3690,6 +5158,7 @@ function determineDropAction(
   dragged,
   target
 ) {
+
 
   const rect =
     card.getBoundingClientRect();
@@ -3708,14 +5177,18 @@ function determineDropAction(
   if (
     ratio < .28
   ) {
+
     return 'before';
+
   }
 
 
   if (
     ratio > .72
   ) {
+
     return 'after';
+
   }
 
 
@@ -3730,7 +5203,9 @@ function determineDropAction(
       'folder'
     )
   ) {
+
     return 'folder';
+
   }
 
 
@@ -3748,6 +5223,7 @@ function moveRootItem(
   targetId,
   before
 ) {
+
 
   const root =
     getRootItems();
@@ -3802,7 +5278,9 @@ function moveRootItem(
   }
 
 
-  if (!before) {
+  if (
+    !before
+  ) {
 
     targetIndex +=
       1;
@@ -3832,6 +5310,7 @@ function applyRootOrder(
   rootItems
 ) {
 
+
   const rebuilt =
     [];
 
@@ -3840,7 +5319,10 @@ function applyRootOrder(
     new Set();
 
 
-  function addItem(item) {
+  function addItem(
+    item
+  ) {
+
 
     if (
       !item ||
@@ -3868,6 +5350,7 @@ function applyRootOrder(
   rootItems.forEach(
     function(rootItem) {
 
+
       addItem(
         rootItem
       );
@@ -3878,13 +5361,11 @@ function applyRootOrder(
         'folder'
       ) {
 
-        const children =
-          getFolderApps(
-            rootItem.id
-          );
 
-
-        children.forEach(
+        getFolderApps(
+          rootItem.id
+        )
+        .forEach(
           function(child) {
 
             addItem(
@@ -3928,7 +5409,7 @@ function applyRootOrder(
 
 
 /* =========================================================
-   ROOT ARROWS
+   ORDER ARROWS
    ========================================================= */
 
 function createRootOrderTools(
@@ -3936,6 +5417,7 @@ function createRootOrderTools(
   index,
   rootItems
 ) {
+
 
   const wrap =
     document.createElement(
@@ -3953,20 +5435,16 @@ function createRootOrderTools(
     );
 
 
-  left.type =
-    'button';
-
-
   left.className =
     'order-btn';
 
 
+  left.type =
+    'button';
+
+
   left.textContent =
     '←';
-
-
-  left.title =
-    'Move earlier';
 
 
   left.disabled =
@@ -3975,6 +5453,7 @@ function createRootOrderTools(
 
   left.onclick =
     function(event) {
+
 
       event.stopPropagation();
 
@@ -4000,12 +5479,6 @@ function createRootOrderTools(
 
       render();
 
-
-      showToast(
-        'Order changed. Click Save to keep it.',
-        ''
-      );
-
     };
 
 
@@ -4015,20 +5488,16 @@ function createRootOrderTools(
     );
 
 
-  right.type =
-    'button';
-
-
   right.className =
     'order-btn';
 
 
+  right.type =
+    'button';
+
+
   right.textContent =
     '→';
-
-
-  right.title =
-    'Move later';
 
 
   right.disabled =
@@ -4038,6 +5507,7 @@ function createRootOrderTools(
 
   right.onclick =
     function(event) {
+
 
       event.stopPropagation();
 
@@ -4063,12 +5533,6 @@ function createRootOrderTools(
 
 
       render();
-
-
-      showToast(
-        'Order changed. Click Save to keep it.',
-        ''
-      );
 
     };
 
@@ -4097,40 +5561,37 @@ function addDropMessage(
   text
 ) {
 
-  const existing =
+
+  let message =
     card.querySelector(
       '.drop-message'
     );
 
 
-  if (existing) {
+  if (
+    !message
+  ) {
 
-    existing.textContent =
-      text;
+
+    message =
+      document.createElement(
+        'div'
+      );
 
 
-    return;
+    message.className =
+      'drop-message';
+
+
+    card.appendChild(
+      message
+    );
 
   }
 
 
-  const message =
-    document.createElement(
-      'div'
-    );
-
-
-  message.className =
-    'drop-message';
-
-
   message.textContent =
     text;
-
-
-  card.appendChild(
-    message
-  );
 
 }
 
@@ -4138,6 +5599,7 @@ function addDropMessage(
 function removeCardDropStyles(
   card
 ) {
+
 
   card.classList.remove(
     'drop-before',
@@ -4152,7 +5614,9 @@ function removeCardDropStyles(
     );
 
 
-  if (message) {
+  if (
+    message
+  ) {
 
     message.remove();
 
@@ -4165,12 +5629,14 @@ function clearDropStyles(
   except
 ) {
 
+
   document
     .querySelectorAll(
       '.card'
     )
     .forEach(
       function(card) {
+
 
         if (
           except &&
@@ -4183,11 +5649,6 @@ function clearDropStyles(
 
         removeCardDropStyles(
           card
-        );
-
-
-        card.classList.remove(
-          'dragging'
         );
 
       }
@@ -4203,6 +5664,7 @@ function clearDropStyles(
 function createFolderIcon(
   folderId
 ) {
+
 
   const icon =
     document.createElement(
@@ -4239,6 +5701,7 @@ function createFolderIcon(
     i++
   ) {
 
+
     const cell =
       document.createElement(
         'div'
@@ -4252,6 +5715,7 @@ function createFolderIcon(
     if (
       children[i]
     ) {
+
 
       const image =
         document.createElement(
@@ -4270,6 +5734,7 @@ function createFolderIcon(
       image.onerror =
         function() {
 
+
           image.onerror =
             null;
 
@@ -4284,7 +5749,9 @@ function createFolderIcon(
         image
       );
 
+
     } else {
+
 
       const dot =
         document.createElement(
@@ -4321,12 +5788,13 @@ function createFolderIcon(
 
 
 /* =========================================================
-   EDIT / DELETE TOOLS
+   CARD TOOLS
    ========================================================= */
 
 function createCardTools(
   item
 ) {
+
 
   const tools =
     document.createElement(
@@ -4352,19 +5820,13 @@ function createCardTools(
     'button';
 
 
-  edit.title =
-    item.type ===
-    'folder'
-      ? 'Rename folder'
-      : 'Edit app';
-
-
   edit.textContent =
     '✎';
 
 
   edit.onclick =
     function(event) {
+
 
       event.stopPropagation();
 
@@ -4377,12 +5839,15 @@ function createCardTools(
         'folder'
       ) {
 
+
         pendingFolderAction = {
+
           type:
             'rename',
 
           folderId:
             item.id
+
         };
 
 
@@ -4391,7 +5856,9 @@ function createCardTools(
           item.name
         );
 
+
       } else {
+
 
         openAppEditor(
           item.id
@@ -4416,16 +5883,13 @@ function createCardTools(
     'button';
 
 
-  remove.title =
-    'Delete';
-
-
   remove.textContent =
     '🗑';
 
 
   remove.onclick =
     function(event) {
+
 
       event.stopPropagation();
 
@@ -4456,13 +5920,14 @@ function createCardTools(
 
 
 /* =========================================================
-   FOLDER NAME MODAL
+   FOLDER MODAL
    ========================================================= */
 
 function openFolderNameModal(
   title,
   value
 ) {
+
 
   folderNameTitle.textContent =
     title;
@@ -4485,6 +5950,7 @@ function openFolderNameModal(
   setTimeout(
     function() {
 
+
       folderNameInput.focus();
 
 
@@ -4498,6 +5964,7 @@ function openFolderNameModal(
 
 
 function closeFolderNameModal() {
+
 
   folderNameModal.classList.add(
     'hidden'
@@ -4516,11 +5983,15 @@ function closeFolderNameModal() {
 
 function saveFolderName() {
 
+
   const name =
     folderNameInput.value.trim();
 
 
-  if (!name) {
+  if (
+    !name
+  ) {
+
 
     folderNameError.textContent =
       'Enter a folder name.';
@@ -4537,18 +6008,21 @@ function saveFolderName() {
 
     closeFolderNameModal();
 
-
     return;
 
   }
 
+
+  /* EMPTY FOLDER */
 
   if (
     pendingFolderAction.type ===
     'empty-folder'
   ) {
 
+
     items.push({
+
       id:
         createId(
           'folder'
@@ -4571,14 +6045,15 @@ function saveFolderName() {
 
       order:
         items.length
+
     });
-
-
-    closeFolderNameModal();
 
 
     pendingFolderAction =
       null;
+
+
+    closeFolderNameModal();
 
 
     sortItems();
@@ -4597,10 +6072,13 @@ function saveFolderName() {
   }
 
 
+  /* CREATE FOLDER FROM TWO APPS */
+
   if (
     pendingFolderAction.type ===
     'combine-apps'
   ) {
+
 
     const first =
       getItem(
@@ -4618,6 +6096,7 @@ function saveFolderName() {
       !first ||
       !second
     ) {
+
 
       pendingFolderAction =
         null;
@@ -4637,27 +6116,17 @@ function saveFolderName() {
 
     const firstIndex =
       rootBefore.findIndex(
-        function(item) {
-
-          return (
-            item.id ===
-            first.id
-          );
-
-        }
+        item =>
+          item.id ===
+          first.id
       );
 
 
     const secondIndex =
       rootBefore.findIndex(
-        function(item) {
-
-          return (
-            item.id ===
-            second.id
-          );
-
-        }
+        item =>
+          item.id ===
+          second.id
       );
 
 
@@ -4672,6 +6141,7 @@ function saveFolderName() {
 
 
     const folder = {
+
       id:
         createId(
           'folder'
@@ -4694,6 +6164,7 @@ function saveFolderName() {
 
       order:
         0
+
     };
 
 
@@ -4707,16 +6178,11 @@ function saveFolderName() {
 
     const newRoot =
       rootBefore.filter(
-        function(item) {
-
-          return (
-            item.id !==
-            first.id &&
-            item.id !==
-            second.id
-          );
-
-        }
+        item =>
+          item.id !==
+          first.id &&
+          item.id !==
+          second.id
       );
 
 
@@ -4737,19 +6203,18 @@ function saveFolderName() {
     );
 
 
-    closeFolderNameModal();
-
-
     pendingFolderAction =
       null;
+
+
+    closeFolderNameModal();
 
 
     render();
 
 
     showToast(
-      'Folder created. Click Save to keep it.',
-      ''
+      'Folder created. Click Save to keep it.'
     );
 
 
@@ -4758,10 +6223,13 @@ function saveFolderName() {
   }
 
 
+  /* RENAME */
+
   if (
     pendingFolderAction.type ===
     'rename'
   ) {
+
 
     const folder =
       getItem(
@@ -4769,7 +6237,10 @@ function saveFolderName() {
       );
 
 
-    if (folder) {
+    if (
+      folder
+    ) {
+
 
       folder.name =
         name;
@@ -4777,11 +6248,11 @@ function saveFolderName() {
     }
 
 
-    closeFolderNameModal();
-
-
     pendingFolderAction =
       null;
+
+
+    closeFolderNameModal();
 
 
     render();
@@ -4803,6 +6274,7 @@ function saveFolderName() {
 function openFolderWindow(
   folderId
 ) {
+
 
   const folder =
     getItem(
@@ -4839,6 +6311,7 @@ function openFolderWindow(
 
 function closeFolderWindow() {
 
+
   folderWindowOverlay.classList.add(
     'hidden'
   );
@@ -4851,10 +6324,11 @@ function closeFolderWindow() {
 
 
 /* =========================================================
-   FOLDER CONTENT
+   RENDER FOLDER APPS
    ========================================================= */
 
 function renderFolderContent() {
+
 
   if (
     !openFolderId
@@ -4885,6 +6359,7 @@ function renderFolderContent() {
     !folderApps.length
   ) {
 
+
     const message =
       document.createElement(
         'p'
@@ -4912,6 +6387,7 @@ function renderFolderContent() {
   folderApps.forEach(
     function(app,index) {
 
+
       const card =
         document.createElement(
           'div'
@@ -4922,7 +6398,10 @@ function renderFolderContent() {
         'folder-app';
 
 
-      if (editMode) {
+      if (
+        editMode
+      ) {
+
 
         card.classList.add(
           'edit-folder-app'
@@ -4966,6 +6445,7 @@ function renderFolderContent() {
       image.onerror =
         function() {
 
+
           image.onerror =
             null;
 
@@ -5005,7 +6485,10 @@ function renderFolderContent() {
       );
 
 
-      if (!editMode) {
+      if (
+        !editMode
+      ) {
+
 
         card.onclick =
           function() {
@@ -5016,7 +6499,9 @@ function renderFolderContent() {
 
           };
 
+
       } else {
+
 
         const tools =
           document.createElement(
@@ -5042,16 +6527,13 @@ function renderFolderContent() {
           'button';
 
 
-        edit.title =
-          'Edit app';
-
-
         edit.textContent =
           '✎';
 
 
         edit.onclick =
           function(event) {
+
 
             event.stopPropagation();
 
@@ -5077,16 +6559,17 @@ function renderFolderContent() {
           'button';
 
 
-        out.title =
-          'Move out of folder';
-
-
         out.textContent =
           '↗';
 
 
+        out.title =
+          'Move out of folder';
+
+
         out.onclick =
           function(event) {
+
 
             event.stopPropagation();
 
@@ -5103,8 +6586,7 @@ function renderFolderContent() {
 
 
             showToast(
-              'Moved out of folder. Click Save to keep it.',
-              ''
+              'Moved out of folder. Click Save to keep it.'
             );
 
           };
@@ -5160,6 +6642,7 @@ function renderFolderContent() {
         left.onclick =
           function(event) {
 
+
             event.stopPropagation();
 
 
@@ -5203,6 +6686,7 @@ function renderFolderContent() {
 
         right.onclick =
           function(event) {
+
 
             event.stopPropagation();
 
@@ -5259,6 +6743,7 @@ function moveFolderApp(
   direction
 ) {
 
+
   const folderApps =
     getFolderApps(
       folderId
@@ -5267,14 +6752,9 @@ function moveFolderApp(
 
   const currentIndex =
     folderApps.findIndex(
-      function(app) {
-
-        return (
-          app.id ===
-          appId
-        );
-
-      }
+      app =>
+        app.id ===
+        appId
     );
 
 
@@ -5293,159 +6773,44 @@ function moveFolderApp(
   }
 
 
-  const temp =
+  const first =
     folderApps[
       currentIndex
     ];
 
 
-  folderApps[
-    currentIndex
-  ] =
+  const second =
     folderApps[
       nextIndex
     ];
 
 
-  folderApps[
-    nextIndex
-  ] =
+  const temp =
+    first.order;
+
+
+  first.order =
+    second.order;
+
+
+  second.order =
     temp;
 
 
-  applyFolderOrder(
-    folderId,
-    folderApps
-  );
-
-
-  showToast(
-    'Order changed. Click Save to keep it.',
-    ''
-  );
+  sortItems();
 
 }
 
 
 /* =========================================================
-   APPLY FOLDER ORDER
-   ========================================================= */
-
-function applyFolderOrder(
-  folderId,
-  orderedChildren
-) {
-
-  const root =
-    getRootItems();
-
-
-  const rebuilt =
-    [];
-
-
-  const addedIds =
-    new Set();
-
-
-  function addItem(item) {
-
-    if (
-      !item ||
-      !item.id ||
-      addedIds.has(
-        item.id
-      )
-    ) {
-      return;
-    }
-
-
-    rebuilt.push(
-      item
-    );
-
-
-    addedIds.add(
-      item.id
-    );
-
-  }
-
-
-  root.forEach(
-    function(rootItem) {
-
-      addItem(
-        rootItem
-      );
-
-
-      if (
-        rootItem.type ===
-        'folder'
-      ) {
-
-        const children =
-          rootItem.id ===
-          folderId
-            ? orderedChildren
-            : getFolderApps(
-                rootItem.id
-              );
-
-
-        children.forEach(
-          function(child) {
-
-            addItem(
-              child
-            );
-
-          }
-        );
-
-      }
-
-    }
-  );
-
-
-  items.forEach(
-    function(item) {
-
-      addItem(
-        item
-      );
-
-    }
-  );
-
-
-  rebuilt.forEach(
-    function(item,index) {
-
-      item.order =
-        index;
-
-    }
-  );
-
-
-  items =
-    rebuilt;
-
-}
-
-
-/* =========================================================
-   MOVE INTO FOLDER
+   MOVE APP INTO FOLDER
    ========================================================= */
 
 function moveItemToEndOfFolder(
   appId,
   folderId
 ) {
+
 
   const app =
     getItem(
@@ -5467,8 +6832,43 @@ function moveItemToEndOfFolder(
   }
 
 
+  const children =
+    items.filter(
+      item =>
+        item.parentId ===
+        folderId &&
+        item.id !==
+        appId
+    );
+
+
+  let maxOrder =
+    -1;
+
+
+  children.forEach(
+    function(child) {
+
+
+      maxOrder =
+        Math.max(
+          maxOrder,
+          Number(
+            child.order
+          ) || 0
+        );
+
+    }
+  );
+
+
   app.parentId =
     folderId;
+
+
+  app.order =
+    maxOrder +
+    1;
 
 
   const root =
@@ -5483,13 +6883,14 @@ function moveItemToEndOfFolder(
 
 
 /* =========================================================
-   MOVE OUT OF FOLDER
-   FIXED — NO DUPLICATION
+   MOVE APP OUT OF FOLDER
+   NO DUPLICATION
    ========================================================= */
 
 function moveAppOutOfFolder(
   appId
 ) {
+
 
   const app =
     getItem(
@@ -5497,7 +6898,9 @@ function moveAppOutOfFolder(
     );
 
 
-  if (!app) {
+  if (
+    !app
+  ) {
     return;
   }
 
@@ -5515,8 +6918,8 @@ function moveAppOutOfFolder(
 
 
   /*
-   * Root is obtained BEFORE parentId changes.
-   * This prevents duplication.
+   * IMPORTANT:
+   * Build root BEFORE parentId changes.
    */
   const root =
     getRootItems();
@@ -5529,14 +6932,9 @@ function moveAppOutOfFolder(
   const folderIndex =
     previousFolder
       ? root.findIndex(
-          function(item) {
-
-            return (
-              item.id ===
-              previousFolder.id
-            );
-
-          }
+          item =>
+            item.id ===
+            previousFolder.id
         )
       : -1;
 
@@ -5545,13 +6943,16 @@ function moveAppOutOfFolder(
     folderIndex >= 0
   ) {
 
+
     root.splice(
       folderIndex + 1,
       0,
       app
     );
 
+
   } else {
+
 
     root.push(
       app
@@ -5574,6 +6975,7 @@ function moveAppOutOfFolder(
 function openAppEditor(
   id
 ) {
+
 
   editingAppId =
     id;
@@ -5634,13 +7036,10 @@ function openAppEditor(
 
 function closeAppModal() {
 
+
   appModal.classList.add(
     'hidden'
   );
-
-
-  editingAppId =
-    null;
 
 
   appFormError.textContent =
@@ -5655,6 +7054,7 @@ function closeAppModal() {
 
 function saveAppFromModal() {
 
+
   const name =
     appNameInput.value.trim();
 
@@ -5667,7 +7067,10 @@ function saveAppFromModal() {
     imageUrlInput.value.trim();
 
 
-  if (!name) {
+  if (
+    !name
+  ) {
+
 
     appFormError.textContent =
       'Enter an app name.';
@@ -5684,6 +7087,7 @@ function saveAppFromModal() {
     )
   ) {
 
+
     appFormError.textContent =
       'Enter a valid http:// or https:// app link.';
 
@@ -5699,6 +7103,7 @@ function saveAppFromModal() {
       imageUrl
     )
   ) {
+
 
     appFormError.textContent =
       'The image link must start with http:// or https://';
@@ -5723,13 +7128,17 @@ function saveAppFromModal() {
     existingId
   ) {
 
+
     const app =
       getItem(
         existingId
       );
 
 
-    if (app) {
+    if (
+      app
+    ) {
+
 
       app.name =
         name;
@@ -5744,9 +7153,12 @@ function saveAppFromModal() {
 
     }
 
+
   } else {
 
+
     items.push({
+
       id:
         createId(
           'app'
@@ -5769,9 +7181,14 @@ function saveAppFromModal() {
 
       order:
         items.length
+
     });
 
   }
+
+
+  editingAppId =
+    null;
 
 
   closeAppModal();
@@ -5809,13 +7226,16 @@ function openDeleteModal(
   id
 ) {
 
+
   const item =
     getItem(
       id
     );
 
 
-  if (!item) {
+  if (
+    !item
+  ) {
     return;
   }
 
@@ -5829,12 +7249,15 @@ function openDeleteModal(
     'folder'
   ) {
 
+
     deleteText.textContent =
       'Delete folder "' +
       item.name +
       '"? Apps inside it will not be deleted. They will return to the main launcher.';
 
+
   } else {
+
 
     deleteText.textContent =
       'Delete "' +
@@ -5853,6 +7276,7 @@ function openDeleteModal(
 
 function closeDeleteModal() {
 
+
   deleteModal.classList.add(
     'hidden'
   );
@@ -5865,6 +7289,7 @@ function closeDeleteModal() {
 
 
 function performDelete() {
+
 
   if (
     !pendingDeleteId
@@ -5879,7 +7304,10 @@ function performDelete() {
     );
 
 
-  if (!item) {
+  if (
+    !item
+  ) {
+
 
     closeDeleteModal();
 
@@ -5894,6 +7322,7 @@ function performDelete() {
     'folder'
   ) {
 
+
     const children =
       getFolderApps(
         item.id
@@ -5902,6 +7331,7 @@ function performDelete() {
 
     children.forEach(
       function(child) {
+
 
         child.parentId =
           '';
@@ -5914,14 +7344,9 @@ function performDelete() {
 
   items =
     items.filter(
-      function(current) {
-
-        return (
-          current.id !==
-          item.id
-        );
-
-      }
+      current =>
+        current.id !==
+        item.id
     );
 
 
@@ -5955,6 +7380,7 @@ function saveAll(
   message
 ) {
 
+
   showSaving(
     true
   );
@@ -5973,7 +7399,9 @@ function saveAll(
     items.map(
       function(item) {
 
+
         return {
+
           id:
             item.id,
 
@@ -5997,6 +7425,7 @@ function saveAll(
 
           order:
             item.order
+
         };
 
       }
@@ -6008,6 +7437,7 @@ function saveAll(
     .withSuccessHandler(
       function(response) {
 
+
         showSaving(
           false
         );
@@ -6018,6 +7448,7 @@ function saveAll(
           response.success !==
           true
         ) {
+
 
           showToast(
             response &&
@@ -6082,6 +7513,7 @@ function saveAll(
     .withFailureHandler(
       function(error) {
 
+
         showSaving(
           false
         );
@@ -6111,6 +7543,7 @@ function saveAll(
 
 function cancelEditing() {
 
+
   items =
     cloneItems(
       originalItems
@@ -6134,8 +7567,7 @@ function cancelEditing() {
 
 
   showToast(
-    'Changes canceled.',
-    ''
+    'Changes canceled.'
   );
 
 }
@@ -6149,15 +7581,11 @@ function getItem(
   id
 ) {
 
+
   return items.find(
-    function(item) {
-
-      return (
-        item.id ===
-        id
-      );
-
-    }
+    item =>
+      item.id ===
+      id
   ) || null;
 
 }
@@ -6165,25 +7593,20 @@ function getItem(
 
 function getRootItems() {
 
+
   return items
     .filter(
-      function(item) {
-
-        return (
-          !item.parentId
-        );
-
-      }
+      item =>
+        !item.parentId
     )
     .sort(
-      function(a,b) {
-
-        return (
-          Number(a.order) -
-          Number(b.order)
-        );
-
-      }
+      (a,b) =>
+        Number(
+          a.order
+        ) -
+        Number(
+          b.order
+        )
     );
 
 }
@@ -6193,28 +7616,23 @@ function getFolderApps(
   folderId
 ) {
 
+
   return items
     .filter(
-      function(item) {
-
-        return (
-          item.type ===
-          'app' &&
-          item.parentId ===
-          folderId
-        );
-
-      }
+      item =>
+        item.type ===
+        'app' &&
+        item.parentId ===
+        folderId
     )
     .sort(
-      function(a,b) {
-
-        return (
-          Number(a.order) -
-          Number(b.order)
-        );
-
-      }
+      (a,b) =>
+        Number(
+          a.order
+        ) -
+        Number(
+          b.order
+        )
     );
 
 }
@@ -6228,6 +7646,7 @@ function dedupeItems(
   list
 ) {
 
+
   const seen =
     new Set();
 
@@ -6238,6 +7657,7 @@ function dedupeItems(
 
   list.forEach(
     function(item) {
+
 
       if (
         !item ||
@@ -6256,6 +7676,7 @@ function dedupeItems(
 
 
       cleaned.push({
+
         id:
           item.id,
 
@@ -6283,6 +7704,7 @@ function dedupeItems(
           Number(
             item.order
           ) || 0
+
       });
 
     }
@@ -6300,6 +7722,7 @@ function dedupeItems(
 
 function sortItems() {
 
+
   items =
     dedupeItems(
       items
@@ -6307,19 +7730,19 @@ function sortItems() {
 
 
   items.sort(
-    function(a,b) {
-
-      return (
-        Number(a.order) -
-        Number(b.order)
-      );
-
-    }
+    (a,b) =>
+      Number(
+        a.order
+      ) -
+      Number(
+        b.order
+      )
   );
 
 
   items.forEach(
     function(item,index) {
+
 
       item.order =
         index;
@@ -6338,6 +7761,7 @@ function validUrl(
   value
 ) {
 
+
   if (
     typeof value !==
     'string' ||
@@ -6348,6 +7772,7 @@ function validUrl(
 
 
   try {
+
 
     const parsed =
       new URL(
@@ -6362,7 +7787,11 @@ function validUrl(
       'http:'
     );
 
-  } catch (error) {
+
+  } catch (
+    error
+  ) {
+
 
     return false;
 
@@ -6379,38 +7808,37 @@ function cloneItems(
   list
 ) {
 
+
   return list.map(
-    function(item) {
+    item => ({
 
-      return {
-        id:
-          item.id,
+      id:
+        item.id,
 
-        type:
-          item.type,
+      type:
+        item.type,
 
-        name:
-          item.name,
+      name:
+        item.name,
 
-        url:
-          item.url ||
-          '',
+      url:
+        item.url ||
+        '',
 
-        imageUrl:
-          item.imageUrl ||
-          '',
+      imageUrl:
+        item.imageUrl ||
+        '',
 
-        parentId:
-          item.parentId ||
-          '',
+      parentId:
+        item.parentId ||
+        '',
 
-        order:
-          Number(
-            item.order
-          ) || 0
-      };
+      order:
+        Number(
+          item.order
+        ) || 0
 
-    }
+    })
   );
 
 }
@@ -6423,6 +7851,7 @@ function cloneItems(
 function createId(
   prefix
 ) {
+
 
   return (
     prefix +
@@ -6445,6 +7874,7 @@ function createId(
 function showError(
   message
 ) {
+
 
   loading.classList.add(
     'hidden'
@@ -6476,6 +7906,7 @@ function showSaving(
   value
 ) {
 
+
   savingOverlay.classList.toggle(
     'hidden',
     !value
@@ -6493,6 +7924,7 @@ function showToast(
   type
 ) {
 
+
   const toast =
     document.createElement(
       'div'
@@ -6503,7 +7935,10 @@ function showToast(
     'toast';
 
 
-  if (type) {
+  if (
+    type
+  ) {
+
 
     toast.classList.add(
       type
@@ -6524,6 +7959,7 @@ function showToast(
   setTimeout(
     function() {
 
+
       toast.remove();
 
     },
@@ -6538,6 +7974,7 @@ function showToast(
    ========================================================= */
 
 function createDefaultIcon() {
+
 
   const svg =
     '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 96 96">' +
@@ -6578,5 +8015,10 @@ function createDefaultIcon() {
 
 </script>
 
+
 </body>
 </html>
+
+
+
+       
