@@ -17,6 +17,7 @@ const CONFIG = Object.freeze({
   SPREADSHEET_ID: '', // Leave blank when this script is bound to the Google Sheet.
   SHEET1_NAME: 'Sheet1',
   ORTHO_SHEET_NAME: 'Ortho',
+  EXCLUSION_SHEET_NAME: 'exclusion',
   HEADER_ROW: 1,
   DATA_START_ROW: 2,
   CLIENT_TIMEOUT_MS: 45000
@@ -500,7 +501,219 @@ function savePatientMissingData(payload) {
     lock.releaseLock();
   }
 
+
   return saveResult;
+}
+
+/* ==========================================================================
+ * EXCLUSION WORKFLOW
+ * Moves one unique FIN from Sheet1 to the "exclusion" sheet.
+ * The Sheet1 row is deleted only after the exclusion copy is verified.
+ * ========================================================================== */
+
+function excludePatient(payload) {
+  const fin = cleanText_(
+    payload && typeof payload === 'object'
+      ? payload.fin
+      : payload
+  );
+
+  if (!fin) {
+    throw new Error('FIN is required to exclude a patient.');
+  }
+
+  const lock = LockService.getScriptLock();
+  lock.waitLock(30000);
+
+  let destinationRow = -1;
+  let exclusionSheet = null;
+
+  try {
+    const spreadsheet = getSpreadsheet_();
+    const sourceSheet = getSheet1_();
+    const sourceContext = readSheetContext_(sourceSheet);
+    const match = findUniqueSheet1RowByFin_(sourceContext, fin);
+
+    if (!match.found) {
+      throw new Error(
+        'FIN "' + fin + '" was not found in Sheet1. The patient may already have been moved.'
+      );
+    }
+
+    if (match.duplicate) {
+      throw new Error(
+        'FIN "' + fin + '" appears more than once in Sheet1. ' +
+        'The patient was not excluded because the source row is ambiguous.'
+      );
+    }
+
+    const sourceSheetRow = match.rowIndex + CONFIG.DATA_START_ROW;
+    const sourceLastColumn = Math.max(sourceSheet.getLastColumn(), 1);
+    const sourceHeaders = sourceSheet
+      .getRange(CONFIG.HEADER_ROW, 1, 1, sourceLastColumn)
+      .getDisplayValues()[0];
+
+    exclusionSheet = getOrCreateExclusionSheet_(spreadsheet, sourceHeaders);
+    ensureExclusionHeaders_(exclusionSheet, sourceHeaders);
+
+    let exclusionContext = readGenericSheetContext_(exclusionSheet);
+    const exclusionFinColumn = findHeaderIndexByAliases_(
+      exclusionContext.headerMap,
+      IDENTITY_ALIASES.fin
+    );
+
+    if (exclusionFinColumn === -1) {
+      throw new Error(
+        'The exclusion sheet does not contain a FIN header. No patient data were moved.'
+      );
+    }
+
+    const targetFinKey = normalizeFinKey_(fin);
+    const alreadyArchived = exclusionContext.dataValues.some(function (row, rowIndex) {
+      return finKeyFromCell_(
+        row[exclusionFinColumn],
+        exclusionContext.dataDisplayValues[rowIndex][exclusionFinColumn]
+      ) === targetFinKey;
+    });
+
+    if (alreadyArchived) {
+      throw new Error(
+        'FIN "' + fin + '" already exists in the exclusion sheet. ' +
+        'Sheet1 was not changed to prevent a duplicate exclusion record.'
+      );
+    }
+
+    const sourceRange = sourceSheet.getRange(
+      sourceSheetRow,
+      1,
+      1,
+      sourceLastColumn
+    );
+
+    const sourceValues = sourceRange.getValues()[0];
+    const sourceNumberFormats = sourceRange.getNumberFormats()[0];
+    const sourceNotes = sourceRange.getNotes()[0];
+
+    const destinationLastColumn = Math.max(exclusionSheet.getLastColumn(), 1);
+    const destinationHeaders = exclusionSheet
+      .getRange(CONFIG.HEADER_ROW, 1, 1, destinationLastColumn)
+      .getDisplayValues()[0];
+
+    const destinationHeaderMap = createHeaderMap_(
+      destinationHeaders,
+      exclusionSheet.getName()
+    );
+
+    const destinationValues = new Array(destinationLastColumn).fill('');
+    const destinationFormats = exclusionSheet
+      .getRange(
+        Math.max(exclusionSheet.getLastRow() + 1, CONFIG.DATA_START_ROW),
+        1,
+        1,
+        destinationLastColumn
+      )
+      .getNumberFormats()[0];
+    const destinationNotes = new Array(destinationLastColumn).fill('');
+
+    sourceHeaders.forEach(function (header, sourceColumnIndex) {
+      const key = normalizeHeader_(header);
+      if (!key) return; // blank separator columns do not contain review data
+
+      const destinationColumnIndex = destinationHeaderMap[key];
+      if (destinationColumnIndex === undefined) return;
+
+      // Archive the current value rather than carrying a live formula into
+      // another sheet. This makes the exclusion sheet a stable record.
+      destinationValues[destinationColumnIndex] = sourceValues[sourceColumnIndex];
+
+      if (sourceNumberFormats[sourceColumnIndex]) {
+        destinationFormats[destinationColumnIndex] =
+          sourceNumberFormats[sourceColumnIndex];
+      }
+
+      destinationNotes[destinationColumnIndex] =
+        sourceNotes[sourceColumnIndex] || '';
+    });
+
+    destinationRow = Math.max(
+      exclusionSheet.getLastRow() + 1,
+      CONFIG.DATA_START_ROW
+    );
+
+    const destinationRange = exclusionSheet.getRange(
+      destinationRow,
+      1,
+      1,
+      destinationLastColumn
+    );
+
+    destinationRange.setValues([destinationValues]);
+    destinationRange.setNumberFormats([destinationFormats]);
+    destinationRange.setNotes([destinationNotes]);
+
+    SpreadsheetApp.flush();
+
+    // Verify the copied FIN before deleting anything from Sheet1.
+    const archivedRawFin = exclusionSheet
+      .getRange(destinationRow, exclusionFinColumn + 1)
+      .getValue();
+    const archivedDisplayFin = exclusionSheet
+      .getRange(destinationRow, exclusionFinColumn + 1)
+      .getDisplayValue();
+
+    const archivedFinKey = finKeyFromCell_(
+      archivedRawFin,
+      archivedDisplayFin
+    );
+
+    if (!archivedFinKey || archivedFinKey !== targetFinKey) {
+      exclusionSheet.deleteRow(destinationRow);
+      destinationRow = -1;
+      throw new Error(
+        'The exclusion copy could not be verified. Sheet1 was not changed.'
+      );
+    }
+
+    try {
+      sourceSheet.deleteRow(sourceSheetRow);
+    } catch (deleteError) {
+      // Roll back the archive row when possible so a failed move does not
+      // leave the patient in both sheets.
+      try {
+        if (destinationRow >= CONFIG.DATA_START_ROW) {
+          exclusionSheet.deleteRow(destinationRow);
+          destinationRow = -1;
+        }
+      } catch (rollbackError) {
+        console.error('Exclusion rollback failed:', rollbackError);
+      }
+
+      throw new Error(
+        'The patient was copied to the exclusion sheet, but the Sheet1 row ' +
+        'could not be deleted. The archive copy was rolled back when possible. ' +
+        errorMessage_(deleteError, '')
+      );
+    }
+
+    SpreadsheetApp.flush();
+
+    return {
+      ok: true,
+      fin: archivedDisplayFin || fin,
+      exclusionSheetName: exclusionSheet.getName(),
+      exclusionRow: destinationRow,
+      message:
+        'Patient FIN "' + (archivedDisplayFin || fin) +
+        '" was moved from Sheet1 to ' + exclusionSheet.getName() + '.'
+    };
+  } catch (error) {
+    console.error(error);
+    throw new Error(
+      errorMessage_(error, 'The patient could not be moved to the exclusion sheet.')
+    );
+  } finally {
+    lock.releaseLock();
+  }
 }
 
 /* ==========================================================================
@@ -1644,6 +1857,109 @@ function calculateOrthoLengthOfStay_(sourceRow, sourceHeaderMap) {
   return round_(milliseconds / 86400000, 2);
 }
 
+
+/* ==========================================================================
+ * EXCLUSION SHEET HELPERS
+ * ========================================================================== */
+
+function getOrCreateExclusionSheet_(spreadsheet, sourceHeaders) {
+  let sheet = spreadsheet.getSheetByName(CONFIG.EXCLUSION_SHEET_NAME);
+
+  if (!sheet) {
+    sheet = spreadsheet.insertSheet(CONFIG.EXCLUSION_SHEET_NAME);
+  }
+
+  const lastColumn = Math.max(sheet.getLastColumn(), 1);
+  const currentHeaders = sheet
+    .getRange(CONFIG.HEADER_ROW, 1, 1, lastColumn)
+    .getDisplayValues()[0];
+
+  const hasAnyHeader = currentHeaders.some(function (value) {
+    return !isBlankValue_(value);
+  });
+
+  if (!hasAnyHeader) {
+    if (sheet.getMaxColumns() < sourceHeaders.length) {
+      sheet.insertColumnsAfter(
+        sheet.getMaxColumns(),
+        sourceHeaders.length - sheet.getMaxColumns()
+      );
+    }
+
+    sheet
+      .getRange(CONFIG.HEADER_ROW, 1, 1, sourceHeaders.length)
+      .setValues([sourceHeaders]);
+
+    sheet.setFrozenRows(CONFIG.HEADER_ROW);
+
+    try {
+      const sourceSheet = getSheet1_();
+      sourceSheet
+        .getRange(CONFIG.HEADER_ROW, 1, 1, sourceHeaders.length)
+        .copyFormatToRange(
+          sheet.getSheetId(),
+          1,
+          sourceHeaders.length,
+          CONFIG.HEADER_ROW,
+          CONFIG.HEADER_ROW
+        );
+    } catch (formatError) {
+      console.log(
+        'Exclusion header formatting could not be copied: ' +
+        errorMessage_(formatError, '')
+      );
+    }
+  }
+
+  return sheet;
+}
+
+function ensureExclusionHeaders_(sheet, sourceHeaders) {
+  let destinationHeaders = getHeaderValues_(sheet);
+  let destinationHeaderMap = createHeaderMap_(
+    destinationHeaders,
+    sheet.getName()
+  );
+
+  const missingHeaders = [];
+
+  sourceHeaders.forEach(function (header) {
+    const cleanHeader = cleanText_(header);
+    if (!cleanHeader) return;
+
+    const key = normalizeHeader_(cleanHeader);
+    if (destinationHeaderMap[key] === undefined) {
+      missingHeaders.push(cleanHeader);
+      destinationHeaderMap[key] = -1; // prevent duplicate appends
+    }
+  });
+
+  if (!missingHeaders.length) {
+    return;
+  }
+
+  const startColumn = Math.max(sheet.getLastColumn(), 0) + 1;
+  const requiredLastColumn = startColumn + missingHeaders.length - 1;
+
+  if (sheet.getMaxColumns() < requiredLastColumn) {
+    sheet.insertColumnsAfter(
+      sheet.getMaxColumns(),
+      requiredLastColumn - sheet.getMaxColumns()
+    );
+  }
+
+  sheet
+    .getRange(
+      CONFIG.HEADER_ROW,
+      startColumn,
+      1,
+      missingHeaders.length
+    )
+    .setValues([missingHeaders]);
+
+  SpreadsheetApp.flush();
+}
+
 /* ==========================================================================
  * SHEET / HEADER HELPERS
  * ========================================================================== */
@@ -2326,7 +2642,9 @@ function orthoCalculateLengthOfStay_(sourceRow, sourceHeaderMap) {
 
 
 
-    <!DOCTYPE html>
+
+
+<!DOCTYPE html>
 <html lang="en">
 <head>
   <base target="_top">
@@ -3087,6 +3405,17 @@ function orthoCalculateLengthOfStay_(sourceRow, sourceHeaderMap) {
       background: #fff8e6;
     }
 
+    .button-exclude {
+      border: 1px solid #d92d20;
+      background: #fff5f4;
+      color: #b42318;
+    }
+
+    .button-exclude:hover:not(:disabled) {
+      background: #feeceb;
+      border-color: #b42318;
+    }
+
     .button-primary {
       border: 1px solid var(--navy);
       background: linear-gradient(135deg, var(--navy), #18547f);
@@ -3303,6 +3632,9 @@ function orthoCalculateLengthOfStay_(sourceRow, sourceHeaderMap) {
         <button class="button button-skip" type="button" id="skipButton">
           Skip Patient
         </button>
+        <button class="button button-exclude" type="button" id="excludeButton">
+          Exclude Patient
+        </button>
         <button class="button button-primary" type="button" id="saveNextButton">
           Save &amp; Next
         </button>
@@ -3352,6 +3684,7 @@ function orthoCalculateLengthOfStay_(sourceRow, sourceHeaderMap) {
     function bindEvents() {
       document.getElementById('previousButton').addEventListener('click', goPrevious);
       document.getElementById('skipButton').addEventListener('click', skipPatient);
+      document.getElementById('excludeButton').addEventListener('click', excludeCurrentPatient);
       document.getElementById('saveNextButton').addEventListener('click', saveAndNext);
       document.getElementById('retryButton').addEventListener('click', loadBootstrap);
 
@@ -3514,6 +3847,77 @@ function orthoCalculateLengthOfStay_(sourceRow, sourceHeaderMap) {
       saveCurrentDraft();
       showToast('Patient skipped. No Sheet1 data were changed.', 'success');
       await loadPatientAtIndex(currentIndex + 1, false);
+    }
+
+    async function excludeCurrentPatient() {
+      if (isBusy || !currentPatient) return;
+
+      const fin = String(currentPatient.fin || '').trim();
+      const patientName = String(currentPatient.patientName || '').trim();
+      const patientLabel = patientName && patientName !== 'Not available'
+        ? `${patientName} (FIN ${fin})`
+        : `FIN ${fin}`;
+
+      const confirmed = window.confirm(
+        `Exclude ${patientLabel}?\n\n` +
+        `This will move the patient's entire row from Sheet1 to the "${'exclusion'}" sheet ` +
+        `and remove the row from Sheet1.\n\n` +
+        `This action should only be used when the patient meets your exclusion criteria.`
+      );
+
+      if (!confirmed) return;
+
+      const excludedIndex = currentIndex;
+      const excludedFinKey = finKey(fin);
+
+      setBusy(true, 'Moving patient to exclusion…');
+
+      try {
+        const result = await serverExcludePatient({ fin: fin });
+
+        delete drafts[excludedFinKey];
+
+        if (
+          excludedIndex >= 0 &&
+          excludedIndex < reviewQueue.length
+        ) {
+          reviewQueue.splice(excludedIndex, 1);
+        } else {
+          reviewQueue = reviewQueue.filter(
+            item => finKey(item.fin) !== excludedFinKey
+          );
+        }
+
+        currentPatient = null;
+
+        showToast(
+          result && result.message
+            ? result.message
+            : `FIN ${fin} was moved to the exclusion sheet.`,
+          'success'
+        );
+
+        setBusy(false);
+
+        if (!reviewQueue.length) {
+          await refreshAfterPass();
+          return;
+        }
+
+        const nextIndex = Math.min(
+          excludedIndex,
+          reviewQueue.length - 1
+        );
+
+        await loadPatientAtIndex(
+          Math.max(nextIndex, 0),
+          false
+        );
+      } catch (error) {
+        showToast(getErrorMessage(error), 'error');
+      } finally {
+        setBusy(false);
+      }
     }
 
     async function goPrevious() {
@@ -4357,12 +4761,14 @@ function orthoCalculateLengthOfStay_(sourceRow, sourceHeaderMap) {
     function updateButtons() {
       const previous = document.getElementById('previousButton');
       const skip = document.getElementById('skipButton');
+      const exclude = document.getElementById('excludeButton');
       const save = document.getElementById('saveNextButton');
       const jumpInput = document.getElementById('jumpPatientInput');
       const jumpButton = document.getElementById('jumpPatientButton');
 
       previous.disabled = isBusy || currentIndex <= 0;
       skip.disabled = isBusy || !currentPatient;
+      exclude.disabled = isBusy || !currentPatient;
       save.disabled = isBusy || !currentPatient;
 
       if (jumpInput) {
@@ -4432,6 +4838,15 @@ function orthoCalculateLengthOfStay_(sourceRow, sourceHeaderMap) {
           .withFailureHandler(failure)
           .savePatientMissingData(payload);
       }, 'Saving the patient record');
+    }
+
+    function serverExcludePatient(payload) {
+      return serverPromise((success, failure) => {
+        google.script.run
+          .withSuccessHandler(success)
+          .withFailureHandler(failure)
+          .excludePatient(payload);
+      }, 'Moving the patient to exclusion');
     }
 
     function serverPromise(invoke, label) {
@@ -4523,3 +4938,4 @@ function orthoCalculateLengthOfStay_(sourceRow, sourceHeaderMap) {
   </script>
 </body>
 </html>
+    
