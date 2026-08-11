@@ -2323,7 +2323,10 @@ function orthoCalculateLengthOfStay_(sourceRow, sourceHeaderMap) {
 
 
 
-     <!DOCTYPE html>
+
+
+
+    <!DOCTYPE html>
 <html lang="en">
 <head>
   <base target="_top">
@@ -2501,6 +2504,85 @@ function orthoCalculateLengthOfStay_(sourceRow, sourceHeaderMap) {
       font-size: 0.8rem;
       font-weight: 700;
       font-variant-numeric: tabular-nums;
+    }
+
+    .patient-jump-row {
+      display: flex;
+      align-items: center;
+      justify-content: flex-end;
+      gap: 10px;
+      margin-top: 10px;
+    }
+
+    .patient-jump-label {
+      color: var(--muted);
+      font-size: 0.78rem;
+      font-weight: 750;
+      white-space: nowrap;
+    }
+
+    .patient-jump-control {
+      display: inline-flex;
+      align-items: center;
+      gap: 7px;
+      padding: 5px;
+      border: 1px solid var(--line);
+      border-radius: 11px;
+      background: #fff;
+      box-shadow: 0 3px 10px rgba(18, 59, 93, 0.05);
+    }
+
+    .patient-jump-input {
+      width: 76px;
+      min-height: 34px;
+      padding: 6px 8px;
+      border: 1px solid #cbd8e2;
+      border-radius: 8px;
+      outline: none;
+      color: var(--ink);
+      background: #fff;
+      text-align: center;
+      font: inherit;
+      font-size: 0.8rem;
+      font-weight: 800;
+      font-variant-numeric: tabular-nums;
+    }
+
+    .patient-jump-input:focus {
+      border-color: var(--teal);
+      box-shadow: 0 0 0 3px rgba(31, 111, 120, 0.12);
+    }
+
+    .patient-jump-total {
+      min-width: 50px;
+      color: var(--muted);
+      font-size: 0.76rem;
+      font-weight: 750;
+      font-variant-numeric: tabular-nums;
+      white-space: nowrap;
+    }
+
+    .patient-jump-button {
+      min-height: 34px;
+      padding: 6px 12px;
+      border: 1px solid var(--teal);
+      border-radius: 8px;
+      background: var(--teal);
+      color: #fff;
+      font: inherit;
+      font-size: 0.76rem;
+      font-weight: 800;
+      cursor: pointer;
+    }
+
+    .patient-jump-button:hover:not(:disabled) {
+      filter: brightness(1.05);
+    }
+
+    .patient-jump-button:disabled,
+    .patient-jump-input:disabled {
+      cursor: not-allowed;
+      opacity: 0.55;
     }
 
     .page {
@@ -3124,6 +3206,26 @@ function orthoCalculateLengthOfStay_(sourceRow, sourceHeaderMap) {
         font-size: 0.77rem;
       }
 
+      .patient-jump-row {
+        justify-content: stretch;
+        align-items: stretch;
+        flex-direction: column;
+        gap: 6px;
+      }
+
+      .patient-jump-control {
+        width: 100%;
+      }
+
+      .patient-jump-input {
+        flex: 1;
+        width: auto;
+      }
+
+      .patient-jump-button {
+        min-width: 72px;
+      }
+
       .page {
         margin-top: 14px;
       }
@@ -3154,6 +3256,25 @@ function orthoCalculateLengthOfStay_(sourceRow, sourceHeaderMap) {
           <div class="progress-bar" id="progressBar"></div>
         </div>
         <div class="progress-text" id="progressText">Loading…</div>
+      </div>
+
+      <div class="patient-jump-row" id="patientJumpRow">
+        <label class="patient-jump-label" for="jumpPatientInput">Jump to Patient #</label>
+        <div class="patient-jump-control">
+          <input
+            class="patient-jump-input"
+            id="jumpPatientInput"
+            type="number"
+            min="1"
+            step="1"
+            inputmode="numeric"
+            autocomplete="off"
+            aria-label="Patient number to open"
+            placeholder="#"
+          >
+          <span class="patient-jump-total" id="jumpPatientTotal">of —</span>
+          <button class="patient-jump-button" type="button" id="jumpPatientButton">Go</button>
+        </div>
       </div>
     </div>
   </header>
@@ -3233,6 +3354,14 @@ function orthoCalculateLengthOfStay_(sourceRow, sourceHeaderMap) {
       document.getElementById('skipButton').addEventListener('click', skipPatient);
       document.getElementById('saveNextButton').addEventListener('click', saveAndNext);
       document.getElementById('retryButton').addEventListener('click', loadBootstrap);
+
+      document.getElementById('jumpPatientButton').addEventListener('click', jumpToPatient);
+      document.getElementById('jumpPatientInput').addEventListener('keydown', event => {
+        if (event.key === 'Enter') {
+          event.preventDefault();
+          jumpToPatient();
+        }
+      });
 
       document.getElementById('patientContainer').addEventListener('click', event => {
         const copyFinButton = event.target.closest('[data-copy-fin]');
@@ -3392,6 +3521,35 @@ function orthoCalculateLengthOfStay_(sourceRow, sourceHeaderMap) {
 
       saveCurrentDraft();
       await loadPatientAtIndex(currentIndex - 1, true);
+    }
+
+    async function jumpToPatient() {
+      if (isBusy || !reviewQueue.length) return;
+
+      const input = document.getElementById('jumpPatientInput');
+      const rawValue = String(input.value || '').trim();
+      const patientNumber = Number(rawValue);
+      const total = reviewQueue.length;
+
+      if (!rawValue || !Number.isInteger(patientNumber)) {
+        showToast(`Enter a whole patient number from 1 to ${total}.`, 'error');
+        input.focus();
+        return;
+      }
+
+      if (patientNumber < 1 || patientNumber > total) {
+        showToast(`Patient number must be between 1 and ${total}.`, 'error');
+        input.focus();
+        input.select();
+        return;
+      }
+
+      if (currentPatient) {
+        saveCurrentDraft();
+      }
+
+      input.value = '';
+      await loadPatientAtIndex(patientNumber - 1, true);
     }
 
     async function refreshAfterPass() {
@@ -4156,9 +4314,24 @@ function orthoCalculateLengthOfStay_(sourceRow, sourceHeaderMap) {
     }
 
     function updateProgress() {
+      const jumpInput = document.getElementById('jumpPatientInput');
+      const jumpTotal = document.getElementById('jumpPatientTotal');
+
       if (!reviewQueue.length || currentIndex < 0) {
         document.getElementById('progressBar').style.width = '0%';
         document.getElementById('progressText').textContent = 'Loading…';
+
+        if (jumpInput) {
+          jumpInput.min = '1';
+          jumpInput.max = String(Math.max(reviewQueue.length, 1));
+          jumpInput.placeholder = '#';
+        }
+
+        if (jumpTotal) {
+          jumpTotal.textContent = reviewQueue.length
+            ? `of ${reviewQueue.length}`
+            : 'of —';
+        }
         return;
       }
 
@@ -4169,16 +4342,36 @@ function orthoCalculateLengthOfStay_(sourceRow, sourceHeaderMap) {
       document.getElementById('progressBar').style.width = `${percentage}%`;
       document.getElementById('progressText').textContent =
         `Patient ${current} of ${total}`;
+
+      if (jumpInput) {
+        jumpInput.min = '1';
+        jumpInput.max = String(total);
+        jumpInput.placeholder = String(current);
+      }
+
+      if (jumpTotal) {
+        jumpTotal.textContent = `of ${total}`;
+      }
     }
 
     function updateButtons() {
       const previous = document.getElementById('previousButton');
       const skip = document.getElementById('skipButton');
       const save = document.getElementById('saveNextButton');
+      const jumpInput = document.getElementById('jumpPatientInput');
+      const jumpButton = document.getElementById('jumpPatientButton');
 
       previous.disabled = isBusy || currentIndex <= 0;
       skip.disabled = isBusy || !currentPatient;
       save.disabled = isBusy || !currentPatient;
+
+      if (jumpInput) {
+        jumpInput.disabled = isBusy || !reviewQueue.length;
+      }
+
+      if (jumpButton) {
+        jumpButton.disabled = isBusy || !reviewQueue.length;
+      }
 
       if (currentPatient && currentPatient.completed) {
         save.textContent = 'Next Patient';
