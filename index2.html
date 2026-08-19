@@ -1,42 +1,47 @@
 /**********************************************************************
- * APIXABAN MUE TABLE BUILDER
- * FORMULA-DRIVEN VERSION
+ * APIXABAN MUE - FORMULA-DRIVEN TABLE BUILDER
  *
  * SOURCE SHEETS
  * ------------------------------------------------------------
- * Sheet1 = included MUE patients
- * Ortho  = larger orthopedic dataset containing facility
+ * Sheet1 = included study patients
+ * Ortho  = larger orthopedic dataset containing facility information
  *
  * OUTPUT SHEETS
  * ------------------------------------------------------------
- * Facility Match Audit
- * MUE Tables
+ * 1. Facility Match Audit
+ * 2. MUE Tables
  *
  * IMPORTANT
  * ------------------------------------------------------------
- * ALL calculated result cells contain Google Sheets formulas.
- *
- * Clicking a result cell will show the equation/formula in the
- * Google Sheets formula bar.
- *
- * Sheet1 and Ortho are NOT modified.
+ * - Sheet1 is NOT changed.
+ * - Ortho is NOT changed.
+ * - Only patients already in Sheet1 are included.
+ * - Patients in Ortho who were excluded from the study are NOT added.
+ * - Calculated cells contain GOOGLE SHEETS FORMULAS.
+ * - Clicking a calculated cell shows the equation in the formula bar.
  *
  * FACILITY MATCHING
  * ------------------------------------------------------------
  * Preferred:
  *   DOB + Gender + Surgery Date
  *
- * Fallback:
+ * If DOB is not available:
  *   Age + Gender + Surgery Date
  *
- * Only patients already in Sheet1 are analyzed.
+ * AGE FIX
+ * ------------------------------------------------------------
+ * Handles:
+ *   74
+ *   74 Years
+ *   74 years
+ *
+ * by extracting the numeric portion.
  *
  * MUE STANDARD
  * ------------------------------------------------------------
- * Apixaban = 2.5 mg BID
+ * Apixaban 2.5 mg BID
  * Total knee arthroplasty = 12 days
  * Total hip arthroplasty  = 35 days
- *
  **********************************************************************/
 
 
@@ -50,11 +55,11 @@ const MUE_TABLES = {
 
   TABLE_SHEET: "MUE Tables",
 
+  APPROPRIATE_DOSE: 2.5,
+
   KNEE_DAYS: 12,
 
-  HIP_DAYS: 35,
-
-  APPROPRIATE_DOSE: 2.5
+  HIP_DAYS: 35
 
 };
 
@@ -63,22 +68,19 @@ const MUE_TABLES = {
  *
  * MAIN FUNCTION
  *
- * RUN THIS FUNCTION:
+ * RUN THIS:
  *
  * buildMUETablesWithFormulas
  *
  **********************************************************************/
 function buildMUETablesWithFormulas() {
 
-  const ss =
-    SpreadsheetApp.getActiveSpreadsheet();
-
+  const ss = SpreadsheetApp.getActiveSpreadsheet();
 
   const source =
     ss.getSheetByName(
       MUE_TABLES.SOURCE_SHEET
     );
-
 
   const ortho =
     ss.getSheetByName(
@@ -91,13 +93,11 @@ function buildMUETablesWithFormulas() {
    ********************************************************************/
   if (!source) {
 
-    SpreadsheetApp
-      .getUi()
-      .alert(
-        'Could not find sheet "' +
-        MUE_TABLES.SOURCE_SHEET +
-        '".'
-      );
+    SpreadsheetApp.getUi().alert(
+      'Could not find sheet "' +
+      MUE_TABLES.SOURCE_SHEET +
+      '".'
+    );
 
     return;
   }
@@ -105,40 +105,28 @@ function buildMUETablesWithFormulas() {
 
   if (!ortho) {
 
-    SpreadsheetApp
-      .getUi()
-      .alert(
-        'Could not find sheet "' +
-        MUE_TABLES.ORTHO_SHEET +
-        '".'
-      );
+    SpreadsheetApp.getUi().alert(
+      'Could not find sheet "' +
+      MUE_TABLES.ORTHO_SHEET +
+      '".'
+    );
 
     return;
   }
 
 
-  /********************************************************************
-   * READ SOURCE DATA
-   ********************************************************************/
   const sourceValues =
-    source
-      .getDataRange()
-      .getValues();
-
+    source.getDataRange().getValues();
 
   const orthoValues =
-    ortho
-      .getDataRange()
-      .getValues();
+    ortho.getDataRange().getValues();
 
 
   if (sourceValues.length < 2) {
 
-    SpreadsheetApp
-      .getUi()
-      .alert(
-        "Sheet1 does not contain patient data."
-      );
+    SpreadsheetApp.getUi().alert(
+      "Sheet1 does not contain patient data."
+    );
 
     return;
   }
@@ -146,11 +134,9 @@ function buildMUETablesWithFormulas() {
 
   if (orthoValues.length < 2) {
 
-    SpreadsheetApp
-      .getUi()
-      .alert(
-        "Ortho does not contain patient data."
-      );
+    SpreadsheetApp.getUi().alert(
+      "Ortho does not contain patient data."
+    );
 
     return;
   }
@@ -159,22 +145,19 @@ function buildMUETablesWithFormulas() {
   const sourceHeaders =
     sourceValues[0];
 
-
   const orthoHeaders =
     orthoValues[0];
 
 
   /********************************************************************
-   * FIND SOURCE COLUMNS
+   * FIND COLUMNS IN SHEET1
    ********************************************************************/
   const S = {
 
     age:
       findMUEHeader_(
         sourceHeaders,
-        [
-          "Age"
-        ],
+        ["Age"],
         true
       ),
 
@@ -195,7 +178,8 @@ function buildMUETablesWithFormulas() {
           "DOB",
           "Date of Birth",
           "Date of birth",
-          "Birth Date"
+          "Birth Date",
+          "Birthdate"
         ],
         false
       ),
@@ -314,7 +298,8 @@ function buildMUETablesWithFormulas() {
           "Number of outpatient days supplied (total treatment duration)",
           "Total treatment duration",
           "Total Treatment Duration",
-          "Treatment duration"
+          "Treatment duration",
+          "Duration"
         ],
         true
       ),
@@ -322,9 +307,7 @@ function buildMUETablesWithFormulas() {
     aspirin:
       findMUEHeader_(
         sourceHeaders,
-        [
-          "Aspirin"
-        ],
+        ["Aspirin"],
         false
       ),
 
@@ -374,7 +357,7 @@ function buildMUETablesWithFormulas() {
 
 
   /********************************************************************
-   * FIND ORTHO COLUMNS
+   * FIND COLUMNS IN ORTHO
    ********************************************************************/
   const O = {
 
@@ -384,7 +367,8 @@ function buildMUETablesWithFormulas() {
         [
           "DOB",
           "Date of Birth",
-          "Date of birth"
+          "Date of birth",
+          "Birth Date"
         ],
         false
       ),
@@ -440,9 +424,7 @@ function buildMUETablesWithFormulas() {
 
 
   /********************************************************************
-   * DETERMINE WHICH SHEET1 ROWS ARE ACTUAL PATIENTS
-   *
-   * This prevents blank rows from being counted.
+   * IDENTIFY ACTUAL PATIENT ROWS IN SHEET1
    ********************************************************************/
   const sourceRows = [];
 
@@ -453,11 +435,7 @@ function buildMUETablesWithFormulas() {
     i++
   ) {
 
-    if (
-      !mueRowIsBlank_(
-        sourceValues[i]
-      )
-    ) {
+    if (!mueRowIsBlank_(sourceValues[i])) {
 
       sourceRows.push(
         i + 1
@@ -470,18 +448,16 @@ function buildMUETablesWithFormulas() {
 
   if (sourceRows.length === 0) {
 
-    SpreadsheetApp
-      .getUi()
-      .alert(
-        "No patients were found in Sheet1."
-      );
+    SpreadsheetApp.getUi().alert(
+      "No patient records were found in Sheet1."
+    );
 
     return;
   }
 
 
   /********************************************************************
-   * BUILD FORMULA-DRIVEN AUDIT
+   * BUILD PATIENT AUDIT
    ********************************************************************/
   const auditInfo =
     buildFormulaAudit_(
@@ -498,7 +474,7 @@ function buildMUETablesWithFormulas() {
 
 
   /********************************************************************
-   * BUILD FORMULA-DRIVEN TABLES
+   * BUILD FINAL TABLES
    ********************************************************************/
   buildFormulaMUETables_(
     ss,
@@ -516,32 +492,32 @@ function buildMUETablesWithFormulas() {
   );
 
 
-  SpreadsheetApp
-    .getUi()
-    .alert(
+  SpreadsheetApp.getUi().alert(
 
-      "MUE tables created successfully.\n\n" +
+    "MUE tables completed.\n\n" +
 
-      "Every calculated result cell contains a Google Sheets formula.\n\n" +
+    "Included patients: " +
+    sourceRows.length +
+    "\n\n" +
 
-      "Created:\n" +
-      "• Facility Match Audit\n" +
-      "• MUE Tables\n\n" +
+    "Created:\n" +
 
-      "Included Sheet1 patients: " +
-      sourceRows.length +
-      "\n\n" +
+    "• Facility Match Audit\n" +
 
-      "Sheet1 and Ortho were not changed."
+    "• MUE Tables\n\n" +
 
-    );
+    "The calculated cells contain Google Sheets equations.\n\n" +
+
+    "Age values such as '74 Years' are now correctly converted to 74."
+
+  );
 
 }
 
 
 /**********************************************************************
  *
- * BUILD FORMULA AUDIT
+ * CREATE FORMULA-DRIVEN PATIENT AUDIT
  *
  **********************************************************************/
 function buildFormulaAudit_(
@@ -596,48 +572,47 @@ function buildFormulaAudit_(
     .getRange("A2:AD2")
     .merge()
     .setValue(
-      "All patient-level calculated fields below are formula-driven. " +
-      "Facility matching prefers DOB + gender + surgery date; " +
-      "age + gender + surgery date is used only when DOB is unavailable."
+      "All calculated patient-level fields are formula-driven. " +
+      "Only patients already included in Sheet1 are analyzed."
     )
     .setWrap(true);
 
 
   /********************************************************************
-   * HEADERS
+   * AUDIT HEADERS
    ********************************************************************/
   const headers = [
 
-    "Source Row",                 // A
-    "Age",                        // B
-    "Gender",                     // C
-    "DOB",                        // D
-    "Surgery Date",               // E
-    "Surgery Type",               // F
-    "Raw Facility Match",         // G
-    "Facility",                   // H
-    "Match Status",               // I
-    "Broad Procedure",            // J
-    "Total Joint Procedure",      // K
-    "BMI",                        // L
-    "Primary / Revision",         // M
-    "Urgency",                    // N
-    "Indication Documented",      // O
-    "Discharge Dose",             // P
-    "Discharge Frequency",        // Q
-    "Dose Assessment",            // R
-    "Duration (days)",            // S
-    "Recommended Duration",       // T
-    "Duration Deviation",         // U
-    "Duration Assessment",        // V
-    "Overall Regimen",            // W
-    "Rx Quantity",                // X
-    "Refills",                    // Y
-    "Aspirin",                    // Z
-    "Antiplatelet",               // AA
-    "NSAID",                      // AB
-    "Other Anticoagulant",        // AC
-    "Heparin / Enoxaparin"        // AD
+    "Source Row",                    // A
+    "Age",                           // B
+    "Gender",                        // C
+    "DOB",                           // D
+    "Surgery Date",                  // E
+    "Surgery Type",                  // F
+    "Raw Facility Match",            // G
+    "Facility",                      // H
+    "Match Status",                  // I
+    "Broad Procedure",               // J
+    "Total Joint Procedure",         // K
+    "BMI",                           // L
+    "Primary / Revision",            // M
+    "Urgency",                       // N
+    "Indication Documented",         // O
+    "Discharge Dose",                // P
+    "Discharge Frequency",           // Q
+    "Dose Assessment",               // R
+    "Duration (days)",               // S
+    "Recommended Duration",          // T
+    "Duration Deviation",            // U
+    "Duration Assessment",           // V
+    "Overall Regimen",               // W
+    "Rx Quantity",                   // X
+    "Refills",                       // Y
+    "Aspirin",                       // Z
+    "Antiplatelet",                  // AA
+    "NSAID",                         // AB
+    "Other Anticoagulant",           // AC
+    "Heparin / Enoxaparin"           // AD
 
   ];
 
@@ -658,12 +633,12 @@ function buildFormulaAudit_(
     .setWrap(true);
 
 
-  /********************************************************************
-   * BUILD FORMULAS FOR EACH INCLUDED PATIENT
-   ********************************************************************/
   const formulas = [];
 
 
+  /********************************************************************
+   * BUILD ONE FORMULA ROW FOR EACH INCLUDED PATIENT
+   ********************************************************************/
   for (
     let i = 0;
     i < sourceRows.length;
@@ -678,26 +653,29 @@ function buildFormulaAudit_(
       i + 5;
 
 
+    /******************************************************************
+     * HELPER FOR SHEET1 REFERENCES
+     ******************************************************************/
     const src =
-      function(col) {
+      function(column) {
 
-        if (col === null) {
+        if (column === null) {
+
           return null;
+
         }
+
 
         return (
           sourceName +
           "!" +
-          columnLetter_(col) +
+          columnLetter_(column) +
           sourceRow
         );
 
       };
 
 
-    /******************************************************************
-     * SOURCE REFERENCES
-     ******************************************************************/
     const ageRef =
       src(S.age);
 
@@ -757,17 +735,40 @@ function buildFormulaAudit_(
 
 
     /******************************************************************
-     * A = SOURCE ROW
+     * A = ORIGINAL SHEET1 ROW
      ******************************************************************/
     const sourceRowFormula =
-      `=ROW(${sourceName}!A${sourceRow})`;
+      `=${sourceRow}`;
 
 
     /******************************************************************
      * B = AGE
+     *
+     * FIXED:
+     *
+     * 74 Years → 74
+     * 74 years → 74
+     * 74       → 74
      ******************************************************************/
     const ageFormula =
-      `=IFERROR(VALUE(${ageRef}),"")`;
+
+      `=IFERROR(` +
+
+        `VALUE(` +
+
+          `REGEXEXTRACT(` +
+
+            `TO_TEXT(${ageRef}),` +
+
+            `"[0-9]+\\.?[0-9]*"` +
+
+          `)` +
+
+        `),` +
+
+        `""` +
+
+      `)`;
 
 
     /******************************************************************
@@ -822,7 +823,16 @@ function buildFormulaAudit_(
      * E = SURGERY DATE
      ******************************************************************/
     const surgeryDateFormula =
-      `=IF(${surgeryDateRef}="","",${surgeryDateRef})`;
+
+      `=IF(` +
+
+        `${surgeryDateRef}="",` +
+
+        `"",` +
+
+        `${surgeryDateRef}` +
+
+      `)`;
 
 
     /******************************************************************
@@ -833,7 +843,7 @@ function buildFormulaAudit_(
 
 
     /******************************************************************
-     * G = RAW FACILITY MATCH
+     * G = FACILITY MATCH
      ******************************************************************/
     const facilityFormula =
       buildFacilityFormula_(
@@ -845,15 +855,21 @@ function buildFormulaAudit_(
 
 
     /******************************************************************
-     * H = FRIENDLY FACILITY NAME
+     * H = CLEAN FACILITY NAME
      ******************************************************************/
     const friendlyFacilityFormula =
 
       `=IF(` +
 
-        `OR(G${auditRow}="",` +
-           `G${auditRow}="Unknown / unmatched",` +
-           `G${auditRow}="Unknown / ambiguous"),` +
+        `OR(` +
+
+          `G${auditRow}="",` +
+
+          `G${auditRow}="Unknown / unmatched",` +
+
+          `G${auditRow}="Unknown / ambiguous"` +
+
+        `),` +
 
         `G${auditRow},` +
 
@@ -936,6 +952,9 @@ function buildFormulaAudit_(
 
     /******************************************************************
      * K = CONFIRMED TOTAL JOINT PROCEDURE
+     *
+     * Generic hip/knee procedure names are NOT automatically treated
+     * as total arthroplasty.
      ******************************************************************/
     const totalJointFormula =
 
@@ -980,6 +999,9 @@ function buildFormulaAudit_(
 
     /******************************************************************
      * L = BMI
+     *
+     * Also safely handles values such as:
+     * 31.2 kg/m2
      ******************************************************************/
     const bmiFormula =
 
@@ -987,7 +1009,7 @@ function buildFormulaAudit_(
 
         ?
 
-        `=IFERROR(VALUE(${bmiRef}),"")`
+        numberFormula_(bmiRef)
 
         :
 
@@ -1011,7 +1033,7 @@ function buildFormulaAudit_(
 
 
     /******************************************************************
-     * N = URGENCY
+     * N = ELECTIVE / URGENT
      ******************************************************************/
     const urgencyFormula =
 
@@ -1044,30 +1066,17 @@ function buildFormulaAudit_(
 
     /******************************************************************
      * P = DISCHARGE DOSE
+     *
+     * Handles:
+     * 2.5
+     * 2.5 mg
      ******************************************************************/
     const doseFormula =
-
-      `=IFERROR(` +
-
-        `VALUE(` +
-
-          `REGEXEXTRACT(` +
-
-            `TO_TEXT(${doseRef}),` +
-
-            `"[0-9]+\\.?[0-9]*"` +
-
-          `)` +
-
-        `),` +
-
-        `""` +
-
-      `)`;
+      numberFormula_(doseRef);
 
 
     /******************************************************************
-     * Q = DISCHARGE FREQUENCY
+     * Q = FREQUENCY
      ******************************************************************/
     const frequencyFormula =
       `=${frequencyRef}`;
@@ -1118,27 +1127,10 @@ function buildFormulaAudit_(
 
 
     /******************************************************************
-     * S = DURATION
+     * S = TREATMENT DURATION
      ******************************************************************/
     const durationFormula =
-
-      `=IFERROR(` +
-
-        `VALUE(` +
-
-          `REGEXEXTRACT(` +
-
-            `TO_TEXT(${durationRef}),` +
-
-            `"[0-9]+\\.?[0-9]*"` +
-
-          `)` +
-
-        `),` +
-
-        `""` +
-
-      `)`;
+      numberFormula_(durationRef);
 
 
     /******************************************************************
@@ -1167,12 +1159,20 @@ function buildFormulaAudit_(
 
     /******************************************************************
      * U = DEVIATION
+     *
+     * Actual - Recommended
      ******************************************************************/
     const deviationFormula =
 
       `=IF(` +
 
-        `OR(S${auditRow}="",T${auditRow}=""),` +
+        `OR(` +
+
+          `S${auditRow}="",` +
+
+          `T${auditRow}=""` +
+
+        `),` +
 
         `"",` +
 
@@ -1298,7 +1298,7 @@ function buildFormulaAudit_(
 
 
     /******************************************************************
-     * Z - AD = CONCOMITANT MEDICATIONS
+     * Z = ASPIRIN
      ******************************************************************/
     const aspirinFormula =
 
@@ -1313,6 +1313,9 @@ function buildFormulaAudit_(
         `="Unknown"`;
 
 
+    /******************************************************************
+     * AA = ANTIPLATELET
+     ******************************************************************/
     const antiplateletFormula =
 
       antiplateletRef
@@ -1326,6 +1329,9 @@ function buildFormulaAudit_(
         `="Unknown"`;
 
 
+    /******************************************************************
+     * AB = NSAID
+     ******************************************************************/
     const nsaidFormula =
 
       nsaidRef
@@ -1339,6 +1345,9 @@ function buildFormulaAudit_(
         `="Unknown"`;
 
 
+    /******************************************************************
+     * AC = OTHER ANTICOAGULANT
+     ******************************************************************/
     const anticoagulantFormula =
 
       anticoagulantRef
@@ -1352,6 +1361,9 @@ function buildFormulaAudit_(
         `="Unknown"`;
 
 
+    /******************************************************************
+     * AD = HEPARIN / ENOXAPARIN
+     ******************************************************************/
     const heparinFormula =
 
       heparinRef
@@ -1404,7 +1416,7 @@ function buildFormulaAudit_(
 
 
   /********************************************************************
-   * WRITE ALL FORMULAS
+   * WRITE PATIENT FORMULAS
    ********************************************************************/
   sh
     .getRange(
@@ -1424,7 +1436,31 @@ function buildFormulaAudit_(
 
 
   /********************************************************************
-   * FORMATTING
+   * DATE FORMATTING
+   ********************************************************************/
+  sh
+    .getRange(
+      `D5:E${lastAuditRow}`
+    )
+    .setNumberFormat(
+      "mm/dd/yyyy"
+    );
+
+
+  /********************************************************************
+   * DEVIATION FORMAT
+   ********************************************************************/
+  sh
+    .getRange(
+      `U5:U${lastAuditRow}`
+    )
+    .setNumberFormat(
+      '+0;-0;0'
+    );
+
+
+  /********************************************************************
+   * BORDERS
    ********************************************************************/
   sh
     .getRange(
@@ -1444,59 +1480,44 @@ function buildFormulaAudit_(
     .setWrap(true);
 
 
-  sh
-    .getRange(
-      `D5:E${lastAuditRow}`
-    )
-    .setNumberFormat(
-      "mm/dd/yyyy"
-    );
-
-
-  sh
-    .getRange(
-      `U5:U${lastAuditRow}`
-    )
-    .setNumberFormat(
-      '+0;-0;0'
-    );
-
-
   sh.setFrozenRows(4);
 
 
+  /********************************************************************
+   * COLUMN WIDTHS
+   ********************************************************************/
   const widths = [
 
-    80,    // A
-    70,    // B
-    90,    // C
-    100,   // D
-    110,   // E
-    280,   // F
-    180,   // G
-    160,   // H
-    120,   // I
-    110,   // J
-    140,   // K
-    80,    // L
-    140,   // M
-    140,   // N
-    130,   // O
-    110,   // P
-    130,   // Q
-    150,   // R
-    110,   // S
-    150,   // T
-    120,   // U
-    160,   // V
-    160,   // W
-    100,   // X
-    80,    // Y
-    100,   // Z
-    120,   // AA
-    100,   // AB
-    150,   // AC
-    150    // AD
+    85,
+    75,
+    90,
+    105,
+    115,
+    290,
+    190,
+    165,
+    120,
+    115,
+    150,
+    80,
+    145,
+    140,
+    140,
+    105,
+    130,
+    150,
+    115,
+    155,
+    120,
+    160,
+    160,
+    105,
+    80,
+    100,
+    120,
+    100,
+    150,
+    150
 
   ];
 
@@ -1514,38 +1535,44 @@ function buildFormulaAudit_(
 
 
   /********************************************************************
-   * MATCHING SUMMARY - ALSO FORMULA DRIVEN
+   * FORMULA-DRIVEN MATCH SUMMARY
    ********************************************************************/
   sh
     .getRange("AF4:AG8")
     .setValues([
+
       [
         "Facility Match Summary",
         "Result"
       ],
+
       [
         "Included patients",
         ""
       ],
+
       [
         "Matched",
         ""
       ],
+
       [
         "Ambiguous",
         ""
       ],
+
       [
         "No match",
         ""
       ]
+
     ]);
 
 
   sh
     .getRange("AF4:AG4")
-    .setFontWeight("bold")
-    .setBackground("#D9EAF7");
+    .setBackground("#D9EAF7")
+    .setFontWeight("bold");
 
 
   sh
@@ -1590,9 +1617,6 @@ function buildFormulaAudit_(
 
   return {
 
-    sheet:
-      sh,
-
     name:
       quoteSheetName_(
         sh.getName()
@@ -1611,7 +1635,7 @@ function buildFormulaAudit_(
 
 /**********************************************************************
  *
- * FACILITY MATCH FORMULA
+ * FACILITY MATCHING EQUATION
  *
  **********************************************************************/
 function buildFacilityFormula_(
@@ -1652,7 +1676,7 @@ function buildFacilityFormula_(
 
 
   /********************************************************************
-   * COMMON CONDITIONS
+   * GENDER CONDITION
    ********************************************************************/
   const genderCondition =
 
@@ -1677,6 +1701,11 @@ function buildFacilityFormula_(
     `LEFT(LOWER(TRIM(TO_TEXT(C${auditRow}))),1)`;
 
 
+  /********************************************************************
+   * SURGERY DATE CONDITION
+   *
+   * Ignores time and compares the date.
+   ********************************************************************/
   const surgeryCondition =
 
     `ARRAYFORMULA(` +
@@ -1685,25 +1714,32 @@ function buildFacilityFormula_(
 
         `INT(${surgeryRange}),` +
 
-        `DATEVALUE(${surgeryRange})` +
+        `IFERROR(DATEVALUE(${surgeryRange}),0)` +
 
       `)` +
 
     `)=` +
 
-    `IFERROR(INT(E${auditRow}),DATEVALUE(E${auditRow}))`;
+    `IFERROR(` +
+
+      `INT(E${auditRow}),` +
+
+      `IFERROR(DATEVALUE(E${auditRow}),-1)` +
+
+    `)`;
 
 
   /********************************************************************
-   * AGE MATCH
+   * AGE FALLBACK
+   *
+   * IMPORTANT FIX:
+   * Handles Ortho age values such as "74 Years".
    ********************************************************************/
   let ageMatch =
     `"Unknown / unmatched"`;
 
 
-  if (
-    O.age !== null
-  ) {
+  if (O.age !== null) {
 
     const ageLetter =
       columnLetter_(
@@ -1721,7 +1757,17 @@ function buildFacilityFormula_(
 
         `IFERROR(` +
 
-          `VALUE(${ageRange}),` +
+          `VALUE(` +
+
+            `REGEXEXTRACT(` +
+
+              `TO_TEXT(${ageRange}),` +
+
+              `"[0-9]+\\.?[0-9]*"` +
+
+            `)` +
+
+          `),` +
 
           `""` +
 
@@ -1765,9 +1811,7 @@ function buildFacilityFormula_(
   /********************************************************************
    * DOB MATCH
    ********************************************************************/
-  if (
-    O.dob !== null
-  ) {
+  if (O.dob !== null) {
 
     const dobLetter =
       columnLetter_(
@@ -1787,13 +1831,19 @@ function buildFacilityFormula_(
 
           `INT(${dobRange}),` +
 
-          `DATEVALUE(${dobRange})` +
+          `IFERROR(DATEVALUE(${dobRange}),0)` +
 
         `)` +
 
       `)=` +
 
-      `IFERROR(INT(D${auditRow}),DATEVALUE(D${auditRow}))`;
+      `IFERROR(` +
+
+        `INT(D${auditRow}),` +
+
+        `IFERROR(DATEVALUE(D${auditRow}),-1)` +
+
+      `)`;
 
 
     const dobFilter =
@@ -1858,18 +1908,31 @@ function buildFacilityFormula_(
 
 
   /********************************************************************
-   * NO DOB COLUMN IN ORTHO:
-   * USE AGE FALLBACK
+   * NO DOB AVAILABLE → AGE MATCH
    ********************************************************************/
   return (
 
     `=IF(` +
 
-      `OR(B${auditRow}="",C${auditRow}="",E${auditRow}=""),` +
+      `OR(` +
+
+        `B${auditRow}="",` +
+
+        `C${auditRow}="",` +
+
+        `E${auditRow}=""` +
+
+      `),` +
 
       `"Unknown / unmatched",` +
 
-      `IFERROR(${ageMatch},"Unknown / unmatched")` +
+      `IFERROR(` +
+
+        `${ageMatch},` +
+
+        `"Unknown / unmatched"` +
+
+      `)` +
 
     `)`
 
@@ -1880,7 +1943,7 @@ function buildFacilityFormula_(
 
 /**********************************************************************
  *
- * BUILD FINAL FORMULA-DRIVEN MUE TABLES
+ * BUILD FINAL PUBLICATION-STYLE TABLES
  *
  **********************************************************************/
 function buildFormulaMUETables_(
@@ -1898,108 +1961,88 @@ function buildFormulaMUETables_(
   const A =
     auditInfo.name;
 
-
   const first =
     auditInfo.firstRow;
-
 
   const last =
     auditInfo.lastRow;
 
 
   /********************************************************************
-   * AUDIT RANGES
+   * AUDIT COLUMN RANGES
    ********************************************************************/
+  const patientRows =
+    `${A}!$A$${first}:$A$${last}`;
+
   const age =
     `${A}!$B$${first}:$B$${last}`;
-
 
   const gender =
     `${A}!$C$${first}:$C$${last}`;
 
-
   const facility =
     `${A}!$H$${first}:$H$${last}`;
-
 
   const matchStatus =
     `${A}!$I$${first}:$I$${last}`;
 
-
   const broadProcedure =
     `${A}!$J$${first}:$J$${last}`;
-
 
   const totalJoint =
     `${A}!$K$${first}:$K$${last}`;
 
-
   const bmi =
     `${A}!$L$${first}:$L$${last}`;
-
 
   const primaryRevision =
     `${A}!$M$${first}:$M$${last}`;
 
-
   const urgency =
     `${A}!$N$${first}:$N$${last}`;
-
 
   const indication =
     `${A}!$O$${first}:$O$${last}`;
 
-
   const doseAssessment =
     `${A}!$R$${first}:$R$${last}`;
-
 
   const duration =
     `${A}!$S$${first}:$S$${last}`;
 
-
   const deviation =
     `${A}!$U$${first}:$U$${last}`;
-
 
   const durationAssessment =
     `${A}!$V$${first}:$V$${last}`;
 
-
   const overall =
     `${A}!$W$${first}:$W$${last}`;
-
 
   const rxQuantity =
     `${A}!$X$${first}:$X$${last}`;
 
-
   const refills =
     `${A}!$Y$${first}:$Y$${last}`;
-
 
   const aspirin =
     `${A}!$Z$${first}:$Z$${last}`;
 
-
   const antiplatelet =
     `${A}!$AA$${first}:$AA$${last}`;
-
 
   const nsaid =
     `${A}!$AB$${first}:$AB$${last}`;
 
-
   const anticoagulant =
     `${A}!$AC$${first}:$AC$${last}`;
-
 
   const heparin =
     `${A}!$AD$${first}:$AD$${last}`;
 
 
   const totalDenominator =
-    `COUNTA(${A}!$A$${first}:$A$${last})`;
+    `COUNTA(${patientRows})`;
 
 
   const totalJointDenominator =
@@ -2010,7 +2053,7 @@ function buildFormulaMUETables_(
 
 
   /********************************************************************
-   * MAIN TITLE
+   * PAGE TITLE
    ********************************************************************/
   sh
     .getRange("A1:C1")
@@ -2030,6 +2073,10 @@ function buildFormulaMUETables_(
    * TABLE 1
    *
    ********************************************************************/
+  const table1Start =
+    row;
+
+
   sh
     .getRange(
       row,
@@ -2041,10 +2088,7 @@ function buildFormulaMUETables_(
 
 
   sh
-    .getRange(
-      row,
-      1
-    )
+    .getRange(row, 1)
     .setFormula(
 
       `="Table 1: Baseline Characteristics (n="&` +
@@ -2064,15 +2108,14 @@ function buildFormulaMUETables_(
   );
 
 
-  const table1Start =
-    row;
-
-
   row++;
 
 
   /********************************************************************
-   * AGE
+   * MEDIAN AGE
+   *
+   * THIS WILL NOW WORK WITH:
+   * "74 Years"
    ********************************************************************/
   setLabel_(
     sh,
@@ -2082,17 +2125,12 @@ function buildFormulaMUETables_(
 
 
   sh
-    .getRange(
-      row++,
-      2
-    )
+    .getRange(row++, 2)
     .setFormula(
-
       medianIQRFormula_(
         age,
         "0"
       )
-
     );
 
 
@@ -2107,17 +2145,12 @@ function buildFormulaMUETables_(
 
 
   sh
-    .getRange(
-      row++,
-      2
-    )
+    .getRange(row++, 2)
     .setFormula(
-
       medianIQRFormula_(
         bmi,
         "0.0"
       )
-
     );
 
 
@@ -2139,15 +2172,15 @@ function buildFormulaMUETables_(
 
 
   sh
-    .getRange(
-      row++,
-      2
-    )
+    .getRange(row++, 2)
     .setFormula(
 
       nPctFormula_(
+
         `COUNTIF(${gender},"Male")`,
+
         totalDenominator
+
       )
 
     );
@@ -2161,15 +2194,15 @@ function buildFormulaMUETables_(
 
 
   sh
-    .getRange(
-      row++,
-      2
-    )
+    .getRange(row++, 2)
     .setFormula(
 
       nPctFormula_(
+
         `COUNTIF(${gender},"Female")`,
+
         totalDenominator
+
       )
 
     );
@@ -2185,7 +2218,7 @@ function buildFormulaMUETables_(
   );
 
 
-  const facilityCategories = [
+  const facilityNames = [
 
     "Riverside",
 
@@ -2193,16 +2226,12 @@ function buildFormulaMUETables_(
 
     "Clay County",
 
-    "St. Johns County",
-
-    "Unknown / unmatched",
-
-    "Unknown / ambiguous"
+    "St. Johns County"
 
   ];
 
 
-  facilityCategories.forEach(
+  facilityNames.forEach(
     function(name) {
 
       setIndentedLabel_(
@@ -2213,15 +2242,15 @@ function buildFormulaMUETables_(
 
 
       sh
-        .getRange(
-          row,
-          2
-        )
+        .getRange(row, 2)
         .setFormula(
 
           nPctFormula_(
+
             `COUNTIF(${facility},"${name}")`,
+
             totalDenominator
+
           )
 
         );
@@ -2234,7 +2263,7 @@ function buildFormulaMUETables_(
 
 
   /********************************************************************
-   * OTHER FACILITY
+   * OTHER / UNKNOWN FACILITY
    ********************************************************************/
   setIndentedLabel_(
     sh,
@@ -2265,10 +2294,7 @@ function buildFormulaMUETables_(
 
 
   sh
-    .getRange(
-      row++,
-      2
-    )
+    .getRange(row++, 2)
     .setFormula(
 
       nPctFormula_(
@@ -2279,8 +2305,34 @@ function buildFormulaMUETables_(
     );
 
 
+  setIndentedLabel_(
+    sh,
+    row,
+    "Facility unmatched/ambiguous"
+  );
+
+
+  const unknownFacilityCount =
+
+    `COUNTIF(${facility},"Unknown / unmatched")+` +
+
+    `COUNTIF(${facility},"Unknown / ambiguous")`;
+
+
+  sh
+    .getRange(row++, 2)
+    .setFormula(
+
+      nPctFormula_(
+        unknownFacilityCount,
+        totalDenominator
+      )
+
+    );
+
+
   /********************************************************************
-   * PROCEDURE TYPE
+   * PROCEDURE LOCATION
    ********************************************************************/
   setSection_(
     sh,
@@ -2297,15 +2349,15 @@ function buildFormulaMUETables_(
 
 
   sh
-    .getRange(
-      row++,
-      2
-    )
+    .getRange(row++, 2)
     .setFormula(
 
       nPctFormula_(
+
         `COUNTIF(${broadProcedure},"Knee")`,
+
         totalDenominator
+
       )
 
     );
@@ -2319,15 +2371,15 @@ function buildFormulaMUETables_(
 
 
   sh
-    .getRange(
-      row++,
-      2
-    )
+    .getRange(row++, 2)
     .setFormula(
 
       nPctFormula_(
+
         `COUNTIF(${broadProcedure},"Hip")`,
+
         totalDenominator
+
       )
 
     );
@@ -2341,15 +2393,15 @@ function buildFormulaMUETables_(
 
 
   sh
-    .getRange(
-      row++,
-      2
-    )
+    .getRange(row++, 2)
     .setFormula(
 
       nPctFormula_(
+
         `COUNTIF(${broadProcedure},"Other/unclear")`,
+
         totalDenominator
+
       )
 
     );
@@ -2373,15 +2425,15 @@ function buildFormulaMUETables_(
 
 
   sh
-    .getRange(
-      row++,
-      2
-    )
+    .getRange(row++, 2)
     .setFormula(
 
       nPctFormula_(
+
         `COUNTIF(${primaryRevision},"*Primary*")`,
+
         totalDenominator
+
       )
 
     );
@@ -2395,15 +2447,15 @@ function buildFormulaMUETables_(
 
 
   sh
-    .getRange(
-      row++,
-      2
-    )
+    .getRange(row++, 2)
     .setFormula(
 
       nPctFormula_(
+
         `COUNTIF(${primaryRevision},"*Revision*")`,
+
         totalDenominator
+
       )
 
     );
@@ -2427,15 +2479,15 @@ function buildFormulaMUETables_(
 
 
   sh
-    .getRange(
-      row++,
-      2
-    )
+    .getRange(row++, 2)
     .setFormula(
 
       nPctFormula_(
+
         `COUNTIF(${urgency},"*Elective*")`,
+
         totalDenominator
+
       )
 
     );
@@ -2456,10 +2508,7 @@ function buildFormulaMUETables_(
 
 
   sh
-    .getRange(
-      row++,
-      2
-    )
+    .getRange(row++, 2)
     .setFormula(
 
       nPctFormula_(
@@ -2479,7 +2528,7 @@ function buildFormulaMUETables_(
 
   /********************************************************************
    *
-   * TABLE 2
+   * TABLE 2 - APIXABAN USE
    *
    ********************************************************************/
   row += 3;
@@ -2500,10 +2549,7 @@ function buildFormulaMUETables_(
 
 
   sh
-    .getRange(
-      row,
-      1
-    )
+    .getRange(row, 1)
     .setFormula(
 
       `="Table 2: Apixaban Use (n="&` +
@@ -2544,15 +2590,15 @@ function buildFormulaMUETables_(
 
 
   sh
-    .getRange(
-      row++,
-      2
-    )
+    .getRange(row++, 2)
     .setFormula(
 
       nPctFormula_(
+
         `COUNTIF(${indication},"Yes")`,
+
         totalDenominator
+
       )
 
     );
@@ -2566,28 +2612,25 @@ function buildFormulaMUETables_(
 
 
   sh
-    .getRange(
-      row++,
-      2
-    )
+    .getRange(row++, 2)
     .setFormula(
 
       nPctFormula_(
+
         `COUNTIF(${indication},"No")`,
+
         totalDenominator
+
       )
 
     );
 
 
   /********************************************************************
-   * CONFIRMED TOTAL JOINT N
+   * DOSE APPROPRIATENESS
    ********************************************************************/
   sh
-    .getRange(
-      row,
-      1
-    )
+    .getRange(row, 1)
     .setFormula(
 
       `="Dose appropriateness among confirmed total arthroplasty patients (n="&` +
@@ -2611,104 +2654,69 @@ function buildFormulaMUETables_(
   row++;
 
 
-  /********************************************************************
-   * DOSE APPROPRIATE
-   ********************************************************************/
-  setIndentedLabel_(
-    sh,
-    row,
-    "Appropriate"
-  );
+  const doseCategories = [
 
+    "Appropriate",
 
-  const doseAppropriateCount =
+    "Inappropriate",
 
-    `COUNTIFS(${totalJoint},"Knee",${doseAssessment},"Appropriate")+` +
-
-    `COUNTIFS(${totalJoint},"Hip",${doseAssessment},"Appropriate")`;
-
-
-  sh
-    .getRange(
-      row++,
-      2
-    )
-    .setFormula(
-
-      nPctFormula_(
-        doseAppropriateCount,
-        totalJointDenominator
-      )
-
-    );
-
-
-  setIndentedLabel_(
-    sh,
-    row,
-    "Inappropriate"
-  );
-
-
-  const doseInappropriateCount =
-
-    `COUNTIFS(${totalJoint},"Knee",${doseAssessment},"Inappropriate")+` +
-
-    `COUNTIFS(${totalJoint},"Hip",${doseAssessment},"Inappropriate")`;
-
-
-  sh
-    .getRange(
-      row++,
-      2
-    )
-    .setFormula(
-
-      nPctFormula_(
-        doseInappropriateCount,
-        totalJointDenominator
-      )
-
-    );
-
-
-  setIndentedLabel_(
-    sh,
-    row,
     "Unable to determine"
+
+  ];
+
+
+  doseCategories.forEach(
+    function(category) {
+
+      setIndentedLabel_(
+        sh,
+        row,
+        category
+      );
+
+
+      const numerator =
+
+        `COUNTIFS(` +
+
+          `${totalJoint},"Knee",` +
+
+          `${doseAssessment},"${category}"` +
+
+        `)+` +
+
+        `COUNTIFS(` +
+
+          `${totalJoint},"Hip",` +
+
+          `${doseAssessment},"${category}"` +
+
+        `)`;
+
+
+      sh
+        .getRange(row, 2)
+        .setFormula(
+
+          nPctFormula_(
+            numerator,
+            totalJointDenominator
+          )
+
+        );
+
+
+      row++;
+
+    }
   );
-
-
-  const doseUnableCount =
-
-    `COUNTIFS(${totalJoint},"Knee",${doseAssessment},"Unable to determine")+` +
-
-    `COUNTIFS(${totalJoint},"Hip",${doseAssessment},"Unable to determine")`;
-
-
-  sh
-    .getRange(
-      row++,
-      2
-    )
-    .setFormula(
-
-      nPctFormula_(
-        doseUnableCount,
-        totalJointDenominator
-      )
-
-    );
 
 
   /********************************************************************
    * DURATION APPROPRIATENESS
    ********************************************************************/
   sh
-    .getRange(
-      row,
-      1
-    )
+    .getRange(row, 1)
     .setFormula(
 
       `="Duration appropriateness among confirmed total arthroplasty patients (n="&` +
@@ -2732,12 +2740,20 @@ function buildFormulaMUETables_(
   row++;
 
 
-  [
+  const durationCategories = [
+
     "Appropriate",
+
     "Too long",
+
     "Too short",
+
     "Unable to determine"
-  ].forEach(
+
+  ];
+
+
+  durationCategories.forEach(
     function(category) {
 
       setIndentedLabel_(
@@ -2747,22 +2763,31 @@ function buildFormulaMUETables_(
       );
 
 
-      const count =
+      const numerator =
 
-        `COUNTIFS(${totalJoint},"Knee",${durationAssessment},"${category}")+` +
+        `COUNTIFS(` +
 
-        `COUNTIFS(${totalJoint},"Hip",${durationAssessment},"${category}")`;
+          `${totalJoint},"Knee",` +
+
+          `${durationAssessment},"${category}"` +
+
+        `)+` +
+
+        `COUNTIFS(` +
+
+          `${totalJoint},"Hip",` +
+
+          `${durationAssessment},"${category}"` +
+
+        `)`;
 
 
       sh
-        .getRange(
-          row,
-          2
-        )
+        .getRange(row, 2)
         .setFormula(
 
           nPctFormula_(
-            count,
+            numerator,
             totalJointDenominator
           )
 
@@ -2779,10 +2804,7 @@ function buildFormulaMUETables_(
    * OVERALL REGIMEN
    ********************************************************************/
   sh
-    .getRange(
-      row,
-      1
-    )
+    .getRange(row, 1)
     .setFormula(
 
       `="Overall regimen appropriateness (n="&` +
@@ -2806,11 +2828,18 @@ function buildFormulaMUETables_(
   row++;
 
 
-  [
+  const overallCategories = [
+
     "Fully appropriate",
+
     "Inappropriate",
+
     "Unable to determine"
-  ].forEach(
+
+  ];
+
+
+  overallCategories.forEach(
     function(category) {
 
       setIndentedLabel_(
@@ -2820,22 +2849,31 @@ function buildFormulaMUETables_(
       );
 
 
-      const count =
+      const numerator =
 
-        `COUNTIFS(${totalJoint},"Knee",${overall},"${category}")+` +
+        `COUNTIFS(` +
 
-        `COUNTIFS(${totalJoint},"Hip",${overall},"${category}")`;
+          `${totalJoint},"Knee",` +
+
+          `${overall},"${category}"` +
+
+        `)+` +
+
+        `COUNTIFS(` +
+
+          `${totalJoint},"Hip",` +
+
+          `${overall},"${category}"` +
+
+        `)`;
 
 
       sh
-        .getRange(
-          row,
-          2
-        )
+        .getRange(row, 2)
         .setFormula(
 
           nPctFormula_(
-            count,
+            numerator,
             totalJointDenominator
           )
 
@@ -2849,7 +2887,7 @@ function buildFormulaMUETables_(
 
 
   /********************************************************************
-   * MEDIAN DURATION
+   * MEDIAN TREATMENT DURATION
    ********************************************************************/
   setLabel_(
     sh,
@@ -2859,23 +2897,24 @@ function buildFormulaMUETables_(
 
 
   sh
-    .getRange(
-      row++,
-      2
-    )
+    .getRange(row++, 2)
     .setFormula(
 
       filteredMedianIQRFormula_(
+
         duration,
+
         totalJoint,
+
         "0"
+
       )
 
     );
 
 
   /********************************************************************
-   * MEDIAN RX QUANTITY
+   * PRESCRIPTION QUANTITY
    ********************************************************************/
   setLabel_(
     sh,
@@ -2885,16 +2924,17 @@ function buildFormulaMUETables_(
 
 
   sh
-    .getRange(
-      row++,
-      2
-    )
+    .getRange(row++, 2)
     .setFormula(
 
       filteredMedianIQRFormula_(
+
         rxQuantity,
+
         totalJoint,
+
         "0"
+
       )
 
     );
@@ -2912,21 +2952,33 @@ function buildFormulaMUETables_(
 
   const refillNumerator =
 
-    `COUNTIFS(${totalJoint},"Knee",${refills},">0")+` +
+    `COUNTIFS(` +
 
-    `COUNTIFS(${totalJoint},"Hip",${refills},">0")`;
+      `${totalJoint},"Knee",` +
+
+      `${refills},">0"` +
+
+    `)+` +
+
+    `COUNTIFS(` +
+
+      `${totalJoint},"Hip",` +
+
+      `${refills},">0"` +
+
+    `)`;
 
 
   sh
-    .getRange(
-      row++,
-      2
-    )
+    .getRange(row++, 2)
     .setFormula(
 
       nPctFormula_(
+
         refillNumerator,
+
         totalJointDenominator
+
       )
 
     );
@@ -2983,15 +3035,15 @@ function buildFormulaMUETables_(
 
 
       sh
-        .getRange(
-          row,
-          2
-        )
+        .getRange(row, 2)
         .setFormula(
 
           nPctFormula_(
+
             `COUNTIF(${item[1]},"Yes")`,
+
             totalDenominator
+
           )
 
         );
@@ -3012,7 +3064,7 @@ function buildFormulaMUETables_(
 
   /********************************************************************
    *
-   * TABLE 3
+   * TABLE 3 - HIP VS KNEE
    *
    ********************************************************************/
   row += 3;
@@ -3049,23 +3101,17 @@ function buildFormulaMUETables_(
 
 
   /********************************************************************
-   * COLUMN HEADERS - FORMULA DRIVEN N
+   * HEADERS WITH FORMULA-DRIVEN N
    ********************************************************************/
   sh
-    .getRange(
-      row,
-      1
-    )
+    .getRange(row, 1)
     .setValue(
       "Duration Assessment"
     );
 
 
   sh
-    .getRange(
-      row,
-      2
-    )
+    .getRange(row, 2)
     .setFormula(
 
       `="Total Knee Arthroplasty (n="&` +
@@ -3076,10 +3122,7 @@ function buildFormulaMUETables_(
 
 
   sh
-    .getRange(
-      row,
-      3
-    )
+    .getRange(row, 3)
     .setFormula(
 
       `="Total Hip Arthroplasty (n="&` +
@@ -3105,67 +3148,65 @@ function buildFormulaMUETables_(
 
 
   /********************************************************************
-   * APPROPRIATE / LONG / SHORT / UNABLE
+   * DURATION OUTCOMES
    ********************************************************************/
-  [
-    "Appropriate",
-    "Too long",
-    "Too short",
-    "Unable to determine"
-  ].forEach(
+  durationCategories.forEach(
     function(category) {
 
       sh
-        .getRange(
-          row,
-          1
-        )
+        .getRange(row, 1)
         .setValue(
           category + ", n (%)"
         );
 
 
       const kneeCount =
-        `COUNTIFS(${totalJoint},"Knee",${durationAssessment},"${category}")`;
 
+        `COUNTIFS(` +
 
-      const kneeDenom =
-        `COUNTIF(${totalJoint},"Knee")`;
+          `${totalJoint},"Knee",` +
+
+          `${durationAssessment},"${category}"` +
+
+        `)`;
 
 
       const hipCount =
-        `COUNTIFS(${totalJoint},"Hip",${durationAssessment},"${category}")`;
 
+        `COUNTIFS(` +
 
-      const hipDenom =
-        `COUNTIF(${totalJoint},"Hip")`;
+          `${totalJoint},"Hip",` +
+
+          `${durationAssessment},"${category}"` +
+
+        `)`;
 
 
       sh
-        .getRange(
-          row,
-          2
-        )
+        .getRange(row, 2)
         .setFormula(
 
           nPctFormula_(
+
             kneeCount,
-            kneeDenom
+
+            `COUNTIF(${totalJoint},"Knee")`
+
           )
 
         );
 
 
       sh
-        .getRange(
-          row,
-          3
-        )
+        .getRange(row, 3)
         .setFormula(
 
           nPctFormula_(
+
             hipCount,
-            hipDenom
+
+            `COUNTIF(${totalJoint},"Hip")`
+
           )
 
         );
@@ -3181,44 +3222,45 @@ function buildFormulaMUETables_(
    * MEDIAN DURATION BY PROCEDURE
    ********************************************************************/
   sh
-    .getRange(
-      row,
-      1
-    )
+    .getRange(row, 1)
     .setValue(
       "Median prescribed duration, days (IQR)"
     );
 
 
   sh
-    .getRange(
-      row,
-      2
-    )
+    .getRange(row, 2)
     .setFormula(
 
       procedureMedianIQRFormula_(
+
         duration,
+
         totalJoint,
+
         "Knee",
+
         "0"
+
       )
 
     );
 
 
   sh
-    .getRange(
-      row,
-      3
-    )
+    .getRange(row, 3)
     .setFormula(
 
       procedureMedianIQRFormula_(
+
         duration,
+
         totalJoint,
+
         "Hip",
+
         "0"
+
       )
 
     );
@@ -3231,44 +3273,45 @@ function buildFormulaMUETables_(
    * MEDIAN DEVIATION
    ********************************************************************/
   sh
-    .getRange(
-      row,
-      1
-    )
+    .getRange(row, 1)
     .setValue(
       "Median deviation from recommended duration, days (IQR)"
     );
 
 
   sh
-    .getRange(
-      row,
-      2
-    )
+    .getRange(row, 2)
     .setFormula(
 
       procedureMedianIQRFormula_(
+
         deviation,
+
         totalJoint,
+
         "Knee",
+
         "0"
+
       )
 
     );
 
 
   sh
-    .getRange(
-      row,
-      3
-    )
+    .getRange(row, 3)
     .setFormula(
 
       procedureMedianIQRFormula_(
+
         deviation,
+
         totalJoint,
+
         "Hip",
+
         "0"
+
       )
 
     );
@@ -3281,44 +3324,45 @@ function buildFormulaMUETables_(
    * MEDIAN RX QUANTITY
    ********************************************************************/
   sh
-    .getRange(
-      row,
-      1
-    )
+    .getRange(row, 1)
     .setValue(
       "Median discharge prescription quantity, tablets (IQR)"
     );
 
 
   sh
-    .getRange(
-      row,
-      2
-    )
+    .getRange(row, 2)
     .setFormula(
 
       procedureMedianIQRFormula_(
+
         rxQuantity,
+
         totalJoint,
+
         "Knee",
+
         "0"
+
       )
 
     );
 
 
   sh
-    .getRange(
-      row,
-      3
-    )
+    .getRange(row, 3)
     .setFormula(
 
       procedureMedianIQRFormula_(
+
         rxQuantity,
+
         totalJoint,
+
         "Hip",
+
         "0"
+
       )
 
     );
@@ -3327,9 +3371,6 @@ function buildFormulaMUETables_(
   row++;
 
 
-  /********************************************************************
-   * TABLE 3 BORDER
-   ********************************************************************/
   sh
     .getRange(
       table3Start,
@@ -3349,9 +3390,7 @@ function buildFormulaMUETables_(
 
   /********************************************************************
    *
-   * TABLE 4
-   *
-   * FACILITY MATCH QUALITY
+   * TABLE 4 - FACILITY MATCH QUALITY
    *
    ********************************************************************/
   row += 3;
@@ -3418,15 +3457,15 @@ function buildFormulaMUETables_(
 
 
       sh
-        .getRange(
-          row,
-          2
-        )
+        .getRange(row, 2)
         .setFormula(
 
           nPctFormula_(
+
             `COUNTIF(${matchStatus},"${item[1]}")`,
+
             totalDenominator
+
           )
 
         );
@@ -3446,7 +3485,7 @@ function buildFormulaMUETables_(
 
 
   /********************************************************************
-   * FOOTNOTE
+   * NOTES
    ********************************************************************/
   row += 3;
 
@@ -3461,18 +3500,18 @@ function buildFormulaMUETables_(
     .merge()
     .setValue(
 
-      "Note: Facility information is matched from the Ortho sheet. " +
+      "Note: Facility was matched from the Ortho sheet using DOB + " +
 
-      "DOB + gender + surgery date is used when DOB is available. " +
+      "gender + surgery date when DOB was available. When DOB was " +
 
-      "If DOB is unavailable in Sheet1, age + gender + surgery date is used. " +
+      "unavailable, age + gender + surgery date was used. Only patients " +
 
-      "Only patients already included in Sheet1 are counted."
+      "already included in Sheet1 were counted."
 
     )
-    .setWrap(true)
     .setFontSize(9)
-    .setFontStyle("italic");
+    .setFontStyle("italic")
+    .setWrap(true);
 
 
   row++;
@@ -3488,22 +3527,20 @@ function buildFormulaMUETables_(
     .merge()
     .setValue(
 
-      "Duration standard used for this MUE: " +
+      "Duration standard used for the MUE: apixaban 2.5 mg twice daily; " +
 
-      "apixaban 2.5 mg twice daily; " +
+      "12 days following total knee arthroplasty and 35 days following " +
 
-      "12 days following total knee arthroplasty and " +
-
-      "35 days following total hip arthroplasty."
+      "total hip arthroplasty."
 
     )
-    .setWrap(true)
     .setFontSize(9)
-    .setFontStyle("italic");
+    .setFontStyle("italic")
+    .setWrap(true);
 
 
   /********************************************************************
-   * FINAL FORMATTING
+   * GENERAL FORMATTING
    ********************************************************************/
   sh
     .getDataRange()
@@ -3514,19 +3551,19 @@ function buildFormulaMUETables_(
 
   sh.setColumnWidth(
     1,
-    440
+    450
   );
 
 
   sh.setColumnWidth(
     2,
-    200
+    205
   );
 
 
   sh.setColumnWidth(
     3,
-    200
+    205
   );
 
 
@@ -3546,14 +3583,13 @@ function buildFormulaMUETables_(
 
 /**********************************************************************
  *
- * FORMULA HELPER:
- * n (%)
+ * FORMULA: n (%)
  *
- * Example cell output:
+ * Example output:
  *
  * 19 (40.4)
  *
- * But the CELL CONTAINS THE EQUATION.
+ * But the cell contains the full formula.
  *
  **********************************************************************/
 function nPctFormula_(
@@ -3588,64 +3624,21 @@ function nPctFormula_(
 
 /**********************************************************************
  *
- * FORMULA HELPER:
- * MEDIAN (IQR)
+ * FORMULA: MEDIAN (IQR)
  *
  **********************************************************************/
 function medianIQRFormula_(
   range,
-  numberFormat
+  format
 ) {
 
-  const valid =
-    `FILTER(${range},ISNUMBER(${range}))`;
-
-
-  return (
-
-    `=IFERROR(` +
-
-      `TEXT(MEDIAN(${valid}),"${numberFormat}")&` +
-
-      `" ("&` +
-
-      `TEXT(QUARTILE.INC(${valid},1),"${numberFormat}")&` +
-
-      `"-"&` +
-
-      `TEXT(QUARTILE.INC(${valid},3),"${numberFormat}")&` +
-
-      `")",` +
-
-      `"—"` +
-
-    `)`
-
-  );
-
-}
-
-
-/**********************************************************************
- *
- * MEDIAN IQR FOR CONFIRMED TOTAL JOINT PATIENTS
- *
- **********************************************************************/
-function filteredMedianIQRFormula_(
-  valueRange,
-  procedureRange,
-  numberFormat
-) {
-
-  const valid =
+  const data =
 
     `FILTER(` +
 
-      `${valueRange},` +
+      `${range},` +
 
-      `ISNUMBER(${valueRange}),` +
-
-      `((${procedureRange}="Knee")+(${procedureRange}="Hip"))>0` +
+      `ISNUMBER(${range})` +
 
     `)`;
 
@@ -3654,15 +3647,33 @@ function filteredMedianIQRFormula_(
 
     `=IFERROR(` +
 
-      `TEXT(MEDIAN(${valid}),"${numberFormat}")&` +
+      `TEXT(` +
+
+        `MEDIAN(${data}),` +
+
+        `"${format}"` +
+
+      `)&` +
 
       `" ("&` +
 
-      `TEXT(QUARTILE.INC(${valid},1),"${numberFormat}")&` +
+      `TEXT(` +
+
+        `QUARTILE.INC(${data},1),` +
+
+        `"${format}"` +
+
+      `)&` +
 
       `"-"&` +
 
-      `TEXT(QUARTILE.INC(${valid},3),"${numberFormat}")&` +
+      `TEXT(` +
+
+        `QUARTILE.INC(${data},3),` +
+
+        `"${format}"` +
+
+      `)&` +
 
       `")",` +
 
@@ -3677,17 +3688,74 @@ function filteredMedianIQRFormula_(
 
 /**********************************************************************
  *
- * MEDIAN IQR BY KNEE / HIP
+ * MEDIAN/IQR FOR ALL CONFIRMED TOTAL JOINT PATIENTS
+ *
+ **********************************************************************/
+function filteredMedianIQRFormula_(
+  valueRange,
+  procedureRange,
+  format
+) {
+
+  const data =
+
+    `FILTER(` +
+
+      `${valueRange},` +
+
+      `ISNUMBER(${valueRange}),` +
+
+      `((` +
+
+        `${procedureRange}="Knee"` +
+
+      `)+(` +
+
+        `${procedureRange}="Hip"` +
+
+      `))>0)` +
+
+    `)`;
+
+
+  return (
+
+    `=IFERROR(` +
+
+      `TEXT(MEDIAN(${data}),"${format}")&` +
+
+      `" ("&` +
+
+      `TEXT(QUARTILE.INC(${data},1),"${format}")&` +
+
+      `"-"&` +
+
+      `TEXT(QUARTILE.INC(${data},3),"${format}")&` +
+
+      `")",` +
+
+      `"—"` +
+
+    `)`
+
+  );
+
+}
+
+
+/**********************************************************************
+ *
+ * MEDIAN/IQR FOR KNEE OR HIP
  *
  **********************************************************************/
 function procedureMedianIQRFormula_(
   valueRange,
   procedureRange,
   procedure,
-  numberFormat
+  format
 ) {
 
-  const valid =
+  const data =
 
     `FILTER(` +
 
@@ -3704,19 +3772,59 @@ function procedureMedianIQRFormula_(
 
     `=IFERROR(` +
 
-      `TEXT(MEDIAN(${valid}),"${numberFormat}")&` +
+      `TEXT(MEDIAN(${data}),"${format}")&` +
 
       `" ("&` +
 
-      `TEXT(QUARTILE.INC(${valid},1),"${numberFormat}")&` +
+      `TEXT(QUARTILE.INC(${data},1),"${format}")&` +
 
       `"-"&` +
 
-      `TEXT(QUARTILE.INC(${valid},3),"${numberFormat}")&` +
+      `TEXT(QUARTILE.INC(${data},3),"${format}")&` +
 
       `")",` +
 
       `"—"` +
+
+    `)`
+
+  );
+
+}
+
+
+/**********************************************************************
+ *
+ * EXTRACT NUMBER
+ *
+ * Examples:
+ *
+ * 74 Years → 74
+ * 2.5 mg   → 2.5
+ * 60 tabs  → 60
+ *
+ **********************************************************************/
+function numberFormula_(
+  reference
+) {
+
+  return (
+
+    `=IFERROR(` +
+
+      `VALUE(` +
+
+        `REGEXEXTRACT(` +
+
+          `TO_TEXT(${reference}),` +
+
+          `"-?[0-9]+\\.?[0-9]*"` +
+
+        `)` +
+
+      `),` +
+
+      `""` +
 
     `)`
 
@@ -3789,40 +3897,6 @@ function yesNoFormula_(
 
 /**********************************************************************
  *
- * NUMBER EXTRACTION FORMULA
- *
- **********************************************************************/
-function numberFormula_(
-  reference
-) {
-
-  return (
-
-    `=IFERROR(` +
-
-      `VALUE(` +
-
-        `REGEXEXTRACT(` +
-
-          `TO_TEXT(${reference}),` +
-
-          `"-?[0-9]+\\.?[0-9]*"` +
-
-        `)` +
-
-      `),` +
-
-      `""` +
-
-    `)`
-
-  );
-
-}
-
-
-/**********************************************************************
- *
  * FIND HEADER
  *
  * RETURNS 1-BASED COLUMN NUMBER
@@ -3864,9 +3938,7 @@ function findMUEHeader_(
       );
 
 
-    if (
-      index !== -1
-    ) {
+    if (index !== -1) {
 
       return index + 1;
 
@@ -3879,7 +3951,7 @@ function findMUEHeader_(
 
     throw new Error(
 
-      "Could not find required column. Expected one of:\n\n" +
+      "Could not find required column.\n\nExpected one of:\n" +
 
       candidates.join("\n")
 
@@ -3917,7 +3989,7 @@ function normalizeMUEHeader_(
 
 /**********************************************************************
  *
- * COLUMN NUMBER → COLUMN LETTER
+ * COLUMN NUMBER → LETTER
  *
  **********************************************************************/
 function columnLetter_(
@@ -3985,7 +4057,7 @@ function quoteSheetName_(
 
 /**********************************************************************
  *
- * CHECK BLANK ROW
+ * BLANK ROW CHECK
  *
  **********************************************************************/
 function mueRowIsBlank_(
@@ -4008,7 +4080,7 @@ function mueRowIsBlank_(
 
 /**********************************************************************
  *
- * RESET OUTPUT SHEET
+ * CREATE OR CLEAR OUTPUT SHEET
  *
  **********************************************************************/
 function resetMUETableSheet_(
@@ -4034,7 +4106,7 @@ function resetMUETableSheet_(
   else {
 
     /******************************************************************
-     * REMOVE MERGED CELLS
+     * REMOVE MERGES
      ******************************************************************/
     sh
       .getDataRange()
@@ -4049,7 +4121,7 @@ function resetMUETableSheet_(
 
 
     /******************************************************************
-     * REMOVE CHARTS IF ANY
+     * DELETE CHARTS
      ******************************************************************/
     sh
       .getCharts()
@@ -4076,7 +4148,7 @@ function resetMUETableSheet_(
 
 /**********************************************************************
  *
- * TABLE FORMATTING
+ * TABLE TITLE STYLE
  *
  **********************************************************************/
 function styleMUETableTitle_(
@@ -4084,28 +4156,19 @@ function styleMUETableTitle_(
 ) {
 
   range
-    .setBackground(
-      "#0B3048"
-    )
-    .setFontColor(
-      "#FFFFFF"
-    )
-    .setFontWeight(
-      "bold"
-    )
-    .setFontSize(
-      12
-    )
-    .setHorizontalAlignment(
-      "center"
-    );
+    .setBackground("#0B3048")
+    .setFontColor("#FFFFFF")
+    .setFontWeight("bold")
+    .setFontSize(12)
+    .setHorizontalAlignment("center")
+    .setVerticalAlignment("middle");
 
 }
 
 
 /**********************************************************************
  *
- * STANDARD LABEL
+ * NORMAL LABEL
  *
  **********************************************************************/
 function setLabel_(
@@ -4115,13 +4178,8 @@ function setLabel_(
 ) {
 
   sheet
-    .getRange(
-      row,
-      1
-    )
-    .setValue(
-      label
-    );
+    .getRange(row, 1)
+    .setValue(label);
 
 }
 
@@ -4138,10 +4196,7 @@ function setIndentedLabel_(
 ) {
 
   sheet
-    .getRange(
-      row,
-      1
-    )
+    .getRange(row, 1)
     .setValue(
       "     " + label
     );
@@ -4173,19 +4228,15 @@ function setSection_(
         ""
       ]
     ])
-    .setFontWeight(
-      "bold"
-    )
-    .setBackground(
-      "#EAF2F8"
-    );
+    .setFontWeight("bold")
+    .setBackground("#EAF2F8");
 
 }
 
 
 /**********************************************************************
  *
- * TWO COLUMN BORDER
+ * TABLE BORDER
  *
  **********************************************************************/
 function applyTwoColumnBorder_(
@@ -4209,5 +4260,26 @@ function applyTwoColumnBorder_(
       true,
       true
     );
+
+}
+
+
+/**********************************************************************
+ *
+ * OPTIONAL MENU
+ *
+ **********************************************************************/
+function onOpen() {
+
+  SpreadsheetApp
+    .getUi()
+    .createMenu(
+      "Apixaban MUE"
+    )
+    .addItem(
+      "Build MUE Tables",
+      "buildMUETablesWithFormulas"
+    )
+    .addToUi();
 
 }
