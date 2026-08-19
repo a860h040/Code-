@@ -1,953 +1,865 @@
 /**********************************************************************
- * APIXABAN MUE - COMPLETE ANALYSIS + ALL GRAPHS
+ * APIXABAN MUE - TABLE BUILDER
  *
- * SOURCE SHEET:
- * Sheet1
+ * SOURCE DATA
+ * ------------------------------------------------------------
+ * Sheet1 = INCLUDED study population
+ *          Example: 80 included patients
  *
- * THIS SCRIPT CREATES:
- *
- * 1. MUE Audit
- * 2. MUE Duration Appropriate
- * 3. MUE Duration Distribution
- * 4. MUE Regimen Adherence
- * 5. MUE Rx Quantity
- * 6. MUE Duration Deviation
- * 7. MUE Overall Regimen Pie
- *
- * MUE STANDARD:
- *
- * Apixaban dose = 2.5 mg BID
- * Knee replacement = 12 days
- * Hip replacement  = 35 days
+ * Ortho  = Larger source population containing facility information
+ *          Example: 213 potential patients
  *
  * IMPORTANT:
- * Sheet1 is NOT modified.
+ * The script ONLY loops through patients in Sheet1.
+ * Therefore, excluded patients in Ortho are NEVER added back into
+ * the study population.
  *
- * Run:
  *
- * buildAllMUEGraphs
+ * FACILITY MATCHING
+ * ------------------------------------------------------------
+ * Preferred:
+ *   DOB + Gender + Surgery Date
+ *
+ * Fallback if Sheet1 does not contain DOB:
+ *   Age + Gender + Surgery Date
+ *
+ * If multiple possible matches have different facilities, the
+ * patient is flagged as ambiguous instead of guessed.
+ *
+ *
+ * OUTPUT SHEETS
+ * ------------------------------------------------------------
+ * 1. MUE Tables
+ * 2. Facility Match Audit
+ *
+ *
+ * TABLES CREATED
+ * ------------------------------------------------------------
+ * Table 1: Baseline Characteristics
+ * Table 2: Apixaban Use
+ * Table 3: Duration Appropriateness by Procedure Type
+ *
+ *
+ * FDA-LABELED APixaban STANDARD USED FOR DURATION ANALYSIS
+ * ------------------------------------------------------------
+ * Total knee arthroplasty:
+ *   Apixaban 2.5 mg BID for 12 days
+ *
+ * Total hip arthroplasty:
+ *   Apixaban 2.5 mg BID for 35 days
+ *
+ *
+ * IMPORTANT CLINICAL RULE
+ * ------------------------------------------------------------
+ * Duration appropriateness is assessed only when the procedure
+ * clearly identifies a total hip/knee arthroplasty / total joint.
+ *
+ * Generic "Hip Procedures Post-Op" or "Knee Procedures Post-Op"
+ * records are NOT automatically assumed to be total arthroplasties.
+ *
  **********************************************************************/
 
 
-const MUE = {
+const MUE_TABLE_CONFIG = {
 
   SOURCE_SHEET: "Sheet1",
 
-  AUDIT_SHEET: "MUE Audit",
+  ORTHO_SHEET: "Ortho",
 
-  KNEE_DAYS: 12,
+  OUTPUT_SHEET: "MUE Tables",
 
-  HIP_DAYS: 35,
+  AUDIT_SHEET: "Facility Match Audit",
 
-  DOSE_MG: 2.5,
+  APPROPRIATE_DOSE_MG: 2.5,
+
+  KNEE_DURATION_DAYS: 12,
+
+  HIP_DURATION_DAYS: 35,
 
   FDA_URL:
-    "https://www.accessdata.fda.gov/drugsatfda_docs/label/2025/220073s000lbl.pdf",
+    "https://www.accessdata.fda.gov/drugsatfda_docs/label/2025/220073s000lbl.pdf"
 
-  SHEETS: {
-
-    DURATION_APPROPRIATENESS:
-      "MUE Duration Appropriate",
-
-    DURATION_DISTRIBUTION:
-      "MUE Duration Distribution",
-
-    REGIMEN_ADHERENCE:
-      "MUE Regimen Adherence",
-
-    RX_QUANTITY:
-      "MUE Rx Quantity",
-
-    DURATION_DEVIATION:
-      "MUE Duration Deviation",
-
-    OVERALL_PIE:
-      "MUE Overall Regimen Pie"
-  }
 };
 
 
 /**********************************************************************
- * MASTER FUNCTION
  *
- * RUN THIS FUNCTION
+ * MAIN FUNCTION
+ *
+ * RUN THIS:
+ *
+ * buildMUETables
+ *
  **********************************************************************/
-function buildAllMUEGraphs() {
+function buildMUETables() {
 
-  const ctx = buildMUEAudit_();
+  const ss =
+    SpreadsheetApp.getActiveSpreadsheet();
 
-  if (!ctx) {
+
+  const sourceSheet =
+    ss.getSheetByName(
+      MUE_TABLE_CONFIG.SOURCE_SHEET
+    );
+
+
+  const orthoSheet =
+    ss.getSheetByName(
+      MUE_TABLE_CONFIG.ORTHO_SHEET
+    );
+
+
+  /********************************************************************
+   * CHECK SHEETS
+   ********************************************************************/
+  if (!sourceSheet) {
+
+    SpreadsheetApp
+      .getUi()
+      .alert(
+        'Could not find the sheet "' +
+        MUE_TABLE_CONFIG.SOURCE_SHEET +
+        '".'
+      );
+
     return;
   }
 
 
-  buildDurationAppropriatenessSheet_(ctx);
+  if (!orthoSheet) {
 
-  buildDurationDistributionSheet_(ctx);
+    SpreadsheetApp
+      .getUi()
+      .alert(
+        'Could not find the sheet "' +
+        MUE_TABLE_CONFIG.ORTHO_SHEET +
+        '".\n\n' +
+        'The facility data must be located in a sheet named "Ortho".'
+      );
 
-  buildRegimenAdherenceSheet_(ctx);
+    return;
+  }
 
-  buildRxQuantitySheet_(ctx);
 
-  buildDurationDeviationSheet_(ctx);
+  /********************************************************************
+   * READ DATA
+   ********************************************************************/
+  const sourceData =
+    sourceSheet
+      .getDataRange()
+      .getValues();
 
-  buildOverallPieSheet_(ctx);
+
+  const orthoData =
+    orthoSheet
+      .getDataRange()
+      .getValues();
+
+
+  if (sourceData.length < 2) {
+
+    SpreadsheetApp
+      .getUi()
+      .alert(
+        "Sheet1 does not contain patient data."
+      );
+
+    return;
+  }
+
+
+  if (orthoData.length < 2) {
+
+    SpreadsheetApp
+      .getUi()
+      .alert(
+        "Ortho does not contain patient data."
+      );
+
+    return;
+  }
+
+
+  const sourceHeaders =
+    sourceData[0];
+
+
+  const orthoHeaders =
+    orthoData[0];
+
+
+  /********************************************************************
+   * FIND SHEET1 COLUMNS
+   ********************************************************************/
+  const S = {
+
+    dob:
+      findTableHeader_(
+        sourceHeaders,
+        [
+          "DOB",
+          "Date of Birth",
+          "Date of birth",
+          "Birth Date",
+          "Birth date"
+        ],
+        false
+      ),
+
+
+    age:
+      findTableHeader_(
+        sourceHeaders,
+        [
+          "Age",
+          "AGE"
+        ],
+        true
+      ),
+
+
+    gender:
+      findTableHeader_(
+        sourceHeaders,
+        [
+          "Gender",
+          "GENDER",
+          "Sex"
+        ],
+        true
+      ),
+
+
+    bmi:
+      findTableHeader_(
+        sourceHeaders,
+        [
+          "BMI (kg/m2)",
+          "BMI",
+          "BMI (kg/m²)"
+        ],
+        false
+      ),
+
+
+    surgeryType:
+      findTableHeader_(
+        sourceHeaders,
+        [
+          "Type of surgery",
+          "Surgery Type",
+          "Procedure Type",
+          "Procedure"
+        ],
+        true
+      ),
+
+
+    surgeryDate:
+      findTableHeader_(
+        sourceHeaders,
+        [
+          "Date and time of surgery",
+          "Date of surgery",
+          "Surgery Date",
+          "Surgery date/time"
+        ],
+        true
+      ),
+
+
+    primaryRevision:
+      findTableHeader_(
+        sourceHeaders,
+        [
+          "Primary versus revision procedure",
+          "Primary vs revision procedure",
+          "Primary/Revision"
+        ],
+        false
+      ),
+
+
+    urgency:
+      findTableHeader_(
+        sourceHeaders,
+        [
+          "Elective versus urgent procedure",
+          "Elective vs urgent procedure",
+          "Procedure urgency"
+        ],
+        false
+      ),
+
+
+    indication:
+      findTableHeader_(
+        sourceHeaders,
+        [
+          "Indication documented",
+          "Indication"
+        ],
+        false
+      ),
+
+
+    dischargeDose:
+      findTableHeader_(
+        sourceHeaders,
+        [
+          "Discharge dose",
+          "Discharge Dose"
+        ],
+        true
+      ),
+
+
+    dischargeFrequency:
+      findTableHeader_(
+        sourceHeaders,
+        [
+          "Discharge frequency",
+          "Discharge Frequency"
+        ],
+        true
+      ),
+
+
+    rxQuantity:
+      findTableHeader_(
+        sourceHeaders,
+        [
+          "Prescription quantity",
+          "Prescription Quantity"
+        ],
+        false
+      ),
+
+
+    refills:
+      findTableHeader_(
+        sourceHeaders,
+        [
+          "Number of refills",
+          "Refills"
+        ],
+        false
+      ),
+
+
+    duration:
+      findTableHeader_(
+        sourceHeaders,
+        [
+          "Number of outpatient days supplied (total treatment duration)",
+          "Total treatment duration",
+          "Total Treatment Duration",
+          "Treatment duration"
+        ],
+        true
+      ),
+
+
+    aspirin:
+      findTableHeader_(
+        sourceHeaders,
+        [
+          "Aspirin"
+        ],
+        false
+      ),
+
+
+    antiplatelet:
+      findTableHeader_(
+        sourceHeaders,
+        [
+          "Clopidogrel or other antiplatelets",
+          "Clopidogrel",
+          "Other antiplatelets"
+        ],
+        false
+      ),
+
+
+    nsaid:
+      findTableHeader_(
+        sourceHeaders,
+        [
+          "NSAIDs",
+          "NSAID"
+        ],
+        false
+      ),
+
+
+    otherAnticoagulant:
+      findTableHeader_(
+        sourceHeaders,
+        [
+          "Other anticoagulants",
+          "Other anticoagulant"
+        ],
+        false
+      ),
+
+
+    heparin:
+      findTableHeader_(
+        sourceHeaders,
+        [
+          "Heparin or enoxaparin",
+          "Heparin/Enoxaparin",
+          "Enoxaparin"
+        ],
+        false
+      )
+
+  };
+
+
+  /********************************************************************
+   * FIND ORTHO COLUMNS
+   ********************************************************************/
+  const O = {
+
+    dob:
+      findTableHeader_(
+        orthoHeaders,
+        [
+          "DOB",
+          "Date of Birth",
+          "Date of birth"
+        ],
+        false
+      ),
+
+
+    age:
+      findTableHeader_(
+        orthoHeaders,
+        [
+          "AGE",
+          "Age"
+        ],
+        false
+      ),
+
+
+    gender:
+      findTableHeader_(
+        orthoHeaders,
+        [
+          "GENDER",
+          "Gender",
+          "Sex"
+        ],
+        true
+      ),
+
+
+    surgeryDate:
+      findTableHeader_(
+        orthoHeaders,
+        [
+          "ORIG_ORDER_DT_TM",
+          "Date and time of surgery",
+          "Date of surgery",
+          "Surgery Date",
+          "Surgery date/time"
+        ],
+        true
+      ),
+
+
+    facility:
+      findTableHeader_(
+        orthoHeaders,
+        [
+          "E_LOC_FACILITY_DISP",
+          "Facility",
+          "FACILITY",
+          "Campus",
+          "Hospital"
+        ],
+        true
+      )
+
+  };
+
+
+  /********************************************************************
+   * BUILD ORTHO MATCH INDEX
+   ********************************************************************/
+  const orthoIndex =
+    buildOrthoIndex_(
+      orthoData,
+      O,
+      ss.getSpreadsheetTimeZone()
+    );
+
+
+  /********************************************************************
+   * BUILD INCLUDED PATIENT RECORDS
+   *
+   * ONLY patients in Sheet1 are processed.
+   ********************************************************************/
+  const records = [];
+
+
+  for (
+    let i = 1;
+    i < sourceData.length;
+    i++
+  ) {
+
+    const row =
+      sourceData[i];
+
+
+    if (
+      isEntireRowBlank_(row)
+    ) {
+
+      continue;
+    }
+
+
+    const record =
+      buildIncludedPatientRecord_(
+        row,
+        i + 1,
+        S,
+        orthoIndex,
+        ss.getSpreadsheetTimeZone()
+      );
+
+
+    records.push(
+      record
+    );
+
+  }
+
+
+  if (
+    records.length === 0
+  ) {
+
+    SpreadsheetApp
+      .getUi()
+      .alert(
+        "No included patient records were found in Sheet1."
+      );
+
+    return;
+  }
+
+
+  /********************************************************************
+   * CREATE MATCH AUDIT
+   ********************************************************************/
+  buildFacilityAuditSheet_(
+    ss,
+    records,
+    sourceData.length - 1,
+    orthoData.length - 1
+  );
+
+
+  /********************************************************************
+   * CREATE TABLES
+   ********************************************************************/
+  buildMUEOutputTables_(
+    ss,
+    records
+  );
 
 
   SpreadsheetApp.flush();
 
 
-  SpreadsheetApp
-    .getActiveSpreadsheet()
-    .setActiveSheet(
+  ss.setActiveSheet(
+    ss.getSheetByName(
+      MUE_TABLE_CONFIG.OUTPUT_SHEET
+    )
+  );
 
-      SpreadsheetApp
-        .getActiveSpreadsheet()
-        .getSheetByName(
-          MUE.SHEETS.DURATION_APPROPRIATENESS
-        )
 
-    );
+  /********************************************************************
+   * MATCH SUMMARY
+   ********************************************************************/
+  const matched =
+    records.filter(
+      r =>
+        r.matchStatus.indexOf(
+          "Matched"
+        ) === 0
+    ).length;
+
+
+  const ambiguous =
+    records.filter(
+      r =>
+        r.matchStatus ===
+        "Ambiguous"
+    ).length;
+
+
+  const unmatched =
+    records.filter(
+      r =>
+        r.matchStatus ===
+        "No match"
+    ).length;
 
 
   SpreadsheetApp
     .getUi()
     .alert(
 
-      "MUE analysis completed.\n\n" +
+      "MUE tables completed.\n\n" +
 
-      "Created/updated:\n" +
+      "Included patients analyzed: " +
+      records.length +
+      "\n" +
 
-      "• MUE Audit\n" +
-      "• MUE Duration Appropriate\n" +
-      "• MUE Duration Distribution\n" +
-      "• MUE Regimen Adherence\n" +
-      "• MUE Rx Quantity\n" +
-      "• MUE Duration Deviation\n" +
-      "• MUE Overall Regimen Pie\n\n" +
+      "Facility matched: " +
+      matched +
+      "\n" +
 
-      "Sheet1 was not changed."
+      "Ambiguous: " +
+      ambiguous +
+      "\n" +
+
+      "No facility match: " +
+      unmatched +
+      "\n\n" +
+
+      "Created:\n" +
+
+      "• MUE Tables\n" +
+
+      "• Facility Match Audit\n\n" +
+
+      "Sheet1 and Ortho were not changed."
 
     );
+
 }
 
 
 /**********************************************************************
  *
- * BUILD MASTER MUE AUDIT
+ * BUILD ORTHO INDEX
  *
  **********************************************************************/
-function buildMUEAudit_() {
-
-  const ss =
-    SpreadsheetApp.getActiveSpreadsheet();
-
-
-  const src =
-    ss.getSheetByName(
-      MUE.SOURCE_SHEET
-    );
-
-
-  if (!src) {
-
-    SpreadsheetApp
-      .getUi()
-      .alert(
-        'Could not find source sheet "' +
-        MUE.SOURCE_SHEET +
-        '".'
-      );
-
-    return null;
-  }
-
-
-  const lastRow =
-    src.getLastRow();
-
-
-  const lastCol =
-    src.getLastColumn();
-
-
-  if (lastRow < 2) {
-
-    SpreadsheetApp
-      .getUi()
-      .alert(
-        "No patient data were found in Sheet1."
-      );
-
-    return null;
-  }
-
-
-  /********************************************************************
-   * READ HEADERS
-   ********************************************************************/
-  const headers =
-
-    src
-      .getRange(
-        1,
-        1,
-        1,
-        lastCol
-      )
-      .getDisplayValues()[0];
-
-
-  /********************************************************************
-   * FIND IMPORTANT COLUMNS
-   ********************************************************************/
-  const surgeryCol =
-    findHeader_(
-      headers,
-      [
-        "Type of surgery",
-        "Surgery Type",
-        "Procedure Type",
-        "Procedure"
-      ]
-    );
-
-
-  const durationCol =
-    findHeader_(
-      headers,
-      [
-        "Number of outpatient days supplied (total treatment duration)",
-        "Total treatment duration",
-        "Total Treatment Duration",
-        "Total treatment duration (days)",
-        "Total Duration",
-        "Treatment duration"
-      ]
-    );
-
-
-  const doseCol =
-    findHeader_(
-      headers,
-      [
-        "Discharge dose",
-        "Discharge Dose",
-        "Apixaban discharge dose",
-        "Dose at discharge"
-      ]
-    );
-
-
-  const frequencyCol =
-    findHeader_(
-      headers,
-      [
-        "Discharge frequency",
-        "Discharge Frequency",
-        "Frequency at discharge",
-        "Frequency"
-      ]
-    );
-
-
-  const quantityCol =
-    findHeader_(
-      headers,
-      [
-        "Prescription quantity",
-        "Prescription Quantity",
-        "Discharge prescription quantity",
-        "Discharge Quantity",
-        "Quantity"
-      ]
-    );
-
-
-  /********************************************************************
-   * CHECK MISSING COLUMNS
-   ********************************************************************/
-  const missing = [];
-
-
-  if (!surgeryCol) {
-
-    missing.push(
-      "Type of surgery"
-    );
-  }
-
-
-  if (!durationCol) {
-
-    missing.push(
-      "Number of outpatient days supplied (total treatment duration)"
-    );
-  }
-
-
-  if (!doseCol) {
-
-    missing.push(
-      "Discharge dose"
-    );
-  }
-
-
-  if (!frequencyCol) {
-
-    missing.push(
-      "Discharge frequency"
-    );
-  }
-
-
-  if (!quantityCol) {
-
-    missing.push(
-      "Prescription quantity"
-    );
-  }
-
-
-  if (missing.length) {
-
-    SpreadsheetApp
-      .getUi()
-      .alert(
-
-        "Could not find these columns:\n\n" +
-
-        missing.join("\n")
-
-      );
-
-    return null;
-  }
-
-
-  /********************************************************************
-   * CREATE AUDIT SHEET
-   ********************************************************************/
-  const audit =
-    resetSheet_(
-      ss,
-      MUE.AUDIT_SHEET
-    );
-
-
-  /********************************************************************
-   * COLUMN LETTERS
-   ********************************************************************/
-  const safeSrc =
-
-    "'" +
-    src
-      .getName()
-      .replace(/'/g, "''") +
-    "'";
-
-
-  const surgeryL =
-    colLetter_(
-      surgeryCol
-    );
-
-
-  const durationL =
-    colLetter_(
-      durationCol
-    );
-
-
-  const doseL =
-    colLetter_(
-      doseCol
-    );
-
-
-  const frequencyL =
-    colLetter_(
-      frequencyCol
-    );
-
-
-  const quantityL =
-    colLetter_(
-      quantityCol
-    );
-
-
-  /********************************************************************
-   * TITLE
-   ********************************************************************/
-  audit
-    .getRange("A1:K1")
-    .merge()
-    .setValue(
-      "Apixaban MUE Audit"
-    );
-
-
-  styleTitle_(
-    audit.getRange("A1:K1")
-  );
-
-
-  audit
-    .getRange("A2:K2")
-    .merge()
-    .setValue(
-      "Formula-driven patient audit used by all MUE graphs. " +
-      "Only confirmed total hip/knee arthroplasty records are included."
-    )
-    .setWrap(true);
-
-
-  /********************************************************************
-   * HEADERS
-   ********************************************************************/
-  audit
-    .getRange("A4:K4")
-    .setValues([
-      [
-        "Source Row",
-        "Procedure",
-        "Duration (days)",
-        "Dose (mg)",
-        "Frequency",
-        "Rx Quantity",
-        "Recommended Duration",
-        "Deviation (days)",
-        "Duration Assessment",
-        "Dose Assessment",
-        "Overall Regimen"
-      ]
-    ]);
-
-
-  styleHeader_(
-    audit.getRange("A4:K4")
-  );
-
-
-  /********************************************************************
-   * FORMULAS
-   ********************************************************************/
-  const formulas = [];
+function buildOrthoIndex_(
+  data,
+  cols,
+  timezone
+) {
+
+  const dobIndex = {};
+
+  const ageIndex = {};
 
 
   for (
-    let sourceRow = 2;
-    sourceRow <= lastRow;
-    sourceRow++
+    let i = 1;
+    i < data.length;
+    i++
   ) {
 
-    const surgeryRef =
-      `${safeSrc}!${surgeryL}${sourceRow}`;
+    const row =
+      data[i];
 
 
-    const durationRef =
-      `${safeSrc}!${durationL}${sourceRow}`;
+    if (
+      isEntireRowBlank_(row)
+    ) {
+
+      continue;
+    }
 
 
-    const doseRef =
-      `${safeSrc}!${doseL}${sourceRow}`;
+    const gender =
+      normalizeGender_(
+        getColValue_(
+          row,
+          cols.gender
+        )
+      );
 
 
-    const frequencyRef =
-      `${safeSrc}!${frequencyL}${sourceRow}`;
+    const surgeryValue =
+      getColValue_(
+        row,
+        cols.surgeryDate
+      );
 
 
-    const quantityRef =
-      `${safeSrc}!${quantityL}${sourceRow}`;
+    const surgeryDate =
+      normalizeDateKey_(
+        surgeryValue,
+        timezone
+      );
 
 
-    const outRow =
-      sourceRow + 3;
+    const surgeryDateTime =
+      normalizeDateTimeNumber_(
+        surgeryValue
+      );
+
+
+    const dob =
+      cols.dob !== null
+        ?
+        normalizeDateKey_(
+          getColValue_(
+            row,
+            cols.dob
+          ),
+          timezone
+        )
+        :
+        "";
+
+
+    const age =
+      cols.age !== null
+        ?
+        normalizeAge_(
+          getColValue_(
+            row,
+            cols.age
+          )
+        )
+        :
+        null;
+
+
+    const rawFacility =
+      cleanText_(
+        getColValue_(
+          row,
+          cols.facility
+        )
+      );
+
+
+    const facility =
+      friendlyFacility_(
+        rawFacility
+      );
+
+
+    if (
+      !gender ||
+      !surgeryDate
+    ) {
+
+      continue;
+    }
+
+
+    const candidate = {
+
+      orthoRow:
+        i + 1,
+
+      dob:
+        dob,
+
+      age:
+        age,
+
+      gender:
+        gender,
+
+      surgeryDate:
+        surgeryDate,
+
+      surgeryDateTime:
+        surgeryDateTime,
+
+      rawFacility:
+        rawFacility,
+
+      facility:
+        facility
+
+    };
 
 
     /******************************************************************
-     * PROCEDURE
+     * DOB + GENDER + SURGERY DATE
      ******************************************************************/
-    const procedureFormula =
+    if (dob) {
 
-      `=IF(OR(` +
+      const key =
+        dob +
+        "|" +
+        gender +
+        "|" +
+        surgeryDate;
 
-      `REGEXMATCH(LOWER(TO_TEXT(${surgeryRef})),"total joint post-op knee"),` +
 
-      `REGEXMATCH(LOWER(TO_TEXT(${surgeryRef})),"total knee"),` +
+      if (!dobIndex[key]) {
 
-      `REGEXMATCH(LOWER(TO_TEXT(${surgeryRef})),"knee arthroplasty"),` +
+        dobIndex[key] = [];
 
-      `REGEXMATCH(LOWER(TO_TEXT(${surgeryRef})),"(^|[^a-z])tka([^a-z]|$)")` +
+      }
 
-      `),` +
 
-      `"Knee",` +
+      dobIndex[key].push(
+        candidate
+      );
 
-      `IF(OR(` +
-
-      `REGEXMATCH(LOWER(TO_TEXT(${surgeryRef})),"total joint post-op hip"),` +
-
-      `REGEXMATCH(LOWER(TO_TEXT(${surgeryRef})),"total hip"),` +
-
-      `REGEXMATCH(LOWER(TO_TEXT(${surgeryRef})),"hip arthroplasty"),` +
-
-      `REGEXMATCH(LOWER(TO_TEXT(${surgeryRef})),"(^|[^a-z])tha([^a-z]|$)")` +
-
-      `),` +
-
-      `"Hip",` +
-
-      `"Not included"` +
-
-      `))`;
+    }
 
 
     /******************************************************************
-     * DURATION
-     ******************************************************************/
-    const durationFormula =
-
-      `=IFERROR(` +
-
-      `VALUE(` +
-
-      `REGEXEXTRACT(` +
-
-      `TO_TEXT(${durationRef}),` +
-
-      `"-?[0-9]+\\.?[0-9]*"` +
-
-      `)` +
-
-      `),` +
-
-      `""` +
-
-      `)`;
-
-
-    /******************************************************************
-     * DOSE
-     ******************************************************************/
-    const doseFormula =
-
-      `=IFERROR(` +
-
-      `VALUE(` +
-
-      `REGEXEXTRACT(` +
-
-      `TO_TEXT(${doseRef}),` +
-
-      `"[0-9]+\\.?[0-9]*"` +
-
-      `)` +
-
-      `),` +
-
-      `""` +
-
-      `)`;
-
-
-    /******************************************************************
-     * RX QUANTITY
-     ******************************************************************/
-    const quantityFormula =
-
-      `=IFERROR(` +
-
-      `VALUE(` +
-
-      `REGEXEXTRACT(` +
-
-      `TO_TEXT(${quantityRef}),` +
-
-      `"[0-9]+\\.?[0-9]*"` +
-
-      `)` +
-
-      `),` +
-
-      `""` +
-
-      `)`;
-
-
-    /******************************************************************
-     * RECOMMENDED DURATION
-     ******************************************************************/
-    const recommendedFormula =
-
-      `=IF(` +
-
-      `B${outRow}="Knee",` +
-
-      `${MUE.KNEE_DAYS},` +
-
-      `IF(` +
-
-      `B${outRow}="Hip",` +
-
-      `${MUE.HIP_DAYS},` +
-
-      `""` +
-
-      `)` +
-
-      `)`;
-
-
-    /******************************************************************
-     * DURATION DEVIATION
+     * AGE + GENDER + SURGERY DATE
      *
-     * Actual - Recommended
+     * Used only if Sheet1 has no DOB.
      ******************************************************************/
-    const deviationFormula =
+    if (
+      age !== null
+    ) {
 
-      `=IF(` +
+      const key =
+        age +
+        "|" +
+        gender +
+        "|" +
+        surgeryDate;
 
-      `OR(` +
 
-      `B${outRow}="Not included",` +
+      if (!ageIndex[key]) {
 
-      `C${outRow}="",` +
+        ageIndex[key] = [];
 
-      `C${outRow}<=0,` +
+      }
 
-      `G${outRow}=""` +
 
-      `),` +
+      ageIndex[key].push(
+        candidate
+      );
 
-      `"",` +
-
-      `C${outRow}-G${outRow}` +
-
-      `)`;
-
-
-    /******************************************************************
-     * DURATION ASSESSMENT
-     ******************************************************************/
-    const durationAssessmentFormula =
-
-      `=IF(` +
-
-      `B${outRow}="Not included",` +
-
-      `"Not included",` +
-
-      `IF(` +
-
-      `OR(C${outRow}="",C${outRow}<=0),` +
-
-      `"Unable to determine",` +
-
-      `IF(` +
-
-      `H${outRow}=0,` +
-
-      `"Appropriate",` +
-
-      `IF(` +
-
-      `H${outRow}>0,` +
-
-      `"Too long",` +
-
-      `"Too short"` +
-
-      `)` +
-
-      `)` +
-
-      `)` +
-
-      `)`;
-
-
-    /******************************************************************
-     * DOSE ASSESSMENT
-     *
-     * Appropriate = 2.5 mg BID
-     ******************************************************************/
-    const doseAssessmentFormula =
-
-      `=IF(` +
-
-      `B${outRow}="Not included",` +
-
-      `"Not included",` +
-
-      `IF(` +
-
-      `OR(D${outRow}="",E${outRow}=""),` +
-
-      `"Unable to determine",` +
-
-      `IF(` +
-
-      `AND(` +
-
-      `ABS(D${outRow}-${MUE.DOSE_MG})<0.001,` +
-
-      `REGEXMATCH(` +
-
-      `LOWER(TO_TEXT(E${outRow})),` +
-
-      `"(^|[^a-z])bid([^a-z]|$)|twice daily|twice a day|2 times daily|2x daily"` +
-
-      `)` +
-
-      `),` +
-
-      `"Appropriate",` +
-
-      `"Inappropriate"` +
-
-      `)` +
-
-      `)` +
-
-      `)`;
-
-
-    /******************************************************************
-     * OVERALL REGIMEN
-     ******************************************************************/
-    const overallFormula =
-
-      `=IF(` +
-
-      `B${outRow}="Not included",` +
-
-      `"Not included",` +
-
-      `IF(` +
-
-      `OR(` +
-
-      `I${outRow}="Unable to determine",` +
-
-      `J${outRow}="Unable to determine"` +
-
-      `),` +
-
-      `"Unable to determine",` +
-
-      `IF(` +
-
-      `AND(` +
-
-      `I${outRow}="Appropriate",` +
-
-      `J${outRow}="Appropriate"` +
-
-      `),` +
-
-      `"Fully appropriate",` +
-
-      `"Inappropriate"` +
-
-      `)` +
-
-      `)` +
-
-      `)`;
-
-
-    formulas.push([
-      `=${sourceRow}`,
-      procedureFormula,
-      durationFormula,
-      doseFormula,
-      `=${frequencyRef}`,
-      quantityFormula,
-      recommendedFormula,
-      deviationFormula,
-      durationAssessmentFormula,
-      doseAssessmentFormula,
-      overallFormula
-    ]);
+    }
 
   }
-
-
-  /********************************************************************
-   * WRITE ALL FORMULAS
-   ********************************************************************/
-  audit
-    .getRange(
-      5,
-      1,
-      formulas.length,
-      11
-    )
-    .setFormulas(
-      formulas
-    );
-
-
-  /********************************************************************
-   * NUMBER FORMAT
-   ********************************************************************/
-  audit
-    .getRange(
-      `H5:H${lastRow + 3}`
-    )
-    .setNumberFormat(
-      '+0;-0;0'
-    );
-
-
-  audit.setFrozenRows(4);
-
-
-  /********************************************************************
-   * MUE STANDARD TABLE
-   ********************************************************************/
-  audit
-    .getRange("M4:N8")
-    .setValues([
-      [
-        "MUE Standard",
-        "Definition"
-      ],
-      [
-        "Dose",
-        "Apixaban 2.5 mg BID"
-      ],
-      [
-        "Knee replacement",
-        "12 days"
-      ],
-      [
-        "Hip replacement",
-        "35 days"
-      ],
-      [
-        "FDA source",
-        MUE.FDA_URL
-      ]
-    ]);
-
-
-  styleHeader_(
-    audit.getRange("M4:N4")
-  );
-
-
-  /********************************************************************
-   * IMPORTANT DURATION NOTE
-   ********************************************************************/
-  audit
-    .getRange("M10:N12")
-    .setValues([
-      [
-        "Important note",
-        ""
-      ],
-      [
-        "Duration field used",
-        "Number of outpatient days supplied (total treatment duration)"
-      ],
-      [
-        "Final reporting",
-        "Confirm this field represents the intended total postoperative " +
-        "course before final P&T reporting."
-      ]
-    ]);
-
-
-  audit
-    .getRange("M10:N12")
-    .setWrap(true);
-
-
-  /********************************************************************
-   * FORMATTING
-   ********************************************************************/
-  setCommonWidths_(
-    audit,
-    [
-      90,
-      110,
-      120,
-      90,
-      140,
-      110,
-      165,
-      120,
-      160,
-      150,
-      160
-    ]
-  );
-
-
-  audit.setColumnWidth(
-    13,
-    190
-  );
-
-
-  audit.setColumnWidth(
-    14,
-    360
-  );
-
-
-  audit
-    .getRange(
-      `A4:K${lastRow + 3}`
-    )
-    .setBorder(
-      true,
-      true,
-      true,
-      true,
-      true,
-      true
-    );
-
-
-  audit
-    .getRange("M4:N8")
-    .setBorder(
-      true,
-      true,
-      true,
-      true,
-      true,
-      true
-    );
-
-
-  SpreadsheetApp.flush();
 
 
   return {
 
-    ss: ss,
+    dobIndex:
+      dobIndex,
 
-    src: src,
+    ageIndex:
+      ageIndex
 
-    audit: audit,
-
-    lastSourceRow: lastRow,
-
-    auditLastRow:
-      lastRow + 3,
-
-    auditName:
-      "'" +
-      audit
-        .getName()
-        .replace(/'/g, "''") +
-      "'"
   };
 
 }
@@ -955,2562 +867,1056 @@ function buildMUEAudit_() {
 
 /**********************************************************************
  *
- * GRAPH 1
- *
- * DURATION APPROPRIATENESS BY PROCEDURE
+ * CREATE INCLUDED PATIENT RECORD
  *
  **********************************************************************/
-function buildDurationAppropriatenessSheet_(
-  ctx
+function buildIncludedPatientRecord_(
+  row,
+  sourceRowNumber,
+  cols,
+  orthoIndex,
+  timezone
 ) {
 
-  const sh =
-    resetSheet_(
-      ctx.ss,
-      MUE.SHEETS.DURATION_APPROPRIATENESS
+  const age =
+    normalizeAge_(
+      getColValue_(
+        row,
+        cols.age
+      )
     );
 
 
-  addSheetTitle_(
-    sh,
-    "Apixaban Duration Appropriateness by Procedure Type"
-  );
-
-
-  addStandardNote_(
-    sh,
-    "100% stacked comparison of duration classification for confirmed " +
-    "total knee and hip arthroplasty patients."
-  );
-
-
-  /********************************************************************
-   * SUMMARY TABLE
-   ********************************************************************/
-  sh
-    .getRange("A4:E9")
-    .setValues([
-      [
-        "Outcome",
-        "Knee n",
-        "Knee %",
-        "Hip n",
-        "Hip %"
-      ],
-      [
-        "Total",
-        "",
-        "",
-        "",
-        ""
-      ],
-      [
-        "Appropriate",
-        "",
-        "",
-        "",
-        ""
-      ],
-      [
-        "Too long",
-        "",
-        "",
-        "",
-        ""
-      ],
-      [
-        "Too short",
-        "",
-        "",
-        "",
-        ""
-      ],
-      [
-        "Unable to determine",
-        "",
-        "",
-        "",
-        ""
-      ]
-    ]);
-
-
-  styleHeader_(
-    sh.getRange("A4:E4")
-  );
-
-
-  const a =
-    ctx.auditName;
-
-
-  const r =
-    ctx.auditLastRow;
-
-
-  /********************************************************************
-   * TOTAL KNEE / HIP
-   ********************************************************************/
-  sh
-    .getRange("B5")
-    .setFormula(
-      `=COUNTIF(${a}!$B$5:$B$${r},"Knee")`
+  const gender =
+    normalizeGender_(
+      getColValue_(
+        row,
+        cols.gender
+      )
     );
 
 
-  sh
-    .getRange("D5")
-    .setFormula(
-      `=COUNTIF(${a}!$B$5:$B$${r},"Hip")`
+  const sourceDob =
+    cols.dob !== null
+      ?
+      normalizeDateKey_(
+        getColValue_(
+          row,
+          cols.dob
+        ),
+        timezone
+      )
+      :
+      "";
+
+
+  const surgeryValue =
+    getColValue_(
+      row,
+      cols.surgeryDate
     );
 
 
-  const cats = [
-    "Appropriate",
-    "Too long",
-    "Too short",
-    "Unable to determine"
-  ];
-
-
-  /********************************************************************
-   * COUNTS + %
-   ********************************************************************/
-  for (
-    let i = 0;
-    i < cats.length;
-    i++
-  ) {
-
-    const row =
-      6 + i;
-
-
-    sh
-      .getRange(`B${row}`)
-      .setFormula(
-
-        `=COUNTIFS(` +
-        `${a}!$B$5:$B$${r},"Knee",` +
-        `${a}!$I$5:$I$${r},A${row}` +
-        `)`
-
-      );
-
-
-    sh
-      .getRange(`C${row}`)
-      .setFormula(
-        `=IFERROR(B${row}/$B$5,0)`
-      );
-
-
-    sh
-      .getRange(`D${row}`)
-      .setFormula(
-
-        `=COUNTIFS(` +
-        `${a}!$B$5:$B$${r},"Hip",` +
-        `${a}!$I$5:$I$${r},A${row}` +
-        `)`
-
-      );
-
-
-    sh
-      .getRange(`E${row}`)
-      .setFormula(
-        `=IFERROR(D${row}/$D$5,0)`
-      );
-
-  }
-
-
-  sh
-    .getRange("C6:C9")
-    .setNumberFormat(
-      "0.0%"
+  const surgeryDate =
+    normalizeDateKey_(
+      surgeryValue,
+      timezone
     );
 
 
-  sh
-    .getRange("E6:E9")
-    .setNumberFormat(
-      "0.0%"
-    );
-
-
-  sh
-    .getRange("A4:E9")
-    .setBorder(
-      true,
-      true,
-      true,
-      true,
-      true,
-      true
+  const surgeryDateTime =
+    normalizeDateTimeNumber_(
+      surgeryValue
     );
 
 
   /********************************************************************
-   * GRAPH DATA
+   * FACILITY MATCH
    ********************************************************************/
-  sh
-    .getRange("G4:K6")
-    .setValues([
-      [
-        "Procedure",
-        "Appropriate",
-        "Too long",
-        "Too short",
-        "Unable to determine"
-      ],
-      [
-        "Knee",
-        "",
-        "",
-        "",
-        ""
-      ],
-      [
-        "Hip",
-        "",
-        "",
-        "",
-        ""
-      ]
-    ]);
+  let candidates = [];
 
-
-  styleHeader_(
-    sh.getRange("G4:K4")
-  );
-
-
-  sh.getRange("H5").setFormula("=C6");
-  sh.getRange("I5").setFormula("=C7");
-  sh.getRange("J5").setFormula("=C8");
-  sh.getRange("K5").setFormula("=C9");
-
-  sh.getRange("H6").setFormula("=E6");
-  sh.getRange("I6").setFormula("=E7");
-  sh.getRange("J6").setFormula("=E8");
-  sh.getRange("K6").setFormula("=E9");
-
-
-  sh
-    .getRange("H5:K6")
-    .setNumberFormat(
-      "0.0%"
-    );
-
-
-  SpreadsheetApp.flush();
-
-
-  /********************************************************************
-   * GRAPH
-   ********************************************************************/
-  const chart =
-
-    sh
-      .newChart()
-
-      .asBarChart()
-
-      .addRange(
-        sh.getRange(
-          "G4:K6"
-        )
-      )
-
-      .setNumHeaders(1)
-
-      .setPosition(
-        11,
-        1,
-        0,
-        0
-      )
-
-      .setOption(
-        "title",
-        "Apixaban Duration Appropriateness by Procedure Type"
-      )
-
-      .setOption(
-        "isStacked",
-        "percent"
-      )
-
-      .setOption(
-        "legend",
-        {
-          position: "top"
-        }
-      )
-
-      .setOption(
-        "hAxis",
-        {
-          title: "Patients (%)",
-          format: "percent",
-          viewWindow: {
-            min: 0,
-            max: 1
-          }
-        }
-      )
-
-      .setOption(
-        "vAxis",
-        {
-          title: "Procedure"
-        }
-      )
-
-      .setOption(
-        "width",
-        900
-      )
-
-      .setOption(
-        "height",
-        500
-      )
-
-      .build();
-
-
-  sh.insertChart(
-    chart
-  );
-
-
-  finishGraphSheet_(
-    sh
-  );
-
-}
-
-
-/**********************************************************************
- *
- * GRAPH 2
- *
- * EXACT TREATMENT DURATION DISTRIBUTION
- *
- **********************************************************************/
-function buildDurationDistributionSheet_(
-  ctx
-) {
-
-  const sh =
-    resetSheet_(
-      ctx.ss,
-      MUE.SHEETS.DURATION_DISTRIBUTION
-    );
-
-
-  addSheetTitle_(
-    sh,
-    "Apixaban Treatment Duration Distribution"
-  );
-
-
-  addStandardNote_(
-    sh,
-    "Shows the actual documented treatment-duration values for " +
-    "confirmed knee and hip arthroplasty patients."
-  );
-
-
-  sh
-    .getRange("A4:C4")
-    .setValues([
-      [
-        "Treatment Duration (days)",
-        "Knee n",
-        "Hip n"
-      ]
-    ]);
-
-
-  styleHeader_(
-    sh.getRange("A4:C4")
-  );
-
-
-  /********************************************************************
-   * FIND UNIQUE DURATIONS
-   ********************************************************************/
-  const unique =
-    uniqueNumericAuditValues_(
-      ctx.audit,
-      ctx.auditLastRow,
-      3,
-      2,
-      false
-    );
+  let matchMethod = "";
 
 
   if (
-    unique.length === 0
+    sourceDob &&
+    gender &&
+    surgeryDate
   ) {
 
-    sh
-      .getRange("A5")
-      .setValue(
-        "No valid duration values found."
-      );
+    const dobKey =
+      sourceDob +
+      "|" +
+      gender +
+      "|" +
+      surgeryDate;
 
-    finishGraphSheet_(
-      sh
-    );
 
-    return;
+    candidates =
+      orthoIndex.dobIndex[dobKey] ||
+      [];
+
+
+    matchMethod =
+      "DOB + gender + surgery date";
+
   }
 
 
-  sh
-    .getRange(
-      5,
-      1,
-      unique.length,
-      1
-    )
-    .setValues(
-      unique.map(
-        value => [value]
+  /********************************************************************
+   * FALLBACK IF DOB DOES NOT EXIST / MATCH
+   ********************************************************************/
+  if (
+    candidates.length === 0 &&
+    age !== null &&
+    gender &&
+    surgeryDate
+  ) {
+
+    const ageKey =
+      age +
+      "|" +
+      gender +
+      "|" +
+      surgeryDate;
+
+
+    candidates =
+      orthoIndex.ageIndex[ageKey] ||
+      [];
+
+
+    matchMethod =
+      "Age + gender + surgery date";
+
+  }
+
+
+  const resolved =
+    resolveFacilityCandidates_(
+      candidates,
+      surgeryDateTime
+    );
+
+
+  /********************************************************************
+   * SURGERY TYPE
+   ********************************************************************/
+  const surgeryType =
+    cleanText_(
+      getColValue_(
+        row,
+        cols.surgeryType
       )
     );
 
 
-  const a =
-    ctx.auditName;
+  const broadProcedure =
+    classifyBroadProcedure_(
+      surgeryType
+    );
 
 
-  const r =
-    ctx.auditLastRow;
+  const totalJointProcedure =
+    classifyConfirmedTotalJoint_(
+      surgeryType
+    );
+
+
+  const totalJointEvaluable =
+    (
+      totalJointProcedure ===
+        "Knee" ||
+      totalJointProcedure ===
+        "Hip"
+    );
 
 
   /********************************************************************
-   * COUNT FORMULAS
+   * DOSE / FREQUENCY
    ********************************************************************/
-  for (
-    let i = 0;
-    i < unique.length;
-    i++
+  const doseRaw =
+    getColValue_(
+      row,
+      cols.dischargeDose
+    );
+
+
+  const dose =
+    extractFirstNumber_(
+      doseRaw
+    );
+
+
+  const frequency =
+    cleanText_(
+      getColValue_(
+        row,
+        cols.dischargeFrequency
+      )
+    );
+
+
+  const doseAssessment =
+    assessDose_(
+      dose,
+      frequency
+    );
+
+
+  /********************************************************************
+   * DURATION
+   ********************************************************************/
+  const duration =
+    extractFirstNumber_(
+      getColValue_(
+        row,
+        cols.duration
+      )
+    );
+
+
+  const durationAssessment =
+    assessDuration_(
+      duration,
+      totalJointProcedure
+    );
+
+
+  let recommendedDuration =
+    null;
+
+
+  if (
+    totalJointProcedure ===
+    "Knee"
   ) {
 
-    const row =
-      5 + i;
-
-
-    sh
-      .getRange(`B${row}`)
-      .setFormula(
-
-        `=COUNTIFS(` +
-
-        `${a}!$B$5:$B$${r},"Knee",` +
-
-        `${a}!$C$5:$C$${r},A${row}` +
-
-        `)`
-
-      );
-
-
-    sh
-      .getRange(`C${row}`)
-      .setFormula(
-
-        `=COUNTIFS(` +
-
-        `${a}!$B$5:$B$${r},"Hip",` +
-
-        `${a}!$C$5:$C$${r},A${row}` +
-
-        `)`
-
-      );
+    recommendedDuration =
+      MUE_TABLE_CONFIG
+        .KNEE_DURATION_DAYS;
 
   }
 
 
-  sh
-    .getRange(
-      `A4:C${4 + unique.length}`
+  if (
+    totalJointProcedure ===
+    "Hip"
+  ) {
+
+    recommendedDuration =
+      MUE_TABLE_CONFIG
+        .HIP_DURATION_DAYS;
+
+  }
+
+
+  const deviation =
+
+    (
+      duration !== null &&
+      recommendedDuration !== null
     )
-    .setBorder(
-      true,
-      true,
-      true,
-      true,
-      true,
-      true
-    );
 
+      ?
 
-  SpreadsheetApp.flush();
+      duration -
+      recommendedDuration
+
+      :
+
+      null;
 
 
   /********************************************************************
-   * GRAPH
+   * OVERALL REGIMEN
    ********************************************************************/
-  const chart =
+  let overallRegimen =
+    "Not evaluated";
 
-    sh
-      .newChart()
 
-      .asColumnChart()
+  if (
+    totalJointEvaluable
+  ) {
 
-      .addRange(
-        sh.getRange(
-          `A4:C${4 + unique.length}`
+    if (
+      doseAssessment ===
+        "Unable to determine" ||
+      durationAssessment ===
+        "Unable to determine"
+    ) {
+
+      overallRegimen =
+        "Unable to determine";
+
+    }
+
+    else if (
+      doseAssessment ===
+        "Appropriate" &&
+      durationAssessment ===
+        "Appropriate"
+    ) {
+
+      overallRegimen =
+        "Fully appropriate";
+
+    }
+
+    else {
+
+      overallRegimen =
+        "Inappropriate";
+
+    }
+
+  }
+
+
+  return {
+
+    sourceRow:
+      sourceRowNumber,
+
+    dob:
+      sourceDob,
+
+    age:
+      age,
+
+    gender:
+      gender,
+
+    bmi:
+      cols.bmi !== null
+        ?
+        extractFirstNumber_(
+          getColValue_(
+            row,
+            cols.bmi
+          )
         )
-      )
+        :
+        null,
 
-      .setNumHeaders(1)
+    surgeryType:
+      surgeryType,
 
-      .setPosition(
-        4,
-        5,
-        0,
-        0
-      )
+    broadProcedure:
+      broadProcedure,
 
-      .setOption(
-        "title",
-        "Apixaban Treatment Duration by Procedure Type"
-      )
+    totalJointProcedure:
+      totalJointProcedure,
 
-      .setOption(
-        "legend",
-        {
-          position: "top"
-        }
-      )
+    totalJointEvaluable:
+      totalJointEvaluable,
 
-      .setOption(
-        "hAxis",
-        {
-          title:
-            "Treatment Duration (days)"
-        }
-      )
+    surgeryDate:
+      surgeryDate,
 
-      .setOption(
-        "vAxis",
-        {
-          title:
-            "Patients (n)",
-          minValue: 0,
-          format: "0"
-        }
-      )
+    primaryRevision:
+      cols.primaryRevision !== null
+        ?
+        cleanText_(
+          getColValue_(
+            row,
+            cols.primaryRevision
+          )
+        )
+        :
+        "",
 
-      .setOption(
-        "width",
-        900
-      )
+    urgency:
+      cols.urgency !== null
+        ?
+        cleanText_(
+          getColValue_(
+            row,
+            cols.urgency
+          )
+        )
+        :
+        "",
 
-      .setOption(
-        "height",
-        500
-      )
+    facility:
+      resolved.facility,
 
-      .build();
+    rawFacility:
+      resolved.rawFacility,
 
+    matchStatus:
+      resolved.status,
 
-  sh.insertChart(
-    chart
-  );
+    matchMethod:
+      candidates.length > 0
+        ?
+        matchMethod
+        :
+        "None",
 
+    orthoMatchCount:
+      candidates.length,
 
-  finishGraphSheet_(
-    sh
-  );
+    matchedOrthoRows:
+      resolved.rows,
+
+    dischargeDose:
+      dose,
+
+    dischargeFrequency:
+      frequency,
+
+    doseAssessment:
+      doseAssessment,
+
+    duration:
+      duration,
+
+    recommendedDuration:
+      recommendedDuration,
+
+    durationDeviation:
+      deviation,
+
+    durationAssessment:
+      durationAssessment,
+
+    overallRegimen:
+      overallRegimen,
+
+    rxQuantity:
+      cols.rxQuantity !== null
+        ?
+        extractFirstNumber_(
+          getColValue_(
+            row,
+            cols.rxQuantity
+          )
+        )
+        :
+        null,
+
+    refills:
+      cols.refills !== null
+        ?
+        extractFirstNumber_(
+          getColValue_(
+            row,
+            cols.refills
+          )
+        )
+        :
+        null,
+
+    indication:
+      cols.indication !== null
+        ?
+        normalizeYesNo_(
+          getColValue_(
+            row,
+            cols.indication
+          )
+        )
+        :
+        "Unknown",
+
+    aspirin:
+      cols.aspirin !== null
+        ?
+        normalizeYesNo_(
+          getColValue_(
+            row,
+            cols.aspirin
+          )
+        )
+        :
+        "Unknown",
+
+    antiplatelet:
+      cols.antiplatelet !== null
+        ?
+        normalizeYesNo_(
+          getColValue_(
+            row,
+            cols.antiplatelet
+          )
+        )
+        :
+        "Unknown",
+
+    nsaid:
+      cols.nsaid !== null
+        ?
+        normalizeYesNo_(
+          getColValue_(
+            row,
+            cols.nsaid
+          )
+        )
+        :
+        "Unknown",
+
+    otherAnticoagulant:
+      cols.otherAnticoagulant !== null
+        ?
+        normalizeYesNo_(
+          getColValue_(
+            row,
+            cols.otherAnticoagulant
+          )
+        )
+        :
+        "Unknown",
+
+    heparin:
+      cols.heparin !== null
+        ?
+        normalizeYesNo_(
+          getColValue_(
+            row,
+            cols.heparin
+          )
+        )
+        :
+        "Unknown"
+
+  };
 
 }
 
 
 /**********************************************************************
  *
- * GRAPH 3
- *
- * DOSE VS DURATION ADHERENCE
+ * RESOLVE FACILITY CANDIDATES
  *
  **********************************************************************/
-function buildRegimenAdherenceSheet_(
-  ctx
+function resolveFacilityCandidates_(
+  candidates,
+  sourceDateTime
 ) {
 
-  const sh =
-    resetSheet_(
-      ctx.ss,
-      MUE.SHEETS.REGIMEN_ADHERENCE
+  if (
+    !candidates ||
+    candidates.length === 0
+  ) {
+
+    return {
+
+      facility:
+        "Unknown / unmatched",
+
+      rawFacility:
+        "",
+
+      status:
+        "No match",
+
+      rows:
+        ""
+
+    };
+
+  }
+
+
+  /********************************************************************
+   * UNIQUE FACILITIES
+   ********************************************************************/
+  const uniqueFacilities =
+    Array.from(
+      new Set(
+        candidates
+          .map(
+            c =>
+              c.facility
+          )
+          .filter(
+            Boolean
+          )
+      )
     );
 
 
-  addSheetTitle_(
-    sh,
-    "Apixaban Regimen Adherence"
-  );
+  /********************************************************************
+   * ONE FACILITY
+   *
+   * Multiple Ortho rows may represent duplicate/order records.
+   ********************************************************************/
+  if (
+    uniqueFacilities.length === 1
+  ) {
+
+    return {
+
+      facility:
+        uniqueFacilities[0],
+
+      rawFacility:
+        candidates[0]
+          .rawFacility,
+
+      status:
+        candidates.length === 1
+          ?
+          "Matched"
+          :
+          "Matched - duplicate Ortho rows",
+
+      rows:
+        candidates
+          .map(
+            c =>
+              c.orthoRow
+          )
+          .join(", ")
+
+    };
+
+  }
 
 
-  addStandardNote_(
-    sh,
-    "Compares the percentage of eligible patients with the correct " +
-    "apixaban dose/frequency versus the correct duration."
+  /********************************************************************
+   * IF MULTIPLE FACILITIES:
+   * TRY EXACT / CLOSEST DATE-TIME
+   ********************************************************************/
+  if (
+    sourceDateTime !== null
+  ) {
+
+    const sorted =
+      candidates
+        .filter(
+          c =>
+            c.surgeryDateTime !== null
+        )
+        .map(
+          c => {
+
+            return {
+
+              candidate:
+                c,
+
+              distance:
+                Math.abs(
+                  c.surgeryDateTime -
+                  sourceDateTime
+                )
+
+            };
+
+          }
+        )
+        .sort(
+          (a, b) =>
+            a.distance -
+            b.distance
+        );
+
+
+    if (
+      sorted.length > 0
+    ) {
+
+      const best =
+        sorted[0];
+
+
+      const second =
+        sorted.length > 1
+          ?
+          sorted[1]
+          :
+          null;
+
+
+      /****************************************************************
+       * Require a unique closest time.
+       ****************************************************************/
+      if (
+        !second ||
+        best.distance <
+          second.distance
+      ) {
+
+        return {
+
+          facility:
+            best.candidate
+              .facility,
+
+          rawFacility:
+            best.candidate
+              .rawFacility,
+
+          status:
+            "Matched - closest surgery time",
+
+          rows:
+            best.candidate
+              .orthoRow
+              .toString()
+
+        };
+
+      }
+
+    }
+
+  }
+
+
+  /********************************************************************
+   * AMBIGUOUS
+   ********************************************************************/
+  return {
+
+    facility:
+      "Unknown / ambiguous",
+
+    rawFacility:
+      candidates
+        .map(
+          c =>
+            c.rawFacility
+        )
+        .join(" | "),
+
+    status:
+      "Ambiguous",
+
+    rows:
+      candidates
+        .map(
+          c =>
+            c.orthoRow
+        )
+        .join(", ")
+
+  };
+
+}
+
+
+/**********************************************************************
+ *
+ * BUILD FACILITY MATCH AUDIT
+ *
+ **********************************************************************/
+function buildFacilityAuditSheet_(
+  ss,
+  records,
+  sourcePatientCount,
+  orthoPatientCount
+) {
+
+  const sh =
+    resetTableSheet_(
+      ss,
+      MUE_TABLE_CONFIG.AUDIT_SHEET
+    );
+
+
+  /********************************************************************
+   * TITLE
+   ********************************************************************/
+  sh
+    .getRange("A1:H1")
+    .merge()
+    .setValue(
+      "Facility Matching Audit"
+    );
+
+
+  styleTableTitle_(
+    sh.getRange("A1:H1")
   );
 
 
   /********************************************************************
    * SUMMARY
    ********************************************************************/
+  const matched =
+    records.filter(
+      r =>
+        r.matchStatus.indexOf(
+          "Matched"
+        ) === 0
+    ).length;
+
+
+  const ambiguous =
+    records.filter(
+      r =>
+        r.matchStatus ===
+        "Ambiguous"
+    ).length;
+
+
+  const unmatched =
+    records.filter(
+      r =>
+        r.matchStatus ===
+        "No match"
+    ).length;
+
+
   sh
-    .getRange("A4:C12")
+    .getRange("A3:B8")
     .setValues([
       [
-        "Outcome",
-        "n",
-        "%"
+        "Matching Summary",
+        "Result"
       ],
       [
-        "Eligible patients",
-        "",
-        ""
+        "Included patients in Sheet1",
+        records.length
       ],
       [
-        "Correct dose",
-        "",
-        ""
+        "Rows in Ortho",
+        orthoPatientCount
       ],
       [
-        "Correct duration",
-        "",
-        ""
+        "Facility matched",
+        matched
       ],
       [
-        "Correct dose + duration",
-        "",
-        ""
+        "Ambiguous",
+        ambiguous
       ],
       [
-        "Duration too long",
-        "",
-        ""
-      ],
-      [
-        "Duration too short",
-        "",
-        ""
-      ],
-      [
-        "Duration unable to determine",
-        "",
-        ""
-      ],
-      [
-        "Dose unable to determine",
-        "",
-        ""
+        "No match",
+        unmatched
       ]
     ]);
 
 
-  styleHeader_(
-    sh.getRange("A4:C4")
+  styleSectionHeader_(
+    sh.getRange("A3:B3")
   );
 
 
-  const a =
-    ctx.auditName;
-
-
-  const r =
-    ctx.auditLastRow;
-
-
-  /********************************************************************
-   * FORMULAS
-   ********************************************************************/
   sh
-    .getRange("B5")
-    .setFormula(
-
-      `=COUNTIF(${a}!$B$5:$B$${r},"Knee")+` +
-
-      `COUNTIF(${a}!$B$5:$B$${r},"Hip")`
-
-    );
-
-
-  sh
-    .getRange("B6")
-    .setFormula(
-      `=COUNTIF(${a}!$J$5:$J$${r},"Appropriate")`
-    );
-
-
-  sh
-    .getRange("B7")
-    .setFormula(
-      `=COUNTIF(${a}!$I$5:$I$${r},"Appropriate")`
-    );
-
-
-  sh
-    .getRange("B8")
-    .setFormula(
-      `=COUNTIF(${a}!$K$5:$K$${r},"Fully appropriate")`
-    );
-
-
-  sh
-    .getRange("B9")
-    .setFormula(
-      `=COUNTIF(${a}!$I$5:$I$${r},"Too long")`
-    );
-
-
-  sh
-    .getRange("B10")
-    .setFormula(
-      `=COUNTIF(${a}!$I$5:$I$${r},"Too short")`
-    );
-
-
-  sh
-    .getRange("B11")
-    .setFormula(
-      `=COUNTIF(${a}!$I$5:$I$${r},"Unable to determine")`
-    );
-
-
-  sh
-    .getRange("B12")
-    .setFormula(
-      `=COUNTIF(${a}!$J$5:$J$${r},"Unable to determine")`
-    );
-
-
-  for (
-    let row = 6;
-    row <= 12;
-    row++
-  ) {
-
-    sh
-      .getRange(`C${row}`)
-      .setFormula(
-        `=IFERROR(B${row}/$B$5,0)`
-      );
-
-  }
-
-
-  sh
-    .getRange("C6:C12")
-    .setNumberFormat(
-      "0.0%"
-    );
-
-
-  sh
-    .getRange("A4:C12")
+    .getRange("A3:B8")
     .setBorder(
       true,
       true,
       true,
       true,
       true,
-      true
+      true,
+      "#B7C5D1",
+      SpreadsheetApp.BorderStyle.SOLID
     );
 
 
   /********************************************************************
-   * GRAPH TABLE
+   * MATCHING NOTE
    ********************************************************************/
   sh
-    .getRange("E4:F6")
-    .setValues([
-      [
-        "Criterion",
-        "Appropriate %"
-      ],
-      [
-        "Correct dose",
-        ""
-      ],
-      [
-        "Correct duration",
-        ""
-      ]
-    ]);
-
-
-  styleHeader_(
-    sh.getRange("E4:F4")
-  );
-
-
-  sh
-    .getRange("F5")
-    .setFormula(
-      "=C6"
-    );
-
-
-  sh
-    .getRange("F6")
-    .setFormula(
-      "=C7"
-    );
-
-
-  sh
-    .getRange("F5:F6")
-    .setNumberFormat(
-      "0.0%"
-    );
-
-
-  SpreadsheetApp.flush();
-
-
-  /********************************************************************
-   * GRAPH
-   ********************************************************************/
-  const chart =
-
-    sh
-      .newChart()
-
-      .asColumnChart()
-
-      .addRange(
-        sh.getRange("E4:F6")
-      )
-
-      .setNumHeaders(1)
-
-      .setPosition(
-        4,
-        8,
-        0,
-        0
-      )
-
-      .setOption(
-        "title",
-        "Apixaban Regimen Adherence"
-      )
-
-      .setOption(
-        "legend",
-        {
-          position: "none"
-        }
-      )
-
-      .setOption(
-        "hAxis",
-        {
-          title:
-            "Prescribing Criterion"
-        }
-      )
-
-      .setOption(
-        "vAxis",
-        {
-          title:
-            "Patients (%)",
-          format:
-            "percent",
-          viewWindow:
-            {
-              min: 0,
-              max: 1
-            }
-        }
-      )
-
-      .setOption(
-        "width",
-        750
-      )
-
-      .setOption(
-        "height",
-        450
-      )
-
-      .build();
-
-
-  sh.insertChart(
-    chart
-  );
-
-
-  finishGraphSheet_(
-    sh
-  );
-
-}
-
-
-/**********************************************************************
- *
- * GRAPH 4
- *
- * PRESCRIPTION QUANTITY
- *
- **********************************************************************/
-function buildRxQuantitySheet_(
-  ctx
-) {
-
-  const sh =
-    resetSheet_(
-      ctx.ss,
-      MUE.SHEETS.RX_QUANTITY
-    );
-
-
-  addSheetTitle_(
-    sh,
-    "Apixaban Discharge Prescription Quantity"
-  );
-
-
-  addStandardNote_(
-    sh,
-    "Shows discharge prescription quantity by procedure type. " +
-    "At BID dosing, 60 tablets represents 30 outpatient days."
-  );
-
-
-  sh
-    .getRange("A4:C4")
-    .setValues([
-      [
-        "Prescription Quantity (tablets)",
-        "Knee n",
-        "Hip n"
-      ]
-    ]);
-
-
-  styleHeader_(
-    sh.getRange("A4:C4")
-  );
-
-
-  /********************************************************************
-   * UNIQUE QUANTITIES
-   ********************************************************************/
-  const unique =
-    uniqueNumericAuditValues_(
-      ctx.audit,
-      ctx.auditLastRow,
-      6,
-      2,
-      false
-    );
-
-
-  if (
-    unique.length === 0
-  ) {
-
-    sh
-      .getRange("A5")
-      .setValue(
-        "No valid prescription quantities found."
-      );
-
-    finishGraphSheet_(
-      sh
-    );
-
-    return;
-  }
-
-
-  sh
-    .getRange(
-      5,
-      1,
-      unique.length,
-      1
-    )
-    .setValues(
-      unique.map(
-        value => [value]
-      )
-    );
-
-
-  const a =
-    ctx.auditName;
-
-
-  const r =
-    ctx.auditLastRow;
-
-
-  /********************************************************************
-   * COUNTS
-   ********************************************************************/
-  for (
-    let i = 0;
-    i < unique.length;
-    i++
-  ) {
-
-    const row =
-      5 + i;
-
-
-    sh
-      .getRange(`B${row}`)
-      .setFormula(
-
-        `=COUNTIFS(` +
-
-        `${a}!$B$5:$B$${r},"Knee",` +
-
-        `${a}!$F$5:$F$${r},A${row}` +
-
-        `)`
-
-      );
-
-
-    sh
-      .getRange(`C${row}`)
-      .setFormula(
-
-        `=COUNTIFS(` +
-
-        `${a}!$B$5:$B$${r},"Hip",` +
-
-        `${a}!$F$5:$F$${r},A${row}` +
-
-        `)`
-
-      );
-
-  }
-
-
-  sh
-    .getRange(
-      `A4:C${4 + unique.length}`
-    )
-    .setBorder(
-      true,
-      true,
-      true,
-      true,
-      true,
-      true
-    );
-
-
-  /********************************************************************
-   * 60 TABLET / 30 DAY PATTERN
-   ********************************************************************/
-  sh
-    .getRange("E4:G6")
-    .setValues([
-      [
-        "30-Day Pattern",
-        "n",
-        "% of procedure"
-      ],
-      [
-        "Knee – 60 tablets",
-        "",
-        ""
-      ],
-      [
-        "Hip – 60 tablets",
-        "",
-        ""
-      ]
-    ]);
-
-
-  styleHeader_(
-    sh.getRange("E4:G4")
-  );
-
-
-  sh
-    .getRange("F5")
-    .setFormula(
-
-      `=COUNTIFS(` +
-
-      `${a}!$B$5:$B$${r},"Knee",` +
-
-      `${a}!$F$5:$F$${r},60` +
-
-      `)`
-
-    );
-
-
-  sh
-    .getRange("G5")
-    .setFormula(
-
-      `=IFERROR(` +
-
-      `F5/COUNTIF(` +
-
-      `${a}!$B$5:$B$${r},"Knee"` +
-
-      `),0)`
-
-    );
-
-
-  sh
-    .getRange("F6")
-    .setFormula(
-
-      `=COUNTIFS(` +
-
-      `${a}!$B$5:$B$${r},"Hip",` +
-
-      `${a}!$F$5:$F$${r},60` +
-
-      `)`
-
-    );
-
-
-  sh
-    .getRange("G6")
-    .setFormula(
-
-      `=IFERROR(` +
-
-      `F6/COUNTIF(` +
-
-      `${a}!$B$5:$B$${r},"Hip"` +
-
-      `),0)`
-
-    );
-
-
-  sh
-    .getRange("G5:G6")
-    .setNumberFormat(
-      "0.0%"
-    );
-
-
-  sh
-    .getRange("E4:G6")
-    .setBorder(
-      true,
-      true,
-      true,
-      true,
-      true,
-      true
-    );
-
-
-  SpreadsheetApp.flush();
-
-
-  /********************************************************************
-   * GRAPH
-   ********************************************************************/
-  const chart =
-
-    sh
-      .newChart()
-
-      .asColumnChart()
-
-      .addRange(
-        sh.getRange(
-          `A4:C${4 + unique.length}`
-        )
-      )
-
-      .setNumHeaders(1)
-
-      .setPosition(
-        9,
-        5,
-        0,
-        0
-      )
-
-      .setOption(
-        "title",
-        "Apixaban Discharge Prescription Quantity by Procedure Type"
-      )
-
-      .setOption(
-        "legend",
-        {
-          position: "top"
-        }
-      )
-
-      .setOption(
-        "hAxis",
-        {
-          title:
-            "Prescription Quantity (tablets)"
-        }
-      )
-
-      .setOption(
-        "vAxis",
-        {
-          title:
-            "Patients (n)",
-          minValue: 0,
-          format: "0"
-        }
-      )
-
-      .setOption(
-        "width",
-        900
-      )
-
-      .setOption(
-        "height",
-        500
-      )
-
-      .build();
-
-
-  sh.insertChart(
-    chart
-  );
-
-
-  finishGraphSheet_(
-    sh
-  );
-
-}
-
-
-/**********************************************************************
- *
- * GRAPH 5
- *
- * DURATION DEVIATION
- *
- **********************************************************************/
-function buildDurationDeviationSheet_(
-  ctx
-) {
-
-  const sh =
-    resetSheet_(
-      ctx.ss,
-      MUE.SHEETS.DURATION_DEVIATION
-    );
-
-
-  addSheetTitle_(
-    sh,
-    "Deviation from Recommended Apixaban Duration"
-  );
-
-
-  addStandardNote_(
-    sh,
-    "Deviation = actual duration − recommended duration. " +
-    "Negative = too short; 0 = appropriate; positive = too long."
-  );
-
-
-  sh
-    .getRange("A4:C4")
-    .setValues([
-      [
-        "Deviation (days)",
-        "Knee n",
-        "Hip n"
-      ]
-    ]);
-
-
-  styleHeader_(
-    sh.getRange("A4:C4")
-  );
-
-
-  /********************************************************************
-   * UNIQUE DEVIATIONS
-   ********************************************************************/
-  const unique =
-    uniqueNumericAuditValues_(
-      ctx.audit,
-      ctx.auditLastRow,
-      8,
-      2,
-      true
-    );
-
-
-  if (
-    unique.length === 0
-  ) {
-
-    sh
-      .getRange("A5")
-      .setValue(
-        "No valid deviation values found."
-      );
-
-    finishGraphSheet_(
-      sh
-    );
-
-    return;
-  }
-
-
-  sh
-    .getRange(
-      5,
-      1,
-      unique.length,
-      1
-    )
-    .setValues(
-      unique.map(
-        value => [value]
-      )
-    );
-
-
-  sh
-    .getRange(
-      `A5:A${4 + unique.length}`
-    )
-    .setNumberFormat(
-      '+0;-0;0'
-    );
-
-
-  const a =
-    ctx.auditName;
-
-
-  const r =
-    ctx.auditLastRow;
-
-
-  /********************************************************************
-   * COUNTS
-   ********************************************************************/
-  for (
-    let i = 0;
-    i < unique.length;
-    i++
-  ) {
-
-    const row =
-      5 + i;
-
-
-    sh
-      .getRange(`B${row}`)
-      .setFormula(
-
-        `=COUNTIFS(` +
-
-        `${a}!$B$5:$B$${r},"Knee",` +
-
-        `${a}!$H$5:$H$${r},A${row}` +
-
-        `)`
-
-      );
-
-
-    sh
-      .getRange(`C${row}`)
-      .setFormula(
-
-        `=COUNTIFS(` +
-
-        `${a}!$B$5:$B$${r},"Hip",` +
-
-        `${a}!$H$5:$H$${r},A${row}` +
-
-        `)`
-
-      );
-
-  }
-
-
-  sh
-    .getRange(
-      `A4:C${4 + unique.length}`
-    )
-    .setBorder(
-      true,
-      true,
-      true,
-      true,
-      true,
-      true
-    );
-
-
-  /********************************************************************
-   * MEDIAN / MIN / MAX
-   ********************************************************************/
-  sh
-    .getRange("E4:H6")
-    .setValues([
-      [
-        "Procedure",
-        "Median Deviation",
-        "Minimum",
-        "Maximum"
-      ],
-      [
-        "Knee",
-        "",
-        "",
-        ""
-      ],
-      [
-        "Hip",
-        "",
-        "",
-        ""
-      ]
-    ]);
-
-
-  styleHeader_(
-    sh.getRange("E4:H4")
-  );
-
-
-  sh
-    .getRange("F5")
-    .setFormula(
-
-      `=IFERROR(` +
-
-      `MEDIAN(` +
-
-      `FILTER(` +
-
-      `${a}!$H$5:$H$${r},` +
-
-      `${a}!$B$5:$B$${r}="Knee",` +
-
-      `${a}!$H$5:$H$${r}<>""` +
-
-      `)` +
-
-      `),""` +
-
-      `)`
-
-    );
-
-
-  sh
-    .getRange("G5")
-    .setFormula(
-
-      `=IFERROR(` +
-
-      `MIN(` +
-
-      `FILTER(` +
-
-      `${a}!$H$5:$H$${r},` +
-
-      `${a}!$B$5:$B$${r}="Knee",` +
-
-      `${a}!$H$5:$H$${r}<>""` +
-
-      `)` +
-
-      `),""` +
-
-      `)`
-
-    );
-
-
-  sh
-    .getRange("H5")
-    .setFormula(
-
-      `=IFERROR(` +
-
-      `MAX(` +
-
-      `FILTER(` +
-
-      `${a}!$H$5:$H$${r},` +
-
-      `${a}!$B$5:$B$${r}="Knee",` +
-
-      `${a}!$H$5:$H$${r}<>""` +
-
-      `)` +
-
-      `),""` +
-
-      `)`
-
-    );
-
-
-  sh
-    .getRange("F6")
-    .setFormula(
-
-      `=IFERROR(` +
-
-      `MEDIAN(` +
-
-      `FILTER(` +
-
-      `${a}!$H$5:$H$${r},` +
-
-      `${a}!$B$5:$B$${r}="Hip",` +
-
-      `${a}!$H$5:$H$${r}<>""` +
-
-      `)` +
-
-      `),""` +
-
-      `)`
-
-    );
-
-
-  sh
-    .getRange("G6")
-    .setFormula(
-
-      `=IFERROR(` +
-
-      `MIN(` +
-
-      `FILTER(` +
-
-      `${a}!$H$5:$H$${r},` +
-
-      `${a}!$B$5:$B$${r}="Hip",` +
-
-      `${a}!$H$5:$H$${r}<>""` +
-
-      `)` +
-
-      `),""` +
-
-      `)`
-
-    );
-
-
-  sh
-    .getRange("H6")
-    .setFormula(
-
-      `=IFERROR(` +
-
-      `MAX(` +
-
-      `FILTER(` +
-
-      `${a}!$H$5:$H$${r},` +
-
-      `${a}!$B$5:$B$${r}="Hip",` +
-
-      `${a}!$H$5:$H$${r}<>""` +
-
-      `)` +
-
-      `),""` +
-
-      `)`
-
-    );
-
-
-  sh
-    .getRange("F5:H6")
-    .setNumberFormat(
-      '+0.0;-0.0;0.0'
-    );
-
-
-  sh
-    .getRange("E4:H6")
-    .setBorder(
-      true,
-      true,
-      true,
-      true,
-      true,
-      true
-    );
-
-
-  SpreadsheetApp.flush();
-
-
-  /********************************************************************
-   * GRAPH
-   ********************************************************************/
-  const chart =
-
-    sh
-      .newChart()
-
-      .asColumnChart()
-
-      .addRange(
-        sh.getRange(
-          `A4:C${4 + unique.length}`
-        )
-      )
-
-      .setNumHeaders(1)
-
-      .setPosition(
-        9,
-        5,
-        0,
-        0
-      )
-
-      .setOption(
-        "title",
-        "Deviation from Recommended Apixaban Duration"
-      )
-
-      .setOption(
-        "legend",
-        {
-          position:
-            "top"
-        }
-      )
-
-      .setOption(
-        "hAxis",
-        {
-          title:
-            "Days Below (−) or Above (+) Recommended Duration"
-        }
-      )
-
-      .setOption(
-        "vAxis",
-        {
-          title:
-            "Patients (n)",
-          minValue:
-            0,
-          format:
-            "0"
-        }
-      )
-
-      .setOption(
-        "width",
-        950
-      )
-
-      .setOption(
-        "height",
-        500
-      )
-
-      .build();
-
-
-  sh.insertChart(
-    chart
-  );
-
-
-  finishGraphSheet_(
-    sh
-  );
-
-}
-
-
-/**********************************************************************
- *
- * GRAPH 6
- *
- * OVERALL REGIMEN APPROPRIATENESS PIE
- *
- **********************************************************************/
-function buildOverallPieSheet_(
-  ctx
-) {
-
-  const sh =
-    resetSheet_(
-      ctx.ss,
-      MUE.SHEETS.OVERALL_PIE
-    );
-
-
-  addSheetTitle_(
-    sh,
-    "Overall Apixaban Regimen Appropriateness"
-  );
-
-
-  addStandardNote_(
-    sh,
-    "Fully appropriate = correct dose/frequency AND correct duration. " +
-    "Unable = required regimen information could not be determined."
-  );
-
-
-  sh
-    .getRange("A4:C8")
-    .setValues([
-      [
-        "Category",
-        "n",
-        "%"
-      ],
-      [
-        "Eligible patients",
-        "",
-        ""
-      ],
-      [
-        "Fully appropriate",
-        "",
-        ""
-      ],
-      [
-        "Inappropriate",
-        "",
-        ""
-      ],
-      [
-        "Unable to determine",
-        "",
-        ""
-      ]
-    ]);
-
-
-  styleHeader_(
-    sh.getRange("A4:C4")
-  );
-
-
-  const a =
-    ctx.auditName;
-
-
-  const r =
-    ctx.auditLastRow;
-
-
-  /********************************************************************
-   * FORMULAS
-   ********************************************************************/
-  sh
-    .getRange("B5")
-    .setFormula(
-
-      `=COUNTIF(` +
-      `${a}!$B$5:$B$${r},"Knee"` +
-      `)+` +
-      `COUNTIF(` +
-      `${a}!$B$5:$B$${r},"Hip"` +
-      `)`
-
-    );
-
-
-  sh
-    .getRange("B6")
-    .setFormula(
-
-      `=COUNTIF(` +
-      `${a}!$K$5:$K$${r},` +
-      `"Fully appropriate"` +
-      `)`
-
-    );
-
-
-  sh
-    .getRange("B7")
-    .setFormula(
-
-      `=COUNTIF(` +
-      `${a}!$K$5:$K$${r},` +
-      `"Inappropriate"` +
-      `)`
-
-    );
-
-
-  sh
-    .getRange("B8")
-    .setFormula(
-
-      `=COUNTIF(` +
-      `${a}!$K$5:$K$${r},` +
-      `"Unable to determine"` +
-      `)`
-
-    );
-
-
-  for (
-    let row = 6;
-    row <= 8;
-    row++
-  ) {
-
-    sh
-      .getRange(`C${row}`)
-      .setFormula(
-        `=IFERROR(B${row}/$B$5,0)`
-      );
-
-  }
-
-
-  sh
-    .getRange("C6:C8")
-    .setNumberFormat(
-      "0.0%"
-    );
-
-
-  sh
-    .getRange("A4:C8")
-    .setBorder(
-      true,
-      true,
-      true,
-      true,
-      true,
-      true
-    );
-
-
-  /********************************************************************
-   * PIE DATA
-   ********************************************************************/
-  sh
-    .getRange("E4:F7")
-    .setValues([
-      [
-        "Category",
-        "Patients"
-      ],
-      [
-        "Fully appropriate",
-        ""
-      ],
-      [
-        "Inappropriate",
-        ""
-      ],
-      [
-        "Unable to determine",
-        ""
-      ]
-    ]);
-
-
-  styleHeader_(
-    sh.getRange("E4:F4")
-  );
-
-
-  sh
-    .getRange("F5")
-    .setFormula(
-      "=B6"
-    );
-
-
-  sh
-    .getRange("F6")
-    .setFormula(
-      "=B7"
-    );
-
-
-  sh
-    .getRange("F7")
-    .setFormula(
-      "=B8"
-    );
-
-
-  SpreadsheetApp.flush();
-
-
-  /********************************************************************
-   * PIE CHART
-   ********************************************************************/
-  const chart =
-
-    sh
-      .newChart()
-
-      .asPieChart()
-
-      .addRange(
-        sh.getRange(
-          "E4:F7"
-        )
-      )
-
-      .setNumHeaders(1)
-
-      .setPosition(
-        4,
-        8,
-        0,
-        0
-      )
-
-      .setOption(
-        "title",
-        "Overall Apixaban Regimen Appropriateness"
-      )
-
-      .setOption(
-        "legend",
-        {
-          position:
-            "right"
-        }
-      )
-
-      .setOption(
-        "pieSliceText",
-        "percentage"
-      )
-
-      .setOption(
-        "width",
-        750
-      )
-
-      .setOption(
-        "height",
-        450
-      )
-
-      .build();
-
-
-  sh.insertChart(
-    chart
-  );
-
-
-  finishGraphSheet_(
-    sh
-  );
-
-}
-
-
-/**********************************************************************
- *
- * INDIVIDUAL GRAPH FUNCTIONS
- *
- * These allow you to rerun only one graph if desired.
- *
- **********************************************************************/
-
-function buildDurationAppropriatenessGraph() {
-
-  const ctx =
-    buildMUEAudit_();
-
-  if (ctx) {
-
-    buildDurationAppropriatenessSheet_(
-      ctx
-    );
-
-  }
-}
-
-
-function buildDurationDistributionGraph() {
-
-  const ctx =
-    buildMUEAudit_();
-
-  if (ctx) {
-
-    buildDurationDistributionSheet_(
-      ctx
-    );
-
-  }
-}
-
-
-function buildRegimenAdherenceGraph() {
-
-  const ctx =
-    buildMUEAudit_();
-
-  if (ctx) {
-
-    buildRegimenAdherenceSheet_(
-      ctx
-    );
-
-  }
-}
-
-
-function buildRxQuantityGraph() {
-
-  const ctx =
-    buildMUEAudit_();
-
-  if (ctx) {
-
-    buildRxQuantitySheet_(
-      ctx
-    );
-
-  }
-}
-
-
-function buildDurationDeviationGraph() {
-
-  const ctx =
-    buildMUEAudit_();
-
-  if (ctx) {
-
-    buildDurationDeviationSheet_(
-      ctx
-    );
-
-  }
-}
-
-
-function buildOverallRegimenPieChart() {
-
-  const ctx =
-    buildMUEAudit_();
-
-  if (ctx) {
-
-    buildOverallPieSheet_(
-      ctx
-    );
-
-  }
-}
-
-
-/**********************************************************************
- *
- * HELPER:
- * CREATE OR RESET SHEET
- *
- **********************************************************************/
-function resetSheet_(
-  ss,
-  name
-) {
-
-  let sh =
-    ss.getSheetByName(
-      name
-    );
-
-
-  if (!sh) {
-
-    sh =
-      ss.insertSheet(
-        name
-      );
-
-  }
-
-
-  /********************************************************************
-   * DELETE OLD CHARTS
-   ********************************************************************/
-  sh
-    .getCharts()
-    .forEach(
-      function(chart) {
-
-        sh.removeChart(
-          chart
-        );
-
-      }
-    );
-
-
-  /********************************************************************
-   * CLEAR OLD CONTENT
-   ********************************************************************/
-  sh.clear();
-
-
-  sh.setFrozenRows(0);
-
-
-  return sh;
-
-}
-
-
-/**********************************************************************
- *
- * HELPER:
- * FIND COLUMN BY HEADER
- *
- **********************************************************************/
-function findHeader_(
-  headers,
-  candidates
-) {
-
-  const normHeaders =
-    headers.map(
-      normalizeHeader_
-    );
-
-
-  for (
-    const candidate
-    of candidates
-  ) {
-
-    const target =
-      normalizeHeader_(
-        candidate
-      );
-
-
-    const idx =
-      normHeaders.indexOf(
-        target
-      );
-
-
-    if (
-      idx !== -1
-    ) {
-
-      return idx + 1;
-
-    }
-
-  }
-
-
-  return null;
-
-}
-
-
-/**********************************************************************
- * NORMALIZE HEADER
- **********************************************************************/
-function normalizeHeader_(
-  value
-) {
-
-  return String(
-    value || ""
-  )
-    .trim()
-    .toLowerCase()
-    .replace(
-      /\s+/g,
-      " "
-    );
-
-}
-
-
-/**********************************************************************
- *
- * COLUMN NUMBER → LETTER
- *
- **********************************************************************/
-function colLetter_(
-  number
-) {
-
-  let result =
-    "";
-
-
-  while (
-    number > 0
-  ) {
-
-    const remainder =
-      (number - 1) % 26;
-
-
-    result =
-
-      String.fromCharCode(
-        65 + remainder
-      ) +
-
-      result;
-
-
-    number =
-
-      Math.floor(
-        (number - 1) / 26
-      );
-
-  }
-
-
-  return result;
-
-}
-
-
-/**********************************************************************
- *
- * GET UNIQUE NUMERIC VALUES
- *
- * Used for:
- *
- * - durations
- * - prescription quantities
- * - deviation values
- *
- **********************************************************************/
-function uniqueNumericAuditValues_(
-  audit,
-  auditLastRow,
-  valueCol,
-  procedureCol,
-  allowZero
-) {
-
-  SpreadsheetApp.flush();
-
-
-  const values =
-
-    audit
-      .getRange(
-        5,
-        1,
-        auditLastRow - 4,
-        Math.max(
-          valueCol,
-          procedureCol
-        )
-      )
-      .getValues();
-
-
-  const set =
-    new Set();
-
-
-  values.forEach(
-    function(row) {
-
-      const procedure =
-
-        String(
-          row[
-            procedureCol - 1
-          ] || ""
-        );
-
-
-      const rawValue =
-        row[
-          valueCol - 1
-        ];
-
-
-      /****************************************************************
-       * IMPORTANT:
-       * Do not treat a blank cell as zero.
-       ****************************************************************/
-      if (
-        rawValue === "" ||
-        rawValue === null
-      ) {
-
-        return;
-
-      }
-
-
-      const value =
-        Number(
-          rawValue
-        );
-
-
-      if (
-        (
-          procedure === "Knee" ||
-          procedure === "Hip"
-        ) &&
-        Number.isFinite(
-          value
-        )
-      ) {
-
-        if (
-          allowZero ||
-          value > 0
-        ) {
-
-          set.add(
-            value
-          );
-
-        }
-
-      }
-
-    }
-  );
-
-
-  return Array
-    .from(
-      set
-    )
-    .sort(
-      function(a, b) {
-
-        return a - b;
-
-      }
-    );
-
-}
-
-
-/**********************************************************************
- *
- * SHEET TITLE
- *
- **********************************************************************/
-function addSheetTitle_(
-  sh,
-  title
-) {
-
-  sh
-    .getRange("A1:H1")
-    .merge()
-    .setValue(
-      title
-    );
-
-
-  styleTitle_(
-    sh.getRange("A1:H1")
-  );
-
-}
-
-
-/**********************************************************************
- *
- * STANDARD / REFERENCE NOTE
- *
- **********************************************************************/
-function addStandardNote_(
-  sh,
-  text
-) {
-
-  sh
-    .getRange("A2:H2")
-    .merge()
-    .setValue(
-      text
-    )
-    .setWrap(true);
-
-
-  sh
-    .getRange("A3:H3")
+    .getRange("D3:H7")
     .merge()
     .setValue(
 
-      `MUE standard: apixaban ${MUE.DOSE_MG} mg BID; ` +
+      "Matching logic:\n\n" +
 
-      `knee ${MUE.KNEE_DAYS} days; ` +
+      "1. DOB + gender + surgery date is used when DOB is available in Sheet1.\n\n" +
 
-      `hip ${MUE.HIP_DAYS} days. ` +
+      "2. If Sheet1 does not contain DOB, age + gender + surgery date is used as a fallback.\n\n" +
 
-      `FDA source: ${MUE.FDA_URL}`
+      "3. Only patients already present in Sheet1 are included. " +
+
+      "Ortho patients that were excluded from the study are never added."
 
     )
-    .setWrap(true);
-
-}
-
-
-/**********************************************************************
- * TITLE FORMAT
- **********************************************************************/
-function styleTitle_(
-  range
-) {
-
-  range
-    .setFontSize(16)
-
-    .setFontWeight(
-      "bold"
-    )
-
-    .setHorizontalAlignment(
-      "center"
-    )
-
-    .setBackground(
-      "#D9EAF7"
-    );
-
-}
-
-
-/**********************************************************************
- * TABLE HEADER FORMAT
- **********************************************************************/
-function styleHeader_(
-  range
-) {
-
-  range
-    .setFontWeight(
-      "bold"
-    )
-
-    .setHorizontalAlignment(
-      "center"
-    )
-
-    .setBackground(
-      "#EAF2F8"
-    );
-
-}
-
-
-/**********************************************************************
- * FINISH GRAPH SHEET
- **********************************************************************/
-function finishGraphSheet_(
-  sh
-) {
-
-  sh
-    .getDataRange()
+    .setWrap(true)
     .setVerticalAlignment(
-      "middle"
+      "top"
     );
+
+
+  /********************************************************************
+   * PATIENT AUDIT TABLE
+   ********************************************************************/
+  const headers = [
+
+    "Sheet1 Row",
+
+    "DOB",
+
+    "Age",
+
+    "Gender",
+
+    "Surgery Date",
+
+    "Surgery Type",
+
+    "Facility",
+
+    "Raw Facility",
+
+    "Match Status",
+
+    "Match Method",
+
+    "Ortho Match Count",
+
+    "Matched Ortho Row(s)",
+
+    "Total Joint Evaluable",
+
+    "Dose Assessment",
+
+    "Duration Assessment",
+
+    "Overall Regimen"
+
+  ];
+
+
+  sh
+    .getRange(
+      10,
+      1,
+      1,
+      headers.length
+    )
+    .setValues([
+      headers
+    ]);
+
+
+  styleSectionHeader_(
+    sh.getRange(
+      10,
+      1,
+      1,
+      headers.length
+    )
+  );
+
+
+  const rows =
+    records.map(
+      r => [
+
+        r.sourceRow,
+
+        r.dob,
+
+        r.age,
+
+        r.gender,
+
+        r.surgeryDate,
+
+        r.surgeryType,
+
+        r.facility,
+
+        r.rawFacility,
+
+        r.matchStatus,
+
+        r.matchMethod,
+
+        r.orthoMatchCount,
+
+        r.matchedOrthoRows,
+
+        r.totalJointEvaluable
+          ?
+          "Yes"
+          :
+          "No",
+
+        r.doseAssessment,
+
+        r.durationAssessment,
+
+        r.overallRegimen
+
+      ]
+    );
+
+
+  if (
+    rows.length > 0
+  ) {
+
+    sh
+      .getRange(
+        11,
+        1,
+        rows.length,
+        headers.length
+      )
+      .setValues(
+        rows
+      );
+
+  }
+
+
+  sh
+    .getRange(
+      10,
+      1,
+      rows.length + 1,
+      headers.length
+    )
+    .setBorder(
+      true,
+      true,
+      true,
+      true,
+      true,
+      true,
+      "#D5DCE2",
+      SpreadsheetApp.BorderStyle.SOLID
+    );
+
+
+  sh
+    .getRange(
+      10,
+      1,
+      rows.length + 1,
+      headers.length
+    )
+    .setWrap(true);
 
 
   sh.setFrozenRows(
-    3
+    10
   );
 
 
-  for (
-    let column = 1;
-    column <= Math.min(
-      sh.getMaxColumns(),
-      15
-    );
-    column++
-  ) {
+  /********************************************************************
+   * COLUMN WIDTHS
+   ********************************************************************/
+  const widths = [
 
-    const current =
-      sh.getColumnWidth(
-        column
-      );
+    90,
+    100,
+    70,
+    90,
+    110,
+    300,
+    150,
+    110,
+    180,
+    220,
+    110,
+    150,
+    140,
+    150,
+    170,
+    170
 
+  ];
 
-    if (
-      current < 90
-    ) {
-
-      sh.setColumnWidth(
-        column,
-        100
-      );
-
-    }
-
-  }
-
-}
-
-
-/**********************************************************************
- * SET MULTIPLE COLUMN WIDTHS
- **********************************************************************/
-function setCommonWidths_(
-  sh,
-  widths
-) {
 
   widths.forEach(
     function(
@@ -3531,57 +1937,3246 @@ function setCommonWidths_(
 
 /**********************************************************************
  *
- * GOOGLE SHEETS MENU
- *
- * Refresh the Google Sheet after saving.
+ * BUILD FINAL MUE TABLES
  *
  **********************************************************************/
-function onOpen() {
+function buildMUEOutputTables_(
+  ss,
+  records
+) {
 
-  SpreadsheetApp
-    .getUi()
+  const sh =
+    resetTableSheet_(
+      ss,
+      MUE_TABLE_CONFIG.OUTPUT_SHEET
+    );
 
-    .createMenu(
-      "Apixaban MUE"
+
+  /********************************************************************
+   * PAGE TITLE
+   ********************************************************************/
+  sh
+    .getRange("A1:C1")
+    .merge()
+    .setValue(
+      "Appendix: Tables and Figures"
     )
-
-    .addItem(
-      "Build ALL MUE Graphs",
-      "buildAllMUEGraphs"
+    .setFontSize(15)
+    .setFontWeight(
+      "bold"
     )
+    .setHorizontalAlignment(
+      "left"
+    );
 
-    .addSeparator()
 
-    .addItem(
-      "Duration Appropriateness",
-      "buildDurationAppropriatenessGraph"
+  const totalN =
+    records.length;
+
+
+  /********************************************************************
+   *
+   * TABLE 1
+   *
+   * BASELINE CHARACTERISTICS
+   *
+   ********************************************************************/
+  let row = 3;
+
+
+  row =
+    buildTable1_(
+      sh,
+      records,
+      row,
+      totalN
+    );
+
+
+  row += 3;
+
+
+  /********************************************************************
+   *
+   * TABLE 2
+   *
+   * APIXABAN USE
+   *
+   ********************************************************************/
+  row =
+    buildTable2_(
+      sh,
+      records,
+      row,
+      totalN
+    );
+
+
+  row += 3;
+
+
+  /********************************************************************
+   *
+   * TABLE 3
+   *
+   * HIP VS KNEE
+   *
+   ********************************************************************/
+  row =
+    buildTable3_(
+      sh,
+      records,
+      row
+    );
+
+
+  /********************************************************************
+   * FOOTNOTES
+   ********************************************************************/
+  row += 3;
+
+
+  sh
+    .getRange(
+      row,
+      1,
+      1,
+      3
     )
+    .merge()
+    .setValue(
 
-    .addItem(
-      "Duration Distribution",
-      "buildDurationDistributionGraph"
+      "Note: Duration appropriateness was evaluated using apixaban " +
+
+      MUE_TABLE_CONFIG.APPROPRIATE_DOSE_MG +
+
+      " mg twice daily with a treatment duration of " +
+
+      MUE_TABLE_CONFIG.KNEE_DURATION_DAYS +
+
+      " days following total knee arthroplasty and " +
+
+      MUE_TABLE_CONFIG.HIP_DURATION_DAYS +
+
+      " days following total hip arthroplasty. " +
+
+      "Generic orthopedic procedure labels that did not clearly identify " +
+
+      "total arthroplasty were not automatically classified for duration appropriateness."
+
     )
+    .setWrap(true)
+    .setFontSize(9)
+    .setFontStyle(
+      "italic"
+    );
 
-    .addItem(
-      "Regimen Adherence",
-      "buildRegimenAdherenceGraph"
+
+  sh
+    .getRange(
+      row + 1,
+      1,
+      1,
+      3
     )
-
-    .addItem(
-      "Rx Quantity",
-      "buildRxQuantityGraph"
+    .merge()
+    .setValue(
+      "FDA prescribing information: " +
+      MUE_TABLE_CONFIG.FDA_URL
     )
+    .setWrap(true)
+    .setFontSize(9);
 
-    .addItem(
-      "Duration Deviation",
-      "buildDurationDeviationGraph"
+
+  /********************************************************************
+   * GENERAL FORMATTING
+   ********************************************************************/
+  sh
+    .getDataRange()
+    .setFontFamily(
+      "Arial"
     )
+    .setVerticalAlignment(
+      "middle"
+    );
 
-    .addItem(
-      "Overall Regimen Pie",
-      "buildOverallRegimenPieChart"
+
+  sh.setColumnWidth(
+    1,
+    430
+  );
+
+
+  sh.setColumnWidth(
+    2,
+    170
+  );
+
+
+  sh.setColumnWidth(
+    3,
+    170
+  );
+
+
+  sh
+    .getDataRange()
+    .setWrap(true);
+
+}
+
+
+/**********************************************************************
+ *
+ * TABLE 1: BASELINE CHARACTERISTICS
+ *
+ **********************************************************************/
+function buildTable1_(
+  sh,
+  records,
+  startRow,
+  totalN
+) {
+
+  let r =
+    startRow;
+
+
+  /********************************************************************
+   * TITLE
+   ********************************************************************/
+  sh
+    .getRange(
+      r,
+      1,
+      1,
+      2
     )
+    .merge()
+    .setValue(
+      "Table 1: Baseline Characteristics (n=" +
+      totalN +
+      ")"
+    );
 
-    .addToUi();
+
+  styleTableTitle_(
+    sh.getRange(
+      r,
+      1,
+      1,
+      2
+    )
+  );
+
+
+  r++;
+
+
+  /********************************************************************
+   * AGE
+   ********************************************************************/
+  const ages =
+    numericValues_(
+      records,
+      "age"
+    );
+
+
+  addNormalTableRow_(
+    sh,
+    r++,
+    "Median age, years (IQR)",
+    formatMedianIQR_(
+      ages,
+      0
+    )
+  );
+
+
+  /********************************************************************
+   * BMI
+   ********************************************************************/
+  const bmis =
+    numericValues_(
+      records,
+      "bmi"
+    );
+
+
+  if (
+    bmis.length > 0
+  ) {
+
+    addNormalTableRow_(
+      sh,
+      r++,
+      "Median BMI, kg/m² (IQR)",
+      formatMedianIQR_(
+        bmis,
+        1
+      )
+    );
+
+  }
+
+
+  /********************************************************************
+   * SEX
+   ********************************************************************/
+  addSectionTableRow_(
+    sh,
+    r++,
+    "Sex, n (%)",
+    ""
+  );
+
+
+  const maleN =
+    countField_(
+      records,
+      "gender",
+      "Male"
+    );
+
+
+  const femaleN =
+    countField_(
+      records,
+      "gender",
+      "Female"
+    );
+
+
+  addIndentedTableRow_(
+    sh,
+    r++,
+    "Male",
+    formatNPct_(
+      maleN,
+      totalN
+    )
+  );
+
+
+  addIndentedTableRow_(
+    sh,
+    r++,
+    "Female",
+    formatNPct_(
+      femaleN,
+      totalN
+    )
+  );
+
+
+  /********************************************************************
+   * FACILITY
+   ********************************************************************/
+  addSectionTableRow_(
+    sh,
+    r++,
+    "Facility where procedure performed, n (%)",
+    ""
+  );
+
+
+  const facilityCounts =
+    countFacilities_(
+      records
+    );
+
+
+  const facilities =
+    sortFacilities_(
+      Object.keys(
+        facilityCounts
+      )
+    );
+
+
+  facilities.forEach(
+    function(
+      facility
+    ) {
+
+      addIndentedTableRow_(
+        sh,
+        r++,
+        facility,
+        formatNPct_(
+          facilityCounts[
+            facility
+          ],
+          totalN
+        )
+      );
+
+    }
+  );
+
+
+  /********************************************************************
+   * PROCEDURE
+   ********************************************************************/
+  addSectionTableRow_(
+    sh,
+    r++,
+    "Procedure location/type, n (%)",
+    ""
+  );
+
+
+  const kneeN =
+    records.filter(
+      x =>
+        x.broadProcedure ===
+        "Knee"
+    ).length;
+
+
+  const hipN =
+    records.filter(
+      x =>
+        x.broadProcedure ===
+        "Hip"
+    ).length;
+
+
+  const otherN =
+    totalN -
+    kneeN -
+    hipN;
+
+
+  addIndentedTableRow_(
+    sh,
+    r++,
+    "Knee procedure",
+    formatNPct_(
+      kneeN,
+      totalN
+    )
+  );
+
+
+  addIndentedTableRow_(
+    sh,
+    r++,
+    "Hip procedure",
+    formatNPct_(
+      hipN,
+      totalN
+    )
+  );
+
+
+  if (
+    otherN > 0
+  ) {
+
+    addIndentedTableRow_(
+      sh,
+      r++,
+      "Other/unclear",
+      formatNPct_(
+        otherN,
+        totalN
+      )
+    );
+
+  }
+
+
+  /********************************************************************
+   * PRIMARY / REVISION
+   ********************************************************************/
+  if (
+    records.some(
+      x =>
+        x.primaryRevision
+    )
+  ) {
+
+    addSectionTableRow_(
+      sh,
+      r++,
+      "Procedure classification, n (%)",
+      ""
+    );
+
+
+    const primary =
+      countContains_(
+        records,
+        "primaryRevision",
+        "primary"
+      );
+
+
+    const revision =
+      countContains_(
+        records,
+        "primaryRevision",
+        "revision"
+      );
+
+
+    addIndentedTableRow_(
+      sh,
+      r++,
+      "Primary",
+      formatNPct_(
+        primary,
+        totalN
+      )
+    );
+
+
+    addIndentedTableRow_(
+      sh,
+      r++,
+      "Revision",
+      formatNPct_(
+        revision,
+        totalN
+      )
+    );
+
+  }
+
+
+  /********************************************************************
+   * ELECTIVE / URGENT
+   ********************************************************************/
+  if (
+    records.some(
+      x =>
+        x.urgency
+    )
+  ) {
+
+    addSectionTableRow_(
+      sh,
+      r++,
+      "Procedure urgency, n (%)",
+      ""
+    );
+
+
+    const elective =
+      countContains_(
+        records,
+        "urgency",
+        "elective"
+      );
+
+
+    const urgent =
+      records.filter(
+        x => {
+
+          const text =
+            normalizeText_(
+              x.urgency
+            );
+
+
+          return (
+            text.indexOf(
+              "urgent"
+            ) !== -1 ||
+            text.indexOf(
+              "emerg"
+            ) !== -1
+          );
+
+        }
+      ).length;
+
+
+    addIndentedTableRow_(
+      sh,
+      r++,
+      "Elective",
+      formatNPct_(
+        elective,
+        totalN
+      )
+    );
+
+
+    addIndentedTableRow_(
+      sh,
+      r++,
+      "Urgent/emergent",
+      formatNPct_(
+        urgent,
+        totalN
+      )
+    );
+
+  }
+
+
+  applyTwoColumnTableBorders_(
+    sh,
+    startRow,
+    r - 1
+  );
+
+
+  return r;
+
+}
+
+
+/**********************************************************************
+ *
+ * TABLE 2: APIXABAN USE
+ *
+ **********************************************************************/
+function buildTable2_(
+  sh,
+  records,
+  startRow,
+  totalN
+) {
+
+  let r =
+    startRow;
+
+
+  sh
+    .getRange(
+      r,
+      1,
+      1,
+      2
+    )
+    .merge()
+    .setValue(
+      "Table 2: Apixaban Use (n=" +
+      totalN +
+      ")"
+    );
+
+
+  styleTableTitle_(
+    sh.getRange(
+      r,
+      1,
+      1,
+      2
+    )
+  );
+
+
+  r++;
+
+
+  /********************************************************************
+   * INDICATION DOCUMENTED
+   ********************************************************************/
+  if (
+    records.some(
+      x =>
+        x.indication !==
+        "Unknown"
+    )
+  ) {
+
+    addSectionTableRow_(
+      sh,
+      r++,
+      "Indication documented, n (%)",
+      ""
+    );
+
+
+    const indicationYes =
+      countField_(
+        records,
+        "indication",
+        "Yes"
+      );
+
+
+    const indicationNo =
+      countField_(
+        records,
+        "indication",
+        "No"
+      );
+
+
+    addIndentedTableRow_(
+      sh,
+      r++,
+      "Yes",
+      formatNPct_(
+        indicationYes,
+        totalN
+      )
+    );
+
+
+    addIndentedTableRow_(
+      sh,
+      r++,
+      "No",
+      formatNPct_(
+        indicationNo,
+        totalN
+      )
+    );
+
+  }
+
+
+  /********************************************************************
+   * DOSE APPROPRIATENESS
+   ********************************************************************/
+  addSectionTableRow_(
+    sh,
+    r++,
+    "Appropriate discharge dose/frequency, n (%)",
+    ""
+  );
+
+
+  const doseAppropriate =
+    countField_(
+      records,
+      "doseAssessment",
+      "Appropriate"
+    );
+
+
+  const doseInappropriate =
+    countField_(
+      records,
+      "doseAssessment",
+      "Inappropriate"
+    );
+
+
+  const doseUnable =
+    countField_(
+      records,
+      "doseAssessment",
+      "Unable to determine"
+    );
+
+
+  addIndentedTableRow_(
+    sh,
+    r++,
+    "Yes",
+    formatNPct_(
+      doseAppropriate,
+      totalN
+    )
+  );
+
+
+  addIndentedTableRow_(
+    sh,
+    r++,
+    "No",
+    formatNPct_(
+      doseInappropriate,
+      totalN
+    )
+  );
+
+
+  if (
+    doseUnable > 0
+  ) {
+
+    addIndentedTableRow_(
+      sh,
+      r++,
+      "Unable to determine",
+      formatNPct_(
+        doseUnable,
+        totalN
+      )
+    );
+
+  }
+
+
+  /********************************************************************
+   * DURATION
+   ********************************************************************/
+  const evaluable =
+    records.filter(
+      x =>
+        x.totalJointEvaluable
+    );
+
+
+  const evaluableN =
+    evaluable.length;
+
+
+  addSectionTableRow_(
+    sh,
+    r++,
+    "Duration appropriateness among confirmed total arthroplasty patients (n=" +
+    evaluableN +
+    "), n (%)",
+    ""
+  );
+
+
+  const durationAppropriate =
+    countField_(
+      evaluable,
+      "durationAssessment",
+      "Appropriate"
+    );
+
+
+  const durationLong =
+    countField_(
+      evaluable,
+      "durationAssessment",
+      "Too long"
+    );
+
+
+  const durationShort =
+    countField_(
+      evaluable,
+      "durationAssessment",
+      "Too short"
+    );
+
+
+  const durationUnable =
+    countField_(
+      evaluable,
+      "durationAssessment",
+      "Unable to determine"
+    );
+
+
+  addIndentedTableRow_(
+    sh,
+    r++,
+    "Appropriate",
+    formatNPct_(
+      durationAppropriate,
+      evaluableN
+    )
+  );
+
+
+  addIndentedTableRow_(
+    sh,
+    r++,
+    "Too long",
+    formatNPct_(
+      durationLong,
+      evaluableN
+    )
+  );
+
+
+  addIndentedTableRow_(
+    sh,
+    r++,
+    "Too short",
+    formatNPct_(
+      durationShort,
+      evaluableN
+    )
+  );
+
+
+  if (
+    durationUnable > 0
+  ) {
+
+    addIndentedTableRow_(
+      sh,
+      r++,
+      "Unable to determine",
+      formatNPct_(
+        durationUnable,
+        evaluableN
+      )
+    );
+
+  }
+
+
+  /********************************************************************
+   * OVERALL REGIMEN
+   ********************************************************************/
+  addSectionTableRow_(
+    sh,
+    r++,
+    "Overall regimen appropriateness (n=" +
+    evaluableN +
+    "), n (%)",
+    ""
+  );
+
+
+  const fullyAppropriate =
+    countField_(
+      evaluable,
+      "overallRegimen",
+      "Fully appropriate"
+    );
+
+
+  const overallInappropriate =
+    countField_(
+      evaluable,
+      "overallRegimen",
+      "Inappropriate"
+    );
+
+
+  const overallUnable =
+    countField_(
+      evaluable,
+      "overallRegimen",
+      "Unable to determine"
+    );
+
+
+  addIndentedTableRow_(
+    sh,
+    r++,
+    "Fully appropriate",
+    formatNPct_(
+      fullyAppropriate,
+      evaluableN
+    )
+  );
+
+
+  addIndentedTableRow_(
+    sh,
+    r++,
+    "Inappropriate",
+    formatNPct_(
+      overallInappropriate,
+      evaluableN
+    )
+  );
+
+
+  if (
+    overallUnable > 0
+  ) {
+
+    addIndentedTableRow_(
+      sh,
+      r++,
+      "Unable to determine",
+      formatNPct_(
+        overallUnable,
+        evaluableN
+      )
+    );
+
+  }
+
+
+  /********************************************************************
+   * DURATION / QUANTITY
+   ********************************************************************/
+  const durations =
+    evaluable
+      .map(
+        x =>
+          x.duration
+      )
+      .filter(
+        isValidNumber_
+      );
+
+
+  if (
+    durations.length > 0
+  ) {
+
+    addNormalTableRow_(
+      sh,
+      r++,
+      "Median treatment duration, days (IQR)",
+      formatMedianIQR_(
+        durations,
+        0
+      )
+    );
+
+  }
+
+
+  const quantities =
+    numericValues_(
+      records,
+      "rxQuantity"
+    );
+
+
+  if (
+    quantities.length > 0
+  ) {
+
+    addNormalTableRow_(
+      sh,
+      r++,
+      "Median discharge prescription quantity, tablets (IQR)",
+      formatMedianIQR_(
+        quantities,
+        0
+      )
+    );
+
+  }
+
+
+  /********************************************************************
+   * REFILLS
+   ********************************************************************/
+  const recordsWithRefills =
+    records.filter(
+      x =>
+        isValidNumber_(
+          x.refills
+        )
+    );
+
+
+  if (
+    recordsWithRefills.length >
+    0
+  ) {
+
+    const refillGreaterZero =
+      recordsWithRefills.filter(
+        x =>
+          x.refills > 0
+      ).length;
+
+
+    addNormalTableRow_(
+      sh,
+      r++,
+      "Prescription with ≥1 refill, n (%)",
+      formatNPct_(
+        refillGreaterZero,
+        recordsWithRefills.length
+      )
+    );
+
+  }
+
+
+  /********************************************************************
+   * CONCOMITANT MEDICATIONS
+   ********************************************************************/
+  addSectionTableRow_(
+    sh,
+    r++,
+    "Concomitant medications, n (%)",
+    ""
+  );
+
+
+  addIndentedTableRow_(
+    sh,
+    r++,
+    "Aspirin",
+    formatNPct_(
+      countField_(
+        records,
+        "aspirin",
+        "Yes"
+      ),
+      totalN
+    )
+  );
+
+
+  addIndentedTableRow_(
+    sh,
+    r++,
+    "Clopidogrel or other antiplatelet",
+    formatNPct_(
+      countField_(
+        records,
+        "antiplatelet",
+        "Yes"
+      ),
+      totalN
+    )
+  );
+
+
+  addIndentedTableRow_(
+    sh,
+    r++,
+    "NSAID",
+    formatNPct_(
+      countField_(
+        records,
+        "nsaid",
+        "Yes"
+      ),
+      totalN
+    )
+  );
+
+
+  addIndentedTableRow_(
+    sh,
+    r++,
+    "Other anticoagulant",
+    formatNPct_(
+      countField_(
+        records,
+        "otherAnticoagulant",
+        "Yes"
+      ),
+      totalN
+    )
+  );
+
+
+  addIndentedTableRow_(
+    sh,
+    r++,
+    "Heparin or enoxaparin",
+    formatNPct_(
+      countField_(
+        records,
+        "heparin",
+        "Yes"
+      ),
+      totalN
+    )
+  );
+
+
+  applyTwoColumnTableBorders_(
+    sh,
+    startRow,
+    r - 1
+  );
+
+
+  return r;
+
+}
+
+
+/**********************************************************************
+ *
+ * TABLE 3
+ *
+ * DURATION BY PROCEDURE
+ *
+ **********************************************************************/
+function buildTable3_(
+  sh,
+  records,
+  startRow
+) {
+
+  let r =
+    startRow;
+
+
+  const knee =
+    records.filter(
+      x =>
+        x.totalJointProcedure ===
+        "Knee"
+    );
+
+
+  const hip =
+    records.filter(
+      x =>
+        x.totalJointProcedure ===
+        "Hip"
+    );
+
+
+  const kneeN =
+    knee.length;
+
+
+  const hipN =
+    hip.length;
+
+
+  /********************************************************************
+   * TITLE
+   ********************************************************************/
+  sh
+    .getRange(
+      r,
+      1,
+      1,
+      3
+    )
+    .merge()
+    .setValue(
+      "Table 3: Apixaban Duration by Procedure Type"
+    );
+
+
+  styleTableTitle_(
+    sh.getRange(
+      r,
+      1,
+      1,
+      3
+    )
+  );
+
+
+  r++;
+
+
+  /********************************************************************
+   * COLUMN HEADERS
+   ********************************************************************/
+  sh
+    .getRange(
+      r,
+      1,
+      1,
+      3
+    )
+    .setValues([
+      [
+        "Duration Assessment",
+        "Total Knee Arthroplasty (n=" +
+          kneeN +
+          ")",
+        "Total Hip Arthroplasty (n=" +
+          hipN +
+          ")"
+      ]
+    ]);
+
+
+  styleSectionHeader_(
+    sh.getRange(
+      r,
+      1,
+      1,
+      3
+    )
+  );
+
+
+  r++;
+
+
+  const categories = [
+
+    "Appropriate",
+    "Too long",
+    "Too short",
+    "Unable to determine"
+
+  ];
+
+
+  categories.forEach(
+    function(
+      category
+    ) {
+
+      const kneeCount =
+        countField_(
+          knee,
+          "durationAssessment",
+          category
+        );
+
+
+      const hipCount =
+        countField_(
+          hip,
+          "durationAssessment",
+          category
+        );
+
+
+      sh
+        .getRange(
+          r,
+          1,
+          1,
+          3
+        )
+        .setValues([
+          [
+            category + ", n (%)",
+
+            formatNPct_(
+              kneeCount,
+              kneeN
+            ),
+
+            formatNPct_(
+              hipCount,
+              hipN
+            )
+          ]
+        ]);
+
+
+      r++;
+
+    }
+  );
+
+
+  /********************************************************************
+   * MEDIAN DURATION
+   ********************************************************************/
+  const kneeDuration =
+    numericValues_(
+      knee,
+      "duration"
+    );
+
+
+  const hipDuration =
+    numericValues_(
+      hip,
+      "duration"
+    );
+
+
+  sh
+    .getRange(
+      r,
+      1,
+      1,
+      3
+    )
+    .setValues([
+      [
+        "Median prescribed duration, days (IQR)",
+
+        formatMedianIQR_(
+          kneeDuration,
+          0
+        ),
+
+        formatMedianIQR_(
+          hipDuration,
+          0
+        )
+      ]
+    ]);
+
+
+  r++;
+
+
+  /********************************************************************
+   * MEDIAN DEVIATION
+   ********************************************************************/
+  const kneeDeviation =
+    numericValues_(
+      knee,
+      "durationDeviation"
+    );
+
+
+  const hipDeviation =
+    numericValues_(
+      hip,
+      "durationDeviation"
+    );
+
+
+  sh
+    .getRange(
+      r,
+      1,
+      1,
+      3
+    )
+    .setValues([
+      [
+        "Median deviation from recommended duration, days (IQR)",
+
+        formatMedianIQR_(
+          kneeDeviation,
+          0,
+          true
+        ),
+
+        formatMedianIQR_(
+          hipDeviation,
+          0,
+          true
+        )
+      ]
+    ]);
+
+
+  r++;
+
+
+  sh
+    .getRange(
+      startRow,
+      1,
+      r - startRow,
+      3
+    )
+    .setBorder(
+      true,
+      true,
+      true,
+      true,
+      true,
+      true,
+      "#B7C5D1",
+      SpreadsheetApp.BorderStyle.SOLID
+    );
+
+
+  sh
+    .getRange(
+      startRow + 2,
+      2,
+      r - startRow - 2,
+      2
+    )
+    .setHorizontalAlignment(
+      "center"
+    );
+
+
+  return r;
+
+}
+
+
+/**********************************************************************
+ *
+ * PROCEDURE CLASSIFICATION
+ *
+ **********************************************************************/
+function classifyBroadProcedure_(
+  value
+) {
+
+  const s =
+    normalizeText_(
+      value
+    );
+
+
+  if (
+    s.indexOf(
+      "knee"
+    ) !== -1 ||
+    regexSafeTest_(
+      /(^|[^a-z])tka([^a-z]|$)/,
+      s
+    )
+  ) {
+
+    return "Knee";
+
+  }
+
+
+  if (
+    s.indexOf(
+      "hip"
+    ) !== -1 ||
+    regexSafeTest_(
+      /(^|[^a-z])tha([^a-z]|$)/,
+      s
+    )
+  ) {
+
+    return "Hip";
+
+  }
+
+
+  return "Other/unclear";
+
+}
+
+
+/**********************************************************************
+ * STRICT TOTAL JOINT CLASSIFICATION
+ **********************************************************************/
+function classifyConfirmedTotalJoint_(
+  value
+) {
+
+  const s =
+    normalizeText_(
+      value
+    );
+
+
+  const isTotal =
+    (
+      s.indexOf(
+        "total joint"
+      ) !== -1 ||
+      s.indexOf(
+        "total knee"
+      ) !== -1 ||
+      s.indexOf(
+        "total hip"
+      ) !== -1 ||
+      s.indexOf(
+        "arthroplasty"
+      ) !== -1 ||
+      regexSafeTest_(
+        /(^|[^a-z])tka([^a-z]|$)/,
+        s
+      ) ||
+      regexSafeTest_(
+        /(^|[^a-z])tha([^a-z]|$)/,
+        s
+      )
+    );
+
+
+  if (!isTotal) {
+
+    return "Not evaluated";
+
+  }
+
+
+  if (
+    s.indexOf(
+      "knee"
+    ) !== -1 ||
+    regexSafeTest_(
+      /(^|[^a-z])tka([^a-z]|$)/,
+      s
+    )
+  ) {
+
+    return "Knee";
+
+  }
+
+
+  if (
+    s.indexOf(
+      "hip"
+    ) !== -1 ||
+    regexSafeTest_(
+      /(^|[^a-z])tha([^a-z]|$)/,
+      s
+    )
+  ) {
+
+    return "Hip";
+
+  }
+
+
+  return "Not evaluated";
+
+}
+
+
+/**********************************************************************
+ *
+ * DOSE ASSESSMENT
+ *
+ **********************************************************************/
+function assessDose_(
+  dose,
+  frequency
+) {
+
+  if (
+    dose === null ||
+    !frequency
+  ) {
+
+    return "Unable to determine";
+
+  }
+
+
+  const f =
+    normalizeText_(
+      frequency
+    );
+
+
+  const bid =
+    (
+      regexSafeTest_(
+        /(^|[^a-z])bid([^a-z]|$)/,
+        f
+      ) ||
+      f.indexOf(
+        "twice daily"
+      ) !== -1 ||
+      f.indexOf(
+        "twice a day"
+      ) !== -1 ||
+      f.indexOf(
+        "2 times daily"
+      ) !== -1 ||
+      f.indexOf(
+        "2x daily"
+      ) !== -1
+    );
+
+
+  if (
+    Math.abs(
+      dose -
+      MUE_TABLE_CONFIG
+        .APPROPRIATE_DOSE_MG
+    ) < 0.001 &&
+    bid
+  ) {
+
+    return "Appropriate";
+
+  }
+
+
+  return "Inappropriate";
+
+}
+
+
+/**********************************************************************
+ *
+ * DURATION ASSESSMENT
+ *
+ **********************************************************************/
+function assessDuration_(
+  duration,
+  procedure
+) {
+
+  if (
+    procedure !== "Knee" &&
+    procedure !== "Hip"
+  ) {
+
+    return "Not evaluated";
+
+  }
+
+
+  if (
+    duration === null ||
+    duration <= 0
+  ) {
+
+    return "Unable to determine";
+
+  }
+
+
+  const target =
+    procedure ===
+      "Knee"
+
+      ?
+
+      MUE_TABLE_CONFIG
+        .KNEE_DURATION_DAYS
+
+      :
+
+      MUE_TABLE_CONFIG
+        .HIP_DURATION_DAYS;
+
+
+  if (
+    duration ===
+    target
+  ) {
+
+    return "Appropriate";
+
+  }
+
+
+  if (
+    duration >
+    target
+  ) {
+
+    return "Too long";
+
+  }
+
+
+  return "Too short";
+
+}
+
+
+/**********************************************************************
+ *
+ * FACILITY DISPLAY NAMES
+ *
+ * If the raw value is not recognized, the original value is retained.
+ *
+ **********************************************************************/
+function friendlyFacility_(
+  raw
+) {
+
+  const original =
+    cleanText_(
+      raw
+    );
+
+
+  if (!original) {
+
+    return "Unknown / unmatched";
+
+  }
+
+
+  const s =
+    normalizeText_(
+      original
+    );
+
+
+  /********************************************************************
+   * RIVERSIDE
+   ********************************************************************/
+  if (
+    s === "svr" ||
+    s.indexOf(
+      "riverside"
+    ) !== -1
+  ) {
+
+    return "Riverside";
+
+  }
+
+
+  /********************************************************************
+   * SOUTHSIDE
+   ********************************************************************/
+  if (
+    s === "svs" ||
+    s.indexOf(
+      "southside"
+    ) !== -1
+  ) {
+
+    return "Southside";
+
+  }
+
+
+  /********************************************************************
+   * CLAY COUNTY
+   ********************************************************************/
+  if (
+    s === "svc" ||
+    s === "svcc" ||
+    s.indexOf(
+      "clay"
+    ) !== -1
+  ) {
+
+    return "Clay County";
+
+  }
+
+
+  /********************************************************************
+   * ST. JOHNS COUNTY
+   ********************************************************************/
+  if (
+    s === "svj" ||
+    s === "svsj" ||
+    s.indexOf(
+      "st john"
+    ) !== -1 ||
+    s.indexOf(
+      "saint john"
+    ) !== -1
+  ) {
+
+    return "St. Johns County";
+
+  }
+
+
+  return original;
+
+}
+
+
+/**********************************************************************
+ *
+ * SORT FACILITIES
+ *
+ **********************************************************************/
+function sortFacilities_(
+  facilities
+) {
+
+  const preferred = [
+
+    "Riverside",
+
+    "Clay County",
+
+    "Southside",
+
+    "St. Johns County"
+
+  ];
+
+
+  return facilities.sort(
+    function(
+      a,
+      b
+    ) {
+
+      const ai =
+        preferred.indexOf(
+          a
+        );
+
+
+      const bi =
+        preferred.indexOf(
+          b
+        );
+
+
+      if (
+        ai !== -1 &&
+        bi !== -1
+      ) {
+
+        return ai - bi;
+
+      }
+
+
+      if (
+        ai !== -1
+      ) {
+
+        return -1;
+
+      }
+
+
+      if (
+        bi !== -1
+      ) {
+
+        return 1;
+
+      }
+
+
+      if (
+        a.indexOf(
+          "Unknown"
+        ) === 0 &&
+        b.indexOf(
+          "Unknown"
+        ) !== 0
+      ) {
+
+        return 1;
+
+      }
+
+
+      if (
+        b.indexOf(
+          "Unknown"
+        ) === 0 &&
+        a.indexOf(
+          "Unknown"
+        ) !== 0
+      ) {
+
+        return -1;
+
+      }
+
+
+      return a.localeCompare(
+        b
+      );
+
+    }
+  );
+
+}
+
+
+/**********************************************************************
+ *
+ * COUNT FACILITIES
+ *
+ **********************************************************************/
+function countFacilities_(
+  records
+) {
+
+  const counts = {};
+
+
+  records.forEach(
+    function(
+      record
+    ) {
+
+      const facility =
+        record.facility ||
+        "Unknown / unmatched";
+
+
+      if (
+        !counts[
+          facility
+        ]
+      ) {
+
+        counts[
+          facility
+        ] = 0;
+
+      }
+
+
+      counts[
+        facility
+      ]++;
+
+    }
+  );
+
+
+  return counts;
+
+}
+
+
+/**********************************************************************
+ *
+ * HEADER FINDER
+ *
+ * Returns ZERO-BASED INDEX
+ *
+ **********************************************************************/
+function findTableHeader_(
+  headers,
+  candidates,
+  required
+) {
+
+  const normalized =
+    headers.map(
+      function(
+        h
+      ) {
+
+        return normalizeText_(
+          h
+        );
+
+      }
+    );
+
+
+  for (
+    let i = 0;
+    i < candidates.length;
+    i++
+  ) {
+
+    const candidate =
+      normalizeText_(
+        candidates[i]
+      );
+
+
+    const index =
+      normalized.indexOf(
+        candidate
+      );
+
+
+    if (
+      index !== -1
+    ) {
+
+      return index;
+
+    }
+
+  }
+
+
+  if (
+    required
+  ) {
+
+    throw new Error(
+
+      "Required column not found. Expected one of:\n" +
+
+      candidates.join(
+        "\n"
+      )
+
+    );
+
+  }
+
+
+  return null;
+
+}
+
+
+/**********************************************************************
+ *
+ * GET VALUE FROM ZERO-BASED COLUMN INDEX
+ *
+ **********************************************************************/
+function getColValue_(
+  row,
+  index
+) {
+
+  if (
+    index === null ||
+    index === undefined
+  ) {
+
+    return "";
+
+  }
+
+
+  return row[index];
+
+}
+
+
+/**********************************************************************
+ *
+ * NORMALIZE AGE
+ *
+ **********************************************************************/
+function normalizeAge_(
+  value
+) {
+
+  if (
+    value === null ||
+    value === undefined ||
+    value === ""
+  ) {
+
+    return null;
+
+  }
+
+
+  if (
+    typeof value ===
+    "number"
+  ) {
+
+    return Math.round(
+      value
+    );
+
+  }
+
+
+  const match =
+    String(
+      value
+    )
+      .match(
+        /-?\d+(\.\d+)?/
+      );
+
+
+  if (!match) {
+
+    return null;
+
+  }
+
+
+  const number =
+    Number(
+      match[0]
+    );
+
+
+  if (
+    !isFinite(
+      number
+    )
+  ) {
+
+    return null;
+
+  }
+
+
+  return Math.round(
+    number
+  );
+
+}
+
+
+/**********************************************************************
+ *
+ * NORMALIZE GENDER
+ *
+ **********************************************************************/
+function normalizeGender_(
+  value
+) {
+
+  const s =
+    normalizeText_(
+      value
+    );
+
+
+  if (
+    s === "m" ||
+    s === "male"
+  ) {
+
+    return "Male";
+
+  }
+
+
+  if (
+    s === "f" ||
+    s === "female"
+  ) {
+
+    return "Female";
+
+  }
+
+
+  if (!s) {
+
+    return "";
+
+  }
+
+
+  return cleanText_(
+    value
+  );
+
+}
+
+
+/**********************************************************************
+ *
+ * NORMALIZE YES / NO
+ *
+ **********************************************************************/
+function normalizeYesNo_(
+  value
+) {
+
+  const s =
+    normalizeText_(
+      value
+    );
+
+
+  if (
+    s === "yes" ||
+    s === "y" ||
+    s === "true" ||
+    s === "1"
+  ) {
+
+    return "Yes";
+
+  }
+
+
+  if (
+    s === "no" ||
+    s === "n" ||
+    s === "false" ||
+    s === "0"
+  ) {
+
+    return "No";
+
+  }
+
+
+  return "Unknown";
+
+}
+
+
+/**********************************************************************
+ *
+ * DATE KEY
+ *
+ * yyyy-MM-dd
+ *
+ **********************************************************************/
+function normalizeDateKey_(
+  value,
+  timezone
+) {
+
+  if (
+    value === null ||
+    value === undefined ||
+    value === ""
+  ) {
+
+    return "";
+
+  }
+
+
+  /********************************************************************
+   * GOOGLE SHEETS DATE OBJECT
+   ********************************************************************/
+  if (
+    Object.prototype.toString.call(
+      value
+    ) ===
+    "[object Date]" &&
+    !isNaN(
+      value.getTime()
+    )
+  ) {
+
+    return Utilities.formatDate(
+      value,
+      timezone ||
+        Session.getScriptTimeZone(),
+      "yyyy-MM-dd"
+    );
+
+  }
+
+
+  /********************************************************************
+   * EXCEL / SHEET SERIAL NUMBER
+   ********************************************************************/
+  if (
+    typeof value ===
+      "number" &&
+    isFinite(
+      value
+    )
+  ) {
+
+    const wholeDays =
+      Math.floor(
+        value
+      );
+
+
+    const utcMillis =
+      (
+        wholeDays -
+        25569
+      ) *
+      86400000;
+
+
+    return Utilities.formatDate(
+      new Date(
+        utcMillis
+      ),
+      "UTC",
+      "yyyy-MM-dd"
+    );
+
+  }
+
+
+  /********************************************************************
+   * STRING DATE
+   ********************************************************************/
+  const text =
+    cleanText_(
+      value
+    );
+
+
+  if (!text) {
+
+    return "";
+
+  }
+
+
+  const mmddyyyy =
+    text.match(
+      /\b(\d{1,2})\/(\d{1,2})\/(\d{2,4})\b/
+    );
+
+
+  if (
+    mmddyyyy
+  ) {
+
+    let year =
+      Number(
+        mmddyyyy[3]
+      );
+
+
+    if (
+      year < 100
+    ) {
+
+      year +=
+        year >= 50
+          ?
+          1900
+          :
+          2000;
+
+    }
+
+
+    return (
+      year +
+      "-" +
+      String(
+        Number(
+          mmddyyyy[1]
+        )
+      ).padStart(
+        2,
+        "0"
+      ) +
+      "-" +
+      String(
+        Number(
+          mmddyyyy[2]
+        )
+      ).padStart(
+        2,
+        "0"
+      )
+    );
+
+  }
+
+
+  const parsed =
+    new Date(
+      text
+    );
+
+
+  if (
+    !isNaN(
+      parsed.getTime()
+    )
+  ) {
+
+    return Utilities.formatDate(
+      parsed,
+      timezone ||
+        Session.getScriptTimeZone(),
+      "yyyy-MM-dd"
+    );
+
+  }
+
+
+  return "";
+
+}
+
+
+/**********************************************************************
+ *
+ * NORMALIZE DATE-TIME TO NUMBER
+ *
+ * Used only to break ties when more than one Ortho match exists.
+ *
+ **********************************************************************/
+function normalizeDateTimeNumber_(
+  value
+) {
+
+  if (
+    value === null ||
+    value === undefined ||
+    value === ""
+  ) {
+
+    return null;
+
+  }
+
+
+  if (
+    Object.prototype.toString.call(
+      value
+    ) ===
+    "[object Date]" &&
+    !isNaN(
+      value.getTime()
+    )
+  ) {
+
+    return value.getTime();
+
+  }
+
+
+  if (
+    typeof value ===
+      "number" &&
+    isFinite(
+      value
+    )
+  ) {
+
+    return (
+      value -
+      25569
+    ) *
+    86400000;
+
+  }
+
+
+  const parsed =
+    new Date(
+      String(
+        value
+      )
+    );
+
+
+  if (
+    !isNaN(
+      parsed.getTime()
+    )
+  ) {
+
+    return parsed.getTime();
+
+  }
+
+
+  return null;
+
+}
+
+
+/**********************************************************************
+ *
+ * EXTRACT FIRST NUMBER
+ *
+ **********************************************************************/
+function extractFirstNumber_(
+  value
+) {
+
+  if (
+    value === null ||
+    value === undefined ||
+    value === ""
+  ) {
+
+    return null;
+
+  }
+
+
+  if (
+    typeof value ===
+      "number" &&
+    isFinite(
+      value
+    )
+  ) {
+
+    return value;
+
+  }
+
+
+  const match =
+    String(
+      value
+    )
+      .match(
+        /-?\d+(\.\d+)?/
+      );
+
+
+  if (!match) {
+
+    return null;
+
+  }
+
+
+  const number =
+    Number(
+      match[0]
+    );
+
+
+  return isFinite(
+    number
+  )
+    ?
+    number
+    :
+    null;
+
+}
+
+
+/**********************************************************************
+ *
+ * TABLE ROW HELPERS
+ *
+ **********************************************************************/
+function addNormalTableRow_(
+  sh,
+  row,
+  label,
+  value
+) {
+
+  sh
+    .getRange(
+      row,
+      1,
+      1,
+      2
+    )
+    .setValues([
+      [
+        label,
+        value
+      ]
+    ]);
+
+
+  sh
+    .getRange(
+      row,
+      2
+    )
+    .setHorizontalAlignment(
+      "center"
+    );
+
+}
+
+
+function addSectionTableRow_(
+  sh,
+  row,
+  label,
+  value
+) {
+
+  sh
+    .getRange(
+      row,
+      1,
+      1,
+      2
+    )
+    .setValues([
+      [
+        label,
+        value
+      ]
+    ]);
+
+
+  sh
+    .getRange(
+      row,
+      1,
+      1,
+      2
+    )
+    .setFontWeight(
+      "bold"
+    )
+    .setBackground(
+      "#EAF2F8"
+    );
+
+}
+
+
+function addIndentedTableRow_(
+  sh,
+  row,
+  label,
+  value
+) {
+
+  sh
+    .getRange(
+      row,
+      1,
+      1,
+      2
+    )
+    .setValues([
+      [
+        "     " + label,
+        value
+      ]
+    ]);
+
+
+  sh
+    .getRange(
+      row,
+      2
+    )
+    .setHorizontalAlignment(
+      "center"
+    );
+
+}
+
+
+/**********************************************************************
+ *
+ * TABLE STYLE
+ *
+ **********************************************************************/
+function styleTableTitle_(
+  range
+) {
+
+  range
+    .setBackground(
+      "#0B3048"
+    )
+    .setFontColor(
+      "#FFFFFF"
+    )
+    .setFontWeight(
+      "bold"
+    )
+    .setFontSize(
+      13
+    )
+    .setHorizontalAlignment(
+      "center"
+    )
+    .setVerticalAlignment(
+      "middle"
+    );
+
+}
+
+
+function styleSectionHeader_(
+  range
+) {
+
+  range
+    .setBackground(
+      "#D9EAF7"
+    )
+    .setFontWeight(
+      "bold"
+    )
+    .setHorizontalAlignment(
+      "center"
+    )
+    .setVerticalAlignment(
+      "middle"
+    );
+
+}
+
+
+function applyTwoColumnTableBorders_(
+  sh,
+  startRow,
+  endRow
+) {
+
+  sh
+    .getRange(
+      startRow,
+      1,
+      endRow -
+        startRow +
+        1,
+      2
+    )
+    .setBorder(
+      true,
+      true,
+      true,
+      true,
+      true,
+      true,
+      "#B7C5D1",
+      SpreadsheetApp.BorderStyle.SOLID
+    );
+
+}
+
+
+/**********************************************************************
+ *
+ * CREATE / CLEAR OUTPUT SHEET
+ *
+ **********************************************************************/
+function resetTableSheet_(
+  ss,
+  name
+) {
+
+  let sh =
+    ss.getSheetByName(
+      name
+    );
+
+
+  if (!sh) {
+
+    sh =
+      ss.insertSheet(
+        name
+      );
+
+  }
+
+  else {
+
+    const merged =
+      sh.getDataRange()
+        .getMergedRanges();
+
+
+    merged.forEach(
+      function(
+        range
+      ) {
+
+        range.breakApart();
+
+      }
+    );
+
+
+    sh.clear();
+
+  }
+
+
+  return sh;
+
+}
+
+
+/**********************************************************************
+ *
+ * COUNTS
+ *
+ **********************************************************************/
+function countField_(
+  records,
+  field,
+  expected
+) {
+
+  return records.filter(
+    function(
+      record
+    ) {
+
+      return record[field] ===
+        expected;
+
+    }
+  ).length;
+
+}
+
+
+function countContains_(
+  records,
+  field,
+  search
+) {
+
+  const target =
+    normalizeText_(
+      search
+    );
+
+
+  return records.filter(
+    function(
+      record
+    ) {
+
+      return normalizeText_(
+        record[field]
+      ).indexOf(
+        target
+      ) !== -1;
+
+    }
+  ).length;
+
+}
+
+
+/**********************************************************************
+ *
+ * n (%)
+ *
+ **********************************************************************/
+function formatNPct_(
+  count,
+  denominator
+) {
+
+  if (
+    denominator === 0
+  ) {
+
+    return (
+      count +
+      " (—)"
+    );
+
+  }
+
+
+  const pct =
+    (
+      count /
+      denominator
+    ) *
+    100;
+
+
+  return (
+    count +
+    " (" +
+    pct.toFixed(
+      1
+    ) +
+    ")"
+  );
+
+}
+
+
+/**********************************************************************
+ *
+ * MEDIAN / IQR
+ *
+ **********************************************************************/
+function formatMedianIQR_(
+  values,
+  decimals,
+  showPositiveSign
+) {
+
+  const clean =
+    values
+      .filter(
+        isValidNumber_
+      )
+      .map(
+        Number
+      )
+      .sort(
+        (a, b) =>
+          a - b
+      );
+
+
+  if (
+    clean.length === 0
+  ) {
+
+    return "—";
+
+  }
+
+
+  const median =
+    percentileInc_(
+      clean,
+      0.50
+    );
+
+
+  const q1 =
+    percentileInc_(
+      clean,
+      0.25
+    );
+
+
+  const q3 =
+    percentileInc_(
+      clean,
+      0.75
+    );
+
+
+  return (
+    formatNumberForTable_(
+      median,
+      decimals,
+      showPositiveSign
+    ) +
+    " (" +
+    formatNumberForTable_(
+      q1,
+      decimals,
+      showPositiveSign
+    ) +
+    "-" +
+    formatNumberForTable_(
+      q3,
+      decimals,
+      showPositiveSign
+    ) +
+    ")"
+  );
+
+}
+
+
+/**********************************************************************
+ *
+ * PERCENTILE.INC STYLE CALCULATION
+ *
+ **********************************************************************/
+function percentileInc_(
+  sorted,
+  p
+) {
+
+  if (
+    sorted.length === 1
+  ) {
+
+    return sorted[0];
+
+  }
+
+
+  const index =
+    (
+      sorted.length -
+      1
+    ) *
+    p;
+
+
+  const lower =
+    Math.floor(
+      index
+    );
+
+
+  const upper =
+    Math.ceil(
+      index
+    );
+
+
+  if (
+    lower === upper
+  ) {
+
+    return sorted[
+      lower
+    ];
+
+  }
+
+
+  const fraction =
+    index -
+    lower;
+
+
+  return (
+    sorted[
+      lower
+    ] +
+    (
+      sorted[
+        upper
+      ] -
+      sorted[
+        lower
+      ]
+    ) *
+    fraction
+  );
+
+}
+
+
+/**********************************************************************
+ *
+ * NUMBER FORMAT FOR TABLE
+ *
+ **********************************************************************/
+function formatNumberForTable_(
+  value,
+  decimals,
+  showPositiveSign
+) {
+
+  if (
+    !isValidNumber_(
+      value
+    )
+  ) {
+
+    return "—";
+
+  }
+
+
+  let text =
+    Number(
+      value
+    ).toFixed(
+      decimals
+    );
+
+
+  if (
+    showPositiveSign &&
+    value > 0
+  ) {
+
+    text =
+      "+" +
+      text;
+
+  }
+
+
+  return text;
+
+}
+
+
+/**********************************************************************
+ *
+ * NUMERIC FIELD VALUES
+ *
+ **********************************************************************/
+function numericValues_(
+  records,
+  field
+) {
+
+  return records
+    .map(
+      r =>
+        r[field]
+    )
+    .filter(
+      isValidNumber_
+    );
+
+}
+
+
+/**********************************************************************
+ *
+ * VALID NUMBER
+ *
+ **********************************************************************/
+function isValidNumber_(
+  value
+) {
+
+  return (
+    value !== null &&
+    value !== "" &&
+    value !== undefined &&
+    typeof Number(
+      value
+    ) ===
+      "number" &&
+    isFinite(
+      Number(
+        value
+      )
+    )
+  );
+
+}
+
+
+/**********************************************************************
+ *
+ * TEXT HELPERS
+ *
+ **********************************************************************/
+function cleanText_(
+  value
+) {
+
+  if (
+    value === null ||
+    value === undefined
+  ) {
+
+    return "";
+
+  }
+
+
+  return String(
+    value
+  )
+    .trim()
+    .replace(
+      /\s+/g,
+      " "
+    );
+
+}
+
+
+function normalizeText_(
+  value
+) {
+
+  return cleanText_(
+    value
+  )
+    .toLowerCase()
+    .replace(
+      /[’']/g,
+      ""
+    )
+    .replace(
+      /[.]/g,
+      ""
+    )
+    .trim();
+
+}
+
+
+/**********************************************************************
+ *
+ * BLANK ROW
+ *
+ **********************************************************************/
+function isEntireRowBlank_(
+  row
+) {
+
+  return row.every(
+    function(
+      cell
+    ) {
+
+      return (
+        cell === "" ||
+        cell === null
+      );
+
+    }
+  );
+
+}
+
+
+/**********************************************************************
+ *
+ * SAFE REGEX
+ *
+ **********************************************************************/
+function regexSafeTest_(
+  regex,
+  text
+) {
+
+  try {
+
+    return regex.test(
+      text
+    );
+
+  }
+
+  catch (
+    error
+  ) {
+
+    return false;
+
+  }
 
 }
