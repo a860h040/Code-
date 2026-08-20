@@ -1,89 +1,118 @@
-function buildFRCResearchPresentation() {
+/***************************************************************
+ * FRC RESEARCH PRESENTATION
+ * Google Slides Apps Script
+ *
+ * IMPORTANT:
+ * 1. Open the Google Slides presentation you want to use.
+ * 2. Go to Extensions > Apps Script.
+ * 3. Delete the old Code.gs.
+ * 4. Paste this ENTIRE file.
+ * 5. Save.
+ * 6. Run: buildFRCResearchPresentation
+ *
+ * This script clears the current presentation and rebuilds it.
+ ***************************************************************/
 
-  // ============================================================
-  // GET THE GOOGLE SLIDES FILE THAT THIS SCRIPT IS ATTACHED TO
-  // ============================================================
+
+function buildFRCResearchPresentation() {
 
   var presentation = SlidesApp.getActivePresentation();
 
   if (!presentation) {
     throw new Error(
-      'No active Google Slides presentation found. ' +
-      'Open your Google Slides file, then go to Extensions > Apps Script, ' +
-      'paste this code there, and run buildFRCResearchPresentation().'
+      'No active Google Slides presentation was found. ' +
+      'Open your Google Slides file first, then go to Extensions > Apps Script.'
     );
   }
 
-  // ============================================================
-  // PRESENTATION SETTINGS
-  // ============================================================
+
+  /*************************************************************
+   * DESIGN SETTINGS
+   *************************************************************/
 
   var C = {
+
     BLUE: '#1F5FAE',
     BLUE2: '#0B66D4',
-    DARK_BLUE: '#163D70',
-    LIGHT_BLUE: '#EAF3FF',
-    VERY_LIGHT_BLUE: '#F5F9FF',
+    DARK_BLUE: '#173F73',
 
-    BLACK: '#111111',
-    DARK_GRAY: '#444444',
-    GRAY: '#F3F4F6',
-    BORDER: '#C9D1D9',
+    LIGHT_BLUE: '#EAF3FF',
+    VERY_LIGHT_BLUE: '#F7FAFF',
 
     WHITE: '#FFFFFF',
+    BLACK: '#111111',
+
+    DARK_GRAY: '#444444',
+    MID_GRAY: '#777777',
+    GRAY: '#F3F4F6',
+
+    BORDER: '#C8D0D9',
+
     YELLOW: '#FFF4CE',
     YELLOW_BORDER: '#D6A700',
+    YELLOW_TEXT: '#795200',
 
-    TITLE_FONT: 'Arial',
-    BODY_FONT: 'Arial',
+    RED: '#A33A00',
+
+    FONT: 'Arial',
 
     RESIDENT: 'Resident Name, PharmD'
   };
 
-  // ============================================================
-  // REFERENCES
-  // These come ONLY from the research paper
-  // ============================================================
+
+  /*************************************************************
+   * REFERENCES
+   * Taken only from the research paper.
+   *************************************************************/
 
   var REF = {
+
     BAKER:
-      'Baker SN, Acquisto NM, Ashley ED, Fairbanks RJ, Beamish SE, Haas CE. J Pharm Pract. 2012;25(2):190-194.',
+      'Baker SN, Acquisto NM, Ashley ED, Fairbanks RJ, Beamish SE, Haas CE. Pharmacist-managed antimicrobial stewardship program for patients discharged from the emergency department. J Pharm Pract. 2012;25(2):190-194. doi:10.1177/0897190011420160.',
 
     BARLAM:
-      'Barlam TF, Cosgrove SE, Abbo LM, et al. Clin Infect Dis. 2016;62(10):e51-e77.',
+      'Barlam TF, Cosgrove SE, Abbo LM, et al. Implementing an Antibiotic Stewardship Program: Guidelines by the Infectious Diseases Society of America and the Society for Healthcare Epidemiology of America. Clin Infect Dis. 2016;62(10):e51-e77. doi:10.1093/cid/ciw118.',
 
     DUMKOW:
-      'Dumkow LE, Kenney RM, MacDonald NC, Carreno JJ, Malhotra MK, Davis SL. Infect Dis Ther. 2014;3(1):45-53.',
+      'Dumkow LE, Kenney RM, MacDonald NC, Carreno JJ, Malhotra MK, Davis SL. Impact of a multidisciplinary culture follow-up program of antimicrobial therapy in the emergency department. Infect Dis Ther. 2014;3(1):45-53. doi:10.1007/s40121-014-0026-x.',
 
     GIRUZZI:
-      'Giruzzi ME, Tawwater JC, Grelle JL. Hosp Pharm. 2020;55(4):261-267.',
+      'Giruzzi ME, Tawwater JC, Grelle JL. Evaluation of antibiotic utilization in an emergency department after implementation of an antimicrobial stewardship pharmacist culture review service. Hosp Pharm. 2020;55(4):261-267. doi:10.1177/0018578719844171.',
 
     LADINES:
-      'Ladines-Lim JB, Fischer MA, Linder JA, Chua KP. Antimicrob Steward Healthc Epidemiol. 2024;4(1):e79.',
+      'Ladines-Lim JB, Fischer MA, Linder JA, Chua KP. Appropriateness of Antibiotic Prescribing in US Emergency Department Visits, 2016-2021. Antimicrob Steward Healthc Epidemiol. 2024;4(1):e79. doi:10.1017/ash.2024.79.',
 
     RAINESS:
-      'Rainess RA, Patel VV, Cavanaugh JB, Hill J. J Pharm Technol. 2021;37(3):140-146.'
+      'Rainess RA, Patel VV, Cavanaugh JB, Hill J. Evaluating the addition of a clinical pharmacist service to a midlevel provider-driven culture follow-up program in a community emergency department. J Pharm Technol. 2021;37(3):140-146. doi:10.1177/87551225211000363.'
   };
 
-  // ============================================================
-  // CLEAR CURRENT PRESENTATION
-  // ============================================================
+
+  /*************************************************************
+   * CLEAR PRESENTATION
+   *************************************************************/
 
   resetPresentation_(presentation);
 
-  // ============================================================
-  // SLIDE 1 - TITLE
-  // ============================================================
+
+  /*************************************************************
+   * SLIDE 1 — TITLE
+   *************************************************************/
 
   var slide = presentation.getSlides()[0];
 
   createTitleSlide_(slide, C);
 
-  // ============================================================
-  // SLIDE 2 - DISCLOSURE
-  // ============================================================
 
-  slide = newStandardSlide_(presentation, 'Disclosure', C);
+  /*************************************************************
+   * SLIDE 2 — DISCLOSURE
+   *************************************************************/
+
+  slide = newStandardSlide_(
+    presentation,
+    'Disclosure',
+    2,
+    C
+  );
 
   addBulletList_(
     slide,
@@ -92,22 +121,26 @@ function buildFRCResearchPresentation() {
       'Primary Investigator: This information is not provided in the research paper.',
       'Co-investigators: This information is not provided in the research paper.'
     ],
-    55, 110, 610, 170, 18, C
+    55, 115, 610, 160,
+    17,
+    C
   );
 
-  // ============================================================
-  // SLIDE 3 - PRESENTATION OBJECTIVE
-  // ============================================================
+
+  /*************************************************************
+   * SLIDE 3 — PRESENTATION OBJECTIVE
+   *************************************************************/
 
   slide = newStandardSlide_(
     presentation,
     'Presentation Objective',
+    3,
     C
   );
 
   addRoundedBox_(
     slide,
-    80, 135, 560, 115,
+    80, 125, 560, 120,
     C.LIGHT_BLUE,
     C.BLUE
   );
@@ -115,136 +148,219 @@ function buildFRCResearchPresentation() {
   addText_(
     slide,
     'Describe the role of structured Emergency Department culture callback programs in improving the timeliness and appropriateness of antibiotic therapy after discharge.',
-    110, 160, 500, 65,
-    22, true, C.DARK_BLUE,
-    SlidesApp.ParagraphAlignment.CENTER,
+    110, 155, 500, 70,
+    21,
+    true,
+    C.DARK_BLUE,
+    'CENTER',
     C
   );
 
   addReferences_(
     slide,
-    [REF.BAKER, REF.GIRUZZI, REF.RAINESS],
+    [
+      REF.BAKER,
+      REF.GIRUZZI,
+      REF.RAINESS
+    ],
     C
   );
 
-  // ============================================================
-  // SLIDE 4 - BACKGROUND
-  // ============================================================
 
-  slide = newStandardSlide_(presentation, 'Background', C);
+  /*************************************************************
+   * SLIDE 4 — BACKGROUND
+   *************************************************************/
 
-  addStatCard_(slide, '819.4 million', 'ED visits\n2016–2021', 35, 105, C);
-  addStatCard_(slide, '152.4 million', 'included an\nantibiotic prescription', 205, 105, C);
-  addStatCard_(slide, '27.6%', 'classified as\ninappropriate', 375, 105, C);
-  addStatCard_(slide, '25.5%', 'post-discharge cultures\nrequired modification', 545, 105, C);
+  slide = newStandardSlide_(
+    presentation,
+    'Background',
+    4,
+    C
+  );
+
+  addStatCard_(
+    slide,
+    '819.4 million',
+    'Estimated ED visits\n2016–2021',
+    35, 105,
+    C
+  );
+
+  addStatCard_(
+    slide,
+    '152.4 million',
+    'ED visits with an\nantibiotic prescription',
+    205, 105,
+    C
+  );
+
+  addStatCard_(
+    slide,
+    '27.6%',
+    'Antibiotic prescribing\nclassified as inappropriate',
+    375, 105,
+    C
+  );
+
+  addStatCard_(
+    slide,
+    '25.5%',
+    'Post-discharge cultures\nrequiring therapy modification',
+    545, 105,
+    C
+  );
 
   addBulletList_(
     slide,
     [
       'Many patients receive empiric antibiotics and are discharged before culture results become available.',
-      'Post-discharge culture review may identify patients who require an antibiotic therapy change.'
+      'Post-discharge culture review may identify patients who require changes in antibiotic therapy.'
     ],
-    55, 245, 610, 75, 16, C
+    55, 245, 610, 75,
+    15,
+    C
   );
 
   addReferences_(
     slide,
-    [REF.LADINES, REF.DUMKOW],
+    [
+      REF.LADINES,
+      REF.DUMKOW
+    ],
     C
   );
 
-  // ============================================================
-  // SLIDE 5 - BACKGROUND
-  // ============================================================
 
-  slide = newStandardSlide_(presentation, 'Background', C);
+  /*************************************************************
+   * SLIDE 5 — BACKGROUND
+   *************************************************************/
+
+  slide = newStandardSlide_(
+    presentation,
+    'Background',
+    5,
+    C
+  );
 
   addFlowRow_(
     slide,
     [
       'ED visit',
       'Empiric\nantibiotic',
-      'Discharge',
+      'ED\ndischarge',
       'Final culture\nresult',
       'Callback\nreview'
     ],
-    35, 95, C
+    34,
+    95,
+    C
   );
 
   addBulletList_(
     slide,
     [
       'Most culture results become available 24–72 hours after ED discharge.',
-      'Final culture and susceptibility results may show the discharge antibiotic is not effective, is broader than necessary, or requires adjustment.',
+      'Final culture and susceptibility results may show the antibiotic is not effective, is broader than necessary, or requires adjustment.',
       'Structured callback programs allow finalized or actionable culture results to be reviewed after discharge.'
     ],
-    50, 165, 620, 105, 14, C
+    50, 165, 620, 100,
+    13.5,
+    C
   );
 
   addComparisonCard_(
     slide,
     'Baker et al.',
     '3 days  →  2 days',
-    80, 285, C
+    80, 280,
+    C
   );
 
   addComparisonCard_(
     slide,
     'Giruzzi et al.',
     '6.79 days  →  1.99 days',
-    385, 285, C
+    385, 280,
+    C
   );
 
   addReferences_(
     slide,
-    [REF.BAKER, REF.DUMKOW, REF.GIRUZZI, REF.RAINESS],
+    [
+      REF.BAKER,
+      REF.DUMKOW,
+      REF.GIRUZZI,
+      REF.RAINESS
+    ],
     C
   );
 
-  // ============================================================
-  // SLIDE 6 - STUDY RATIONALE
-  // ============================================================
 
-  slide = newStandardSlide_(presentation, 'Study Rationale', C);
+  /*************************************************************
+   * SLIDE 6 — STUDY RATIONALE
+   *************************************************************/
+
+  slide = newStandardSlide_(
+    presentation,
+    'Study Rationale',
+    6,
+    C
+  );
 
   addVerticalFlow_(
     slide,
     [
-      'Structured callback programs may improve antibiotic follow-up',
+      'Structured callback programs may improve timeliness and appropriateness of antibiotic therapy',
       'ED return visits and hospital readmissions have not been consistently improved',
-      'Limited information exists comparing callback workflows within the same health system',
+      'Limited information exists comparing callback workflows across hospitals within the same health system',
       'Workflow differences may affect how quickly patients receive appropriate treatment'
     ],
-    100, 95, 520, C
+    100,
+    88,
+    520,
+    C
   );
 
   addRoundedBox_(
     slide,
-    90, 315, 540, 45,
+    90, 303, 540, 48,
     C.LIGHT_BLUE,
     C.BLUE
   );
 
   addText_(
     slide,
-    'Evaluating callback workflows may help improve antimicrobial stewardship and post-discharge follow-up.',
-    110, 325, 500, 24,
-    14, true, C.DARK_BLUE,
-    SlidesApp.ParagraphAlignment.CENTER,
+    'Evaluating callback workflows may help improve antimicrobial stewardship and post-discharge follow-up processes.',
+    110, 315, 500, 25,
+    13.5,
+    true,
+    C.DARK_BLUE,
+    'CENTER',
     C
   );
 
   addReferences_(
     slide,
-    [REF.BAKER, REF.DUMKOW, REF.GIRUZZI, REF.RAINESS],
+    [
+      REF.BAKER,
+      REF.DUMKOW,
+      REF.GIRUZZI,
+      REF.RAINESS
+    ],
     C
   );
 
-  // ============================================================
-  // SLIDE 7 - STUDY PURPOSE
-  // ============================================================
 
-  slide = newStandardSlide_(presentation, 'Study Purpose', C);
+  /*************************************************************
+   * SLIDE 7 — STUDY PURPOSE
+   *************************************************************/
+
+  slide = newStandardSlide_(
+    presentation,
+    'Study Purpose',
+    7,
+    C
+  );
 
   addRoundedBox_(
     slide,
@@ -257,86 +373,198 @@ function buildFRCResearchPresentation() {
     slide,
     'To evaluate the impact of a pharmacy-led Emergency Department culture callback program on patient outcomes.',
     120, 175, 480, 55,
-    24, true, C.DARK_BLUE,
-    SlidesApp.ParagraphAlignment.CENTER,
+    23,
+    true,
+    C.DARK_BLUE,
+    'CENTER',
     C
   );
 
-  // ============================================================
-  // SLIDE 8 - RESEARCH SETTING
-  // ============================================================
 
-  slide = newStandardSlide_(presentation, 'Research Setting', C);
+  /*************************************************************
+   * SLIDE 8 — RESEARCH SETTING
+   *************************************************************/
+
+  slide = newStandardSlide_(
+    presentation,
+    'Research Setting',
+    8,
+    C
+  );
 
   addText_(
     slide,
     'Ascension St. Vincent’s Emergency Departments',
     70, 90, 580, 35,
-    23, true, C.DARK_BLUE,
-    SlidesApp.ParagraphAlignment.CENTER,
+    22,
+    true,
+    C.DARK_BLUE,
+    'CENTER',
     C
   );
 
-  addCampusCard_(slide, 'Riverside', 70, 155, C);
-  addCampusCard_(slide, 'Southside', 250, 155, C);
-  addCampusCard_(slide, 'Clay County', 430, 155, C);
-  addCampusCard_(slide, 'St Johns County', 250, 250, C);
+  addCampusCard_(
+    slide,
+    'Riverside',
+    70, 155,
+    C
+  );
+
+  addCampusCard_(
+    slide,
+    'Southside',
+    250, 155,
+    C
+  );
+
+  addCampusCard_(
+    slide,
+    'Clay County',
+    430, 155,
+    C
+  );
+
+  addCampusCard_(
+    slide,
+    'St Johns County',
+    250, 250,
+    C
+  );
 
   addText_(
     slide,
     'Hospital bed counts, ED volumes, ICU bed numbers, and other institutional statistics are not provided in the research paper.',
-    80, 338, 560, 30,
-    11, false, C.DARK_GRAY,
-    SlidesApp.ParagraphAlignment.CENTER,
+    80, 338, 560, 25,
+    10.5,
+    false,
+    C.DARK_GRAY,
+    'CENTER',
     C
   );
 
-  // ============================================================
-  // SLIDE 9 - RESEARCH SETTING
-  // ============================================================
 
-  slide = newStandardSlide_(presentation, 'Research Setting', C);
+  /*************************************************************
+   * SLIDE 9 — RESEARCH SETTING
+   *************************************************************/
+
+  slide = newStandardSlide_(
+    presentation,
+    'Research Setting',
+    9,
+    C
+  );
 
   addSimpleTable_(
     slide,
-    ['Participating ED', 'Study participation'],
     [
-      ['Riverside', 'Culture callback workflow evaluated'],
-      ['Southside', 'Culture callback workflow evaluated'],
-      ['Clay County', 'Culture callback workflow evaluated'],
-      ['St Johns County', 'Culture callback workflow evaluated']
+      'Participating ED',
+      'Study participation'
     ],
-    55, 95, 610, 32, C
+    [
+      [
+        'Riverside',
+        'Culture callback workflow evaluated'
+      ],
+      [
+        'Southside',
+        'Culture callback workflow evaluated'
+      ],
+      [
+        'Clay County',
+        'Culture callback workflow evaluated'
+      ],
+      [
+        'St Johns County',
+        'Culture callback workflow evaluated'
+      ]
+    ],
+    55, 95,
+    610,
+    31,
+    C
   );
 
   addBulletList_(
     slide,
     [
-      'Patients will be grouped by campus and the callback workflow used at that campus.',
+      'Patients will be grouped by ED campus and the callback workflow used at that campus.',
       'Workflow assessment includes who reviews the culture, makes treatment recommendations, approves recommendations, and contacts the patient.'
     ],
-    65, 280, 590, 65, 14, C
+    65, 275, 590, 70,
+    13.5,
+    C
   );
 
-  // ============================================================
-  // SLIDE 10 - METHODOLOGY
-  // ============================================================
 
-  slide = newStandardSlide_(presentation, 'Methodology', C);
+  /*************************************************************
+   * SLIDE 10 — METHODOLOGY
+   *************************************************************/
 
-  addMethodologyStep_(slide, '01', 'Study Design', 75, 95, C);
-  addMethodologyStep_(slide, '02', 'Subject Selection', 75, 142, C);
-  addMethodologyStep_(slide, '03', 'Intervention/Outcomes', 75, 189, C);
-  addMethodologyStep_(slide, '04', 'Data Collection', 75, 236, C);
-  addMethodologyStep_(slide, '05', 'Statistical Analysis', 75, 283, C);
+  slide = newStandardSlide_(
+    presentation,
+    'Methodology',
+    10,
+    C
+  );
 
-  // ============================================================
-  // SLIDE 11 - STUDY DESIGN
-  // ============================================================
+  addMethodologyStep_(
+    slide,
+    '01',
+    'Study Design',
+    75, 92,
+    C
+  );
 
-  slide = newStandardSlide_(presentation, 'Study Design', C);
+  addMethodologyStep_(
+    slide,
+    '02',
+    'Subject Selection',
+    75, 139,
+    C
+  );
 
-  addRoundedBox_(slide, 50, 95, 300, 170, C.VERY_LIGHT_BLUE, C.BORDER);
+  addMethodologyStep_(
+    slide,
+    '03',
+    'Intervention/Outcomes',
+    75, 186,
+    C
+  );
+
+  addMethodologyStep_(
+    slide,
+    '04',
+    'Data Collection',
+    75, 233,
+    C
+  );
+
+  addMethodologyStep_(
+    slide,
+    '05',
+    'Statistical Analysis',
+    75, 280,
+    C
+  );
+
+
+  /*************************************************************
+   * SLIDE 11 — STUDY DESIGN
+   *************************************************************/
+
+  slide = newStandardSlide_(
+    presentation,
+    'Study Design',
+    11,
+    C
+  );
+
+  addRoundedBox_(
+    slide,
+    45, 95, 315, 185,
+    C.VERY_LIGHT_BLUE,
+    C.BORDER
+  );
 
   addBulletList_(
     slide,
@@ -344,44 +572,62 @@ function buildFRCResearchPresentation() {
       'Multicenter',
       'Retrospective',
       'Observational cohort study',
-      'Patients identified using microbiology reports and the electronic medical record',
+      'Eligible patients identified through microbiology reports and the electronic medical record',
       'Study submitted to the Institutional Review Board before data collection'
     ],
-    65, 112, 270, 140, 14, C
+    62, 112, 280, 150,
+    13.5,
+    C
   );
 
-  addStudyTimeline_(slide, 390, 115, C);
+  addStudyTimeline_(
+    slide,
+    405, 115,
+    C
+  );
 
   addText_(
     slide,
     'Study periods',
-    415, 245, 220, 22,
-    16, true, C.DARK_BLUE,
-    SlidesApp.ParagraphAlignment.CENTER,
+    415, 225, 220, 22,
+    16,
+    true,
+    C.DARK_BLUE,
+    'CENTER',
     C
   );
 
   addText_(
     slide,
     'June 1, 2013–January 1, 2022\nJanuary 1, 2023–September 16, 2026\n\n2022 excluded as transition/stabilization period',
-    405, 270, 240, 70,
-    12, false, C.BLACK,
-    SlidesApp.ParagraphAlignment.CENTER,
+    400, 252, 250, 75,
+    11.5,
+    false,
+    C.BLACK,
+    'CENTER',
     C
   );
 
-  // ============================================================
-  // SLIDE 12 - SUBJECT SELECTION
-  // ============================================================
 
-  slide = newStandardSlide_(presentation, 'Subject Selection', C);
+  /*************************************************************
+   * SLIDE 12 — SUBJECT SELECTION
+   *************************************************************/
+
+  slide = newStandardSlide_(
+    presentation,
+    'Subject Selection',
+    12,
+    C
+  );
 
   addText_(
     slide,
     'Subjects identified through microbiology reports and the electronic medical record',
-    65, 88, 590, 28,
-    14, true, C.DARK_BLUE,
-    SlidesApp.ParagraphAlignment.CENTER,
+    65, 88, 590, 25,
+    13.5,
+    true,
+    C.DARK_BLUE,
+    'CENTER',
     C
   );
 
@@ -390,62 +636,86 @@ function buildFRCResearchPresentation() {
     'Inclusion Criteria',
     [
       'Age ≥18 years',
-      'Evaluated at participating ED',
-      'Discharged from ED',
+      'Evaluated at Riverside, Southside, St Johns, or Clay County ED',
+      'Discharged from the ED',
       'Culture collected during ED visit',
-      'Positive/actionable result after discharge',
+      'Positive or clinically actionable culture result available after discharge',
       'Culture reviewed through callback process',
       'Required documentation available'
     ],
-    45, 130, 305, 200, C
+    40, 125, 315, 215,
+    C
   );
 
   addCriteriaBox_(
     slide,
     'Exclusion Criteria',
     [
-      'Admitted, transferred, or observation during original ED visit',
+      'Admitted, transferred, or placed in observation during original ED visit',
       'Culture result available before ED discharge',
-      'Culture managed outside ED callback process',
-      'Returned or admitted before culture result became available'
+      'Culture managed by another service outside ED callback process',
+      'Patient returned or was admitted before culture result became available'
     ],
-    370, 130, 305, 200, C
+    365, 125, 315, 215,
+    C
   );
 
-  // ============================================================
-  // SLIDE 13 - STUDY OUTCOMES
-  // ============================================================
 
-  slide = newStandardSlide_(presentation, 'Study Outcomes', C);
+  /*************************************************************
+   * SLIDE 13 — STUDY OUTCOMES
+   *************************************************************/
 
-  addRoundedBox_(slide, 55, 92, 610, 100, C.LIGHT_BLUE, C.BLUE);
+  slide = newStandardSlide_(
+    presentation,
+    'Study Outcomes',
+    13,
+    C
+  );
+
+  addRoundedBox_(
+    slide,
+    55, 92, 610, 100,
+    C.LIGHT_BLUE,
+    C.BLUE
+  );
 
   addText_(
     slide,
     'Primary Outcome',
     80, 105, 560, 22,
-    18, true, C.DARK_BLUE,
-    SlidesApp.ParagraphAlignment.CENTER,
+    17,
+    true,
+    C.DARK_BLUE,
+    'CENTER',
     C
   );
 
   addText_(
     slide,
-    'Time to appropriate antibiotic intervention\n\nHours from final actionable culture result to first documented appropriate antibiotic treatment decision',
+    'Time to appropriate antibiotic intervention\n\nHours from availability of the final actionable culture result to the first documented appropriate antibiotic treatment decision',
     90, 132, 540, 50,
-    14, false, C.BLACK,
-    SlidesApp.ParagraphAlignment.CENTER,
+    13,
+    false,
+    C.BLACK,
+    'CENTER',
     C
   );
 
-  addRoundedBox_(slide, 55, 215, 610, 120, C.GRAY, C.BORDER);
+  addRoundedBox_(
+    slide,
+    55, 215, 610, 120,
+    C.GRAY,
+    C.BORDER
+  );
 
   addText_(
     slide,
     'Secondary Outcomes',
     80, 228, 560, 22,
-    18, true, C.DARK_BLUE,
-    SlidesApp.ParagraphAlignment.CENTER,
+    17,
+    true,
+    C.DARK_BLUE,
+    'CENTER',
     C
   );
 
@@ -458,21 +728,31 @@ function buildFRCResearchPresentation() {
       'ED return visit within 30 days',
       'Hospital admission/readmission within 30 days'
     ],
-    135, 255, 450, 70, 13, C
+    135, 255, 450, 70,
+    12.5,
+    C
   );
 
-  // ============================================================
-  // SLIDE 14 - STATISTICAL ANALYSIS
-  // ============================================================
 
-  slide = newStandardSlide_(presentation, 'Statistical Analysis', C);
+  /*************************************************************
+   * SLIDE 14 — STATISTICAL ANALYSIS
+   *************************************************************/
+
+  slide = newStandardSlide_(
+    presentation,
+    'Statistical Analysis',
+    14,
+    C
+  );
 
   addText_(
     slide,
     'Power calculation: This information is not provided in the research paper.',
-    55, 90, 610, 25,
-    15, true, '#A33A00',
-    SlidesApp.ParagraphAlignment.CENTER,
+    55, 88, 610, 25,
+    14,
+    true,
+    C.RED,
+    'CENTER',
     C
   );
 
@@ -486,7 +766,8 @@ function buildFRCResearchPresentation() {
       'Categorical variables',
       'n (%)'
     ],
-    45, 140, C
+    45, 135,
+    C
   );
 
   addAnalysisCard_(
@@ -497,7 +778,8 @@ function buildFRCResearchPresentation() {
       'Analysis of variance',
       'Wilcoxon Rank Sum test'
     ],
-    265, 140, C
+    265, 135,
+    C
   );
 
   addAnalysisCard_(
@@ -507,141 +789,274 @@ function buildFRCResearchPresentation() {
       'Chi-square test',
       'Fisher’s exact test'
     ],
-    485, 140, C
+    485, 135,
+    C
   );
 
   addText_(
     slide,
     'Not provided: alpha, power, expected difference between groups, sample size calculation, or statistical software.',
-    70, 330, 580, 28,
-    11, false, C.DARK_GRAY,
-    SlidesApp.ParagraphAlignment.CENTER,
+    70, 325, 580, 28,
+    10.5,
+    false,
+    C.DARK_GRAY,
+    'CENTER',
     C
   );
 
-  // ============================================================
-  // SLIDE 15 - RESULTS
-  // ============================================================
 
-  slide = newStandardSlide_(presentation, 'Results', C);
+  /*************************************************************
+   * SLIDE 15 — RESULTS
+   *************************************************************/
 
-  addMissingInformationBox_(slide, 100, 120, C);
+  slide = newStandardSlide_(
+    presentation,
+    'Results',
+    15,
+    C
+  );
+
+  addMissingInformationBox_(
+    slide,
+    100, 115,
+    C
+  );
 
   addBulletList_(
     slide,
     [
       'Use lowercase n for number of subjects.',
       'Use lowercase p for p value.',
-      'Include measurement units.',
-      'Label graph axes.',
-      'Report data as median (IQR) or n (%) when applicable.'
+      'Always provide measurement units.',
+      'Label all graph axes.',
+      'Report continuous variables as median (IQR) and categorical variables as n (%) when applicable.'
     ],
-    130, 235, 470, 100, 14, C
+    125, 225, 480, 105,
+    13.5,
+    C
   );
 
-  // ============================================================
-  // SLIDE 16 - SUBJECT SELECTION
-  // ============================================================
 
-  slide = newStandardSlide_(presentation, 'Subject Selection', C);
+  /*************************************************************
+   * SLIDE 16 — SUBJECT SELECTION
+   *************************************************************/
 
-  addMissingInformationBox_(slide, 80, 100, C);
+  slide = newStandardSlide_(
+    presentation,
+    'Subject Selection',
+    16,
+    C
+  );
 
-  addSubjectFlowPlaceholder_(slide, C);
+  addMissingInformationBox_(
+    slide,
+    100, 95,
+    C
+  );
 
-  // ============================================================
-  // SLIDE 17 - BASELINE CHARACTERISTICS
-  // ============================================================
+  addSubjectSelectionFlow_(
+    slide,
+    C
+  );
+
+
+  /*************************************************************
+   * SLIDE 17 — BASELINE CHARACTERISTICS
+   *************************************************************/
 
   slide = newStandardSlide_(
     presentation,
     'Baseline Characteristics',
+    17,
     C
   );
 
-  addMissingInformationBox_(slide, 75, 90, C);
+  addMissingInformationBox_(
+    slide,
+    100, 85,
+    C
+  );
 
   addSimpleTable_(
     slide,
-    ['Characteristic', 'Pharmacy-led', 'Nurse-led', 'p value'],
     [
-      ['Age, years', '—', '—', '—'],
-      ['Sex', '—', '—', '—'],
-      ['Renal function', '—', '—', '—'],
-      ['Immunocompromised status', '—', '—', '—']
+      'Characteristic',
+      'Pharmacy-led',
+      'Nurse-led',
+      'p value'
     ],
-    55, 175, 610, 31, C
+    [
+      [
+        'Age, years',
+        '—',
+        '—',
+        '—'
+      ],
+      [
+        'Sex',
+        '—',
+        '—',
+        '—'
+      ],
+      [
+        'Renal function',
+        '—',
+        '—',
+        '—'
+      ],
+      [
+        'Immunocompromised status',
+        '—',
+        '—',
+        '—'
+      ]
+    ],
+    55, 175,
+    610,
+    31,
+    C
   );
 
-  // ============================================================
-  // SLIDE 18 - PRIMARY OUTCOME
-  // ============================================================
 
-  slide = newStandardSlide_(presentation, 'Primary Outcome', C);
+  /*************************************************************
+   * SLIDE 18 — PRIMARY OUTCOME
+   *************************************************************/
 
-  addMissingInformationBox_(slide, 85, 105, C);
+  slide = newStandardSlide_(
+    presentation,
+    'Primary Outcome',
+    18,
+    C
+  );
 
-  addRoundedBox_(slide, 80, 235, 240, 65, C.LIGHT_BLUE, C.BLUE);
+  addMissingInformationBox_(
+    slide,
+    100, 95,
+    C
+  );
+
+  addRoundedBox_(
+    slide,
+    70, 230, 245, 70,
+    C.LIGHT_BLUE,
+    C.BLUE
+  );
 
   addText_(
     slide,
     'Final actionable\nculture result',
-    95, 250, 210, 35,
-    15, true, C.DARK_BLUE,
-    SlidesApp.ParagraphAlignment.CENTER,
+    85, 249, 215, 35,
+    15,
+    true,
+    C.DARK_BLUE,
+    'CENTER',
     C
   );
 
-  addArrow_(slide, 330, 258, 55, C);
+  addArrow_(
+    slide,
+    330, 255, 55,
+    C
+  );
 
-  addRoundedBox_(slide, 395, 235, 240, 65, C.LIGHT_BLUE, C.BLUE);
+  addRoundedBox_(
+    slide,
+    400, 230, 245, 70,
+    C.LIGHT_BLUE,
+    C.BLUE
+  );
 
   addText_(
     slide,
     'Appropriate antibiotic\nintervention',
-    410, 250, 210, 35,
-    15, true, C.DARK_BLUE,
-    SlidesApp.ParagraphAlignment.CENTER,
+    415, 249, 215, 35,
+    15,
+    true,
+    C.DARK_BLUE,
+    'CENTER',
     C
   );
 
   addText_(
     slide,
     'Unit: hours',
-    300, 320, 120, 22,
-    14, true, C.DARK_BLUE,
-    SlidesApp.ParagraphAlignment.CENTER,
+    300, 320, 120, 20,
+    14,
+    true,
+    C.DARK_BLUE,
+    'CENTER',
     C
   );
 
-  // ============================================================
-  // SLIDE 19 - SECONDARY OUTCOMES
-  // ============================================================
 
-  slide = newStandardSlide_(presentation, 'Secondary Outcomes', C);
+  /*************************************************************
+   * SLIDE 19 — SECONDARY OUTCOMES
+   *************************************************************/
 
-  addMissingInformationBox_(slide, 65, 90, C);
+  slide = newStandardSlide_(
+    presentation,
+    'Secondary Outcomes',
+    19,
+    C
+  );
+
+  addMissingInformationBox_(
+    slide,
+    100, 82,
+    C
+  );
 
   addSimpleTable_(
     slide,
-    ['Outcome', 'Planned reporting'],
     [
-      ['Appropriate antibiotic intervention', 'n (%)'],
-      ['Time to patient contact', 'Median (IQR)'],
-      ['Successful patient contact', 'n (%)'],
-      ['ED return within 30 days', 'n (%)'],
-      ['Hospital admission/readmission within 30 days', 'n (%)']
+      'Outcome',
+      'Planned reporting'
     ],
-    70, 170, 580, 30, C
+    [
+      [
+        'Appropriate antibiotic intervention',
+        'n (%)'
+      ],
+      [
+        'Time to patient contact',
+        'Median (IQR)'
+      ],
+      [
+        'Successful patient contact',
+        'n (%)'
+      ],
+      [
+        'ED return within 30 days',
+        'n (%)'
+      ],
+      [
+        'Hospital admission/readmission within 30 days',
+        'n (%)'
+      ]
+    ],
+    70, 170,
+    580,
+    30,
+    C
   );
 
-  // ============================================================
-  // SLIDE 20 - DISCUSSION
-  // ============================================================
 
-  slide = newStandardSlide_(presentation, 'Discussion', C);
+  /*************************************************************
+   * SLIDE 20 — DISCUSSION
+   *************************************************************/
 
-  addMissingInformationBox_(slide, 90, 105, C);
+  slide = newStandardSlide_(
+    presentation,
+    'Discussion',
+    20,
+    C
+  );
+
+  addMissingInformationBox_(
+    slide,
+    100, 100,
+    C
+  );
 
   addBulletList_(
     slide,
@@ -649,77 +1064,123 @@ function buildFRCResearchPresentation() {
       'Completed study results are required before discussing the main observations.',
       'Clinical significance and impact on patient care should not be added until results are available.',
       'Comparison with previous studies must use only references contained in the research paper.',
-      'Generalizability cannot be determined before study results are available.'
+      'Generalizability cannot be determined before the study results are available.'
     ],
-    100, 230, 520, 100, 14, C
+    100, 220, 520, 110,
+    13.5,
+    C
   );
 
-  // ============================================================
-  // SLIDE 21 - STUDY CRITIQUE
-  // ============================================================
 
-  slide = newStandardSlide_(presentation, 'Study Critique', C);
+  /*************************************************************
+   * SLIDE 21 — STUDY CRITIQUE
+   *************************************************************/
 
-  addMissingInformationBox_(slide, 70, 90, C);
+  slide = newStandardSlide_(
+    presentation,
+    'Study Critique',
+    21,
+    C
+  );
+
+  addMissingInformationBox_(
+    slide,
+    100, 82,
+    C
+  );
 
   addEmptyCritiqueColumn_(
     slide,
     'Strengths',
-    65, 205, C
+    65, 205,
+    C
   );
 
   addEmptyCritiqueColumn_(
     slide,
     'Limitations',
-    385, 205, C
-  );
-
-  // ============================================================
-  // SLIDE 22 - FUTURE DIRECTIONS
-  // ============================================================
-
-  slide = newStandardSlide_(presentation, 'Future Directions', C);
-
-  addMissingInformationBox_(slide, 100, 110, C);
-
-  addText_(
-    slide,
-    'The paper states that study results may help improve antimicrobial stewardship and support more effective follow-up processes, but specific future directions are not provided.',
-    100, 235, 520, 70,
-    16, false, C.BLACK,
-    SlidesApp.ParagraphAlignment.CENTER,
+    385, 205,
     C
   );
 
-  // ============================================================
-  // SLIDE 23 - CONCLUSION
-  // ============================================================
 
-  slide = newStandardSlide_(presentation, 'Conclusion', C);
+  /*************************************************************
+   * SLIDE 22 — FUTURE DIRECTIONS
+   *************************************************************/
 
-  addMissingInformationBox_(slide, 100, 125, C);
+  slide = newStandardSlide_(
+    presentation,
+    'Future Directions',
+    22,
+    C
+  );
+
+  addMissingInformationBox_(
+    slide,
+    100, 105,
+    C
+  );
+
+  addText_(
+    slide,
+    'The paper states that study results may help improve antimicrobial stewardship efforts and support the development of more effective follow-up processes, but specific future directions are not provided.',
+    100, 225, 520, 75,
+    15,
+    false,
+    C.BLACK,
+    'CENTER',
+    C
+  );
+
+
+  /*************************************************************
+   * SLIDE 23 — CONCLUSION
+   *************************************************************/
+
+  slide = newStandardSlide_(
+    presentation,
+    'Conclusion',
+    23,
+    C
+  );
+
+  addMissingInformationBox_(
+    slide,
+    100, 120,
+    C
+  );
 
   addText_(
     slide,
     'A final conclusion should be added only after completed study results are available.',
-    110, 245, 500, 55,
-    18, true, C.DARK_BLUE,
-    SlidesApp.ParagraphAlignment.CENTER,
+    110, 240, 500, 55,
+    18,
+    true,
+    C.DARK_BLUE,
+    'CENTER',
     C
   );
 
-  // ============================================================
-  // SLIDE 24 - ASSESSMENT QUESTION
-  // ============================================================
 
-  slide = newStandardSlide_(presentation, 'Assessment Question', C);
+  /*************************************************************
+   * SLIDE 24 — ASSESSMENT QUESTION
+   *************************************************************/
+
+  slide = newStandardSlide_(
+    presentation,
+    'Assessment Question',
+    24,
+    C
+  );
 
   addText_(
     slide,
     'Which statement best describes the purpose of a structured ED culture callback program?',
-    55, 82, 610, 35,
-    16, true, C.BLACK,
-    SlidesApp.ParagraphAlignment.LEFT,
+    55, 80, 610, 35,
+    15,
+    true,
+    C.BLACK,
+    'LEFT',
     C
   );
 
@@ -729,15 +1190,17 @@ function buildFRCResearchPresentation() {
     'B. To review post-discharge culture results and modify antibiotic therapy when needed.\n\n' +
     'C. To eliminate empiric antibiotic therapy at ED discharge.\n\n' +
     'D. To contact patients only if they return to the ED.',
-    70, 125, 585, 135,
-    13, false, C.BLACK,
-    SlidesApp.ParagraphAlignment.LEFT,
+    70, 120, 585, 135,
+    12.5,
+    false,
+    C.BLACK,
+    'LEFT',
     C
   );
 
   addRoundedBox_(
     slide,
-    80, 270, 560, 65,
+    80, 265, 560, 70,
     C.LIGHT_BLUE,
     C.BLUE
   );
@@ -745,25 +1208,40 @@ function buildFRCResearchPresentation() {
   addText_(
     slide,
     'Correct answer: B\nCallback programs allow post-discharge culture results to be reviewed and antibiotic therapy to be modified when needed.',
-    100, 282, 520, 42,
-    13, true, C.DARK_BLUE,
-    SlidesApp.ParagraphAlignment.CENTER,
+    100, 278, 520, 45,
+    12.5,
+    true,
+    C.DARK_BLUE,
+    'CENTER',
     C
   );
 
   addReferences_(
     slide,
-    [REF.BARLAM, REF.DUMKOW],
+    [
+      REF.BARLAM,
+      REF.DUMKOW
+    ],
     C
   );
 
-  // ============================================================
-  // SLIDE 25 - ACKNOWLEDGEMENTS
-  // ============================================================
 
-  slide = newStandardSlide_(presentation, 'Acknowledgements', C);
+  /*************************************************************
+   * SLIDE 25 — ACKNOWLEDGEMENTS
+   *************************************************************/
 
-  addMissingInformationBox_(slide, 90, 100, C);
+  slide = newStandardSlide_(
+    presentation,
+    'Acknowledgements',
+    25,
+    C
+  );
+
+  addMissingInformationBox_(
+    slide,
+    100, 95,
+    C
+  );
 
   addBulletList_(
     slide,
@@ -774,167 +1252,276 @@ function buildFRCResearchPresentation() {
       'Statistician',
       'Other contributors'
     ],
-    225, 235, 300, 100, 16, C
+    220, 225, 300, 100,
+    15,
+    C
   );
 
-  // ============================================================
-  // FINISH
-  // ============================================================
 
-  presentation.saveAndClose();
+  /*************************************************************
+   * FINISH
+   *************************************************************/
 
-  Logger.log('Slides successfully created.');
+  Logger.log(
+    'FRC research presentation successfully created.'
+  );
+
+  Logger.log(
+    presentation.getUrl()
+  );
 }
 
 
-// ======================================================================
-// RESET PRESENTATION
-// ======================================================================
+/****************************************************************
+ * RESET PRESENTATION
+ ****************************************************************/
 
 function resetPresentation_(presentation) {
 
   var slides = presentation.getSlides();
 
-  // Keep the first slide.
-  // Delete every other slide.
+  /*
+   * Delete every slide except slide 1.
+   */
   for (var i = slides.length - 1; i >= 1; i--) {
-    slides[i].remove();
+
+    try {
+      slides[i].remove();
+    } catch (e) {
+      Logger.log(
+        'Could not remove slide ' +
+        (i + 1) +
+        ': ' +
+        e.message
+      );
+    }
   }
 
-  // Clear all elements from the first slide.
+  /*
+   * Clear all elements from slide 1.
+   */
   var firstSlide = presentation.getSlides()[0];
+
   var elements = firstSlide.getPageElements();
 
   for (var j = elements.length - 1; j >= 0; j--) {
-    elements[j].remove();
+
+    try {
+      elements[j].remove();
+    } catch (e2) {
+      Logger.log(
+        'Could not remove element from first slide: ' +
+        e2.message
+      );
+    }
   }
 
-  firstSlide.getBackground().setSolidFill('#FFFFFF');
+  firstSlide
+    .getBackground()
+    .setSolidFill('#FFFFFF');
 }
 
 
-// ======================================================================
-// STANDARD SLIDE
-// ======================================================================
+/****************************************************************
+ * STANDARD SLIDE
+ ****************************************************************/
 
-function newStandardSlide_(presentation, title, C) {
+function newStandardSlide_(
+  presentation,
+  title,
+  slideNumber,
+  C
+) {
 
   var slide = presentation.appendSlide(
     SlidesApp.PredefinedLayout.BLANK
   );
 
-  slide.getBackground().setSolidFill(C.WHITE);
+  slide
+    .getBackground()
+    .setSolidFill(C.WHITE);
 
-  // Small blue title accent.
-  var accent = slide.insertShape(
-    SlidesApp.ShapeType.RECTANGLE,
-    42, 35, 28, 5
+
+  /*
+   * Blue accent above title
+   */
+  addRectangle_(
+    slide,
+    42, 35, 28, 5,
+    C.BLUE,
+    C.BLUE
   );
 
-  accent.getFill().setSolidFill(C.BLUE);
-  accent.getBorder().setTransparent();
 
+  /*
+   * Slide title
+   */
   addText_(
     slide,
     title,
-    42, 52, 620, 40,
-    27, true, C.BLACK,
-    SlidesApp.ParagraphAlignment.LEFT,
+    42, 50, 620, 40,
+    27,
+    true,
+    C.BLACK,
+    'LEFT',
     C
   );
 
-  // Footer divider.
-  var line = slide.insertShape(
-    SlidesApp.ShapeType.RECTANGLE,
-    30, 365, 660, 1
+
+  /*
+   * Footer divider
+   */
+  addRectangle_(
+    slide,
+    30, 365, 660, 1,
+    '#999999',
+    '#999999'
   );
 
-  line.getFill().setSolidFill('#999999');
-  line.getBorder().setTransparent();
 
+  /*
+   * Footer logo text
+   */
   addText_(
     slide,
     'Ascension Rx',
     38, 370, 145, 20,
-    16, true, C.DARK_BLUE,
-    SlidesApp.ParagraphAlignment.LEFT,
+    16,
+    true,
+    C.DARK_BLUE,
+    'LEFT',
     C
   );
 
+
+  /*
+   * Resident name
+   */
   addText_(
     slide,
     C.RESIDENT,
-    38, 390, 160, 10,
-    7, false, C.DARK_BLUE,
-    SlidesApp.ParagraphAlignment.LEFT,
+    38, 389, 160, 10,
+    7,
+    false,
+    C.DARK_BLUE,
+    'LEFT',
     C
   );
+
+
+  /*
+   * Slide number
+   */
+  addText_(
+    slide,
+    String(slideNumber),
+    660, 375, 30, 20,
+    11,
+    true,
+    C.DARK_BLUE,
+    'RIGHT',
+    C
+  );
+
 
   return slide;
 }
 
 
-// ======================================================================
-// TITLE SLIDE
-// ======================================================================
+/****************************************************************
+ * TITLE SLIDE
+ ****************************************************************/
 
 function createTitleSlide_(slide, C) {
 
-  slide.getBackground().setSolidFill(C.BLUE);
+  slide
+    .getBackground()
+    .setSolidFill(C.BLUE);
 
-  var sideBlock = slide.insertShape(
-    SlidesApp.ShapeType.RECTANGLE,
-    0, 0, 125, 405
+
+  /*
+   * Left white area
+   */
+  addRectangle_(
+    slide,
+    0, 0, 125, 405,
+    C.WHITE,
+    C.WHITE
   );
 
-  sideBlock.getFill().setSolidFill(C.WHITE);
-  sideBlock.getBorder().setTransparent();
 
-  var lightBlock = slide.insertShape(
-    SlidesApp.ShapeType.RECTANGLE,
-    600, 0, 120, 405
+  /*
+   * Right light-blue accent
+   */
+  addRectangle_(
+    slide,
+    600, 0, 120, 405,
+    '#78A8E4',
+    '#78A8E4'
   );
 
-  lightBlock.getFill().setSolidFill('#78A8E4');
-  lightBlock.getBorder().setTransparent();
 
+  /*
+   * Main title
+   */
   addText_(
     slide,
     'Time to appropriate antibiotic intervention associated with a pharmacist-driven emergency department culture callback program',
-    150, 60, 420, 150,
-    27, true, C.WHITE,
-    SlidesApp.ParagraphAlignment.LEFT,
+    150, 55, 420, 165,
+    26,
+    true,
+    C.WHITE,
+    'LEFT',
     C
   );
 
+
+  /*
+   * Ascension Rx placeholder
+   */
   addText_(
     slide,
     'Ascension Rx',
-    20, 320, 100, 45,
-    20, true, C.DARK_BLUE,
-    SlidesApp.ParagraphAlignment.CENTER,
+    18, 315, 102, 45,
+    19,
+    true,
+    C.DARK_BLUE,
+    'CENTER',
     C
   );
 
+
+  /*
+   * Resident information
+   */
   addText_(
     slide,
-    'Resident Name, PharmD\nAscension St. Vincent’s Riverside\nPGY1 Pharmacy Resident',
-    445, 300, 220, 70,
-    14, true, C.WHITE,
-    SlidesApp.ParagraphAlignment.LEFT,
+    'Resident Name, PharmD\n' +
+    'Ascension St. Vincent’s Riverside\n' +
+    'PGY1 Pharmacy Resident',
+    430, 295, 250, 75,
+    14,
+    true,
+    C.WHITE,
+    'LEFT',
     C
   );
 }
 
 
-// ======================================================================
-// TEXT
-// ======================================================================
+/****************************************************************
+ * SAFE TEXT FUNCTION
+ *
+ * THIS IS THE IMPORTANT FIX FOR YOUR ERROR.
+ ****************************************************************/
 
 function addText_(
   slide,
   text,
-  x, y, w, h,
+  x,
+  y,
+  w,
+  h,
   fontSize,
   bold,
   color,
@@ -943,33 +1530,98 @@ function addText_(
 ) {
 
   var box = slide.insertTextBox(
-    text,
-    x, y, w, h
+    String(text),
+    x,
+    y,
+    w,
+    h
   );
 
-  var textRange = box.getText();
+  var range = box.getText();
 
-  textRange.getTextStyle()
-    .setFontFamily(C.BODY_FONT)
-    .setFontSize(fontSize)
-    .setForegroundColor(color)
-    .setBold(bold);
 
-  textRange.getParagraphStyle()
-    .setParagraphAlignment(alignment);
+  /*
+   * Text formatting
+   */
+  try {
+
+    range
+      .getTextStyle()
+      .setFontFamily(C.FONT)
+      .setFontSize(fontSize)
+      .setForegroundColor(color)
+      .setBold(bold);
+
+  } catch (e) {
+
+    Logger.log(
+      'Text formatting warning: ' +
+      e.message
+    );
+  }
+
+
+  /*
+   * Paragraph alignment.
+   *
+   * Some Google Slides environments throw:
+   *
+   * Unexpected error while getting the method or property
+   * setParagraphAlignment on object SlidesApp.ParagraphStyle
+   *
+   * Therefore alignment is protected by try/catch.
+   * Slide creation continues even if alignment fails.
+   */
+  try {
+
+    if (alignment) {
+
+      var style = range.getParagraphStyle();
+
+      if (alignment === 'CENTER') {
+
+        style.setParagraphAlignment(
+          SlidesApp.ParagraphAlignment.CENTER
+        );
+
+      } else if (alignment === 'RIGHT') {
+
+        style.setParagraphAlignment(
+          SlidesApp.ParagraphAlignment.END
+        );
+
+      } else {
+
+        style.setParagraphAlignment(
+          SlidesApp.ParagraphAlignment.START
+        );
+      }
+    }
+
+  } catch (alignmentError) {
+
+    Logger.log(
+      'Paragraph alignment skipped: ' +
+      alignmentError.message
+    );
+  }
+
 
   return box;
 }
 
 
-// ======================================================================
-// BULLETS
-// ======================================================================
+/****************************************************************
+ * BULLET LIST
+ ****************************************************************/
 
 function addBulletList_(
   slide,
   items,
-  x, y, w, h,
+  x,
+  y,
+  w,
+  h,
   fontSize,
   C
 ) {
@@ -988,109 +1640,203 @@ function addBulletList_(
   return addText_(
     slide,
     output,
-    x, y, w, h,
+    x,
+    y,
+    w,
+    h,
     fontSize,
     false,
     C.BLACK,
-    SlidesApp.ParagraphAlignment.LEFT,
+    'LEFT',
     C
   );
 }
 
 
-// ======================================================================
-// ROUNDED BOX
-// ======================================================================
+/****************************************************************
+ * RECTANGLE
+ ****************************************************************/
+
+function addRectangle_(
+  slide,
+  x,
+  y,
+  w,
+  h,
+  fillColor,
+  borderColor
+) {
+
+  var shape = slide.insertShape(
+    SlidesApp.ShapeType.RECTANGLE,
+    x,
+    y,
+    w,
+    h
+  );
+
+  try {
+
+    shape
+      .getFill()
+      .setSolidFill(fillColor);
+
+  } catch (e) {
+    Logger.log('Fill warning: ' + e.message);
+  }
+
+
+  try {
+
+    shape
+      .getBorder()
+      .getLineFill()
+      .setSolidFill(borderColor);
+
+  } catch (e2) {
+    Logger.log('Border warning: ' + e2.message);
+  }
+
+
+  return shape;
+}
+
+
+/****************************************************************
+ * ROUNDED BOX
+ ****************************************************************/
 
 function addRoundedBox_(
   slide,
-  x, y, w, h,
+  x,
+  y,
+  w,
+  h,
   fillColor,
   borderColor
 ) {
 
   var shape = slide.insertShape(
     SlidesApp.ShapeType.ROUND_RECTANGLE,
-    x, y, w, h
+    x,
+    y,
+    w,
+    h
   );
 
-  shape.getFill().setSolidFill(fillColor);
+  try {
 
-  if (borderColor) {
-    shape.getBorder()
+    shape
+      .getFill()
+      .setSolidFill(fillColor);
+
+  } catch (e) {
+    Logger.log('Fill warning: ' + e.message);
+  }
+
+
+  try {
+
+    shape
+      .getBorder()
       .getLineFill()
       .setSolidFill(borderColor);
-  } else {
-    shape.getBorder().setTransparent();
+
+  } catch (e2) {
+    Logger.log('Border warning: ' + e2.message);
   }
+
 
   return shape;
 }
 
 
-// ======================================================================
-// REFERENCES
-// ======================================================================
+/****************************************************************
+ * REFERENCES
+ ****************************************************************/
 
-function addReferences_(slide, references, C) {
+function addReferences_(
+  slide,
+  references,
+  C
+) {
 
   var text = references.join('\n');
 
+  /*
+   * Full references are long, so use very small footer font.
+   */
   addText_(
     slide,
     text,
-    300, 366, 385, 32,
-    6,
+    260, 352, 425, 48,
+    5.5,
     false,
     C.DARK_GRAY,
-    SlidesApp.ParagraphAlignment.RIGHT,
+    'RIGHT',
     C
   );
 }
 
 
-// ======================================================================
-// STAT CARDS
-// ======================================================================
+/****************************************************************
+ * STATISTIC CARD
+ ****************************************************************/
 
 function addStatCard_(
   slide,
   value,
   label,
-  x, y,
+  x,
+  y,
   C
 ) {
 
   addRoundedBox_(
     slide,
-    x, y, 140, 105,
+    x,
+    y,
+    140,
+    105,
     C.LIGHT_BLUE,
     C.BLUE
   );
 
+
   addText_(
     slide,
     value,
-    x + 8, y + 16, 124, 28,
-    18, true, C.DARK_BLUE,
-    SlidesApp.ParagraphAlignment.CENTER,
+    x + 8,
+    y + 15,
+    124,
+    28,
+    17,
+    true,
+    C.DARK_BLUE,
+    'CENTER',
     C
   );
+
 
   addText_(
     slide,
     label,
-    x + 8, y + 50, 124, 42,
-    11, false, C.BLACK,
-    SlidesApp.ParagraphAlignment.CENTER,
+    x + 8,
+    y + 50,
+    124,
+    42,
+    10.5,
+    false,
+    C.BLACK,
+    'CENTER',
     C
   );
 }
 
 
-// ======================================================================
-// FLOW ROW
-// ======================================================================
+/****************************************************************
+ * FLOW ROW
+ ****************************************************************/
 
 function addFlowRow_(
   slide,
@@ -1100,38 +1846,50 @@ function addFlowRow_(
   C
 ) {
 
-  var boxWidth = 112;
-  var gap = 15;
+  var boxWidth = 110;
+  var boxHeight = 52;
+  var gap = 20;
 
   for (var i = 0; i < labels.length; i++) {
 
-    var x = startX + i * (boxWidth + gap);
+    var x =
+      startX +
+      i * (boxWidth + gap);
+
 
     addRoundedBox_(
       slide,
-      x, y,
-      boxWidth, 50,
+      x,
+      y,
+      boxWidth,
+      boxHeight,
       C.LIGHT_BLUE,
       C.BLUE
     );
 
+
     addText_(
       slide,
       labels[i],
-      x + 5, y + 12,
-      boxWidth - 10, 28,
-      11, true, C.DARK_BLUE,
-      SlidesApp.ParagraphAlignment.CENTER,
+      x + 5,
+      y + 11,
+      boxWidth - 10,
+      30,
+      10.5,
+      true,
+      C.DARK_BLUE,
+      'CENTER',
       C
     );
+
 
     if (i < labels.length - 1) {
 
       addArrow_(
         slide,
-        x + boxWidth + 2,
-        y + 20,
-        gap - 4,
+        x + boxWidth + 3,
+        y + 17,
+        gap - 6,
         C
       );
     }
@@ -1139,82 +1897,140 @@ function addFlowRow_(
 }
 
 
-// ======================================================================
-// ARROW
-// ======================================================================
+/****************************************************************
+ * ARROW
+ ****************************************************************/
 
-function addArrow_(slide, x, y, width, C) {
+function addArrow_(
+  slide,
+  x,
+  y,
+  width,
+  C
+) {
 
-  var arrow = slide.insertShape(
-    SlidesApp.ShapeType.RIGHT_ARROW,
-    x, y,
-    width, 18
-  );
+  try {
 
-  arrow.getFill().setSolidFill(C.BLUE);
-  arrow.getBorder().setTransparent();
+    var arrow = slide.insertShape(
+      SlidesApp.ShapeType.RIGHT_ARROW,
+      x,
+      y,
+      width,
+      18
+    );
+
+    arrow
+      .getFill()
+      .setSolidFill(C.BLUE);
+
+    return arrow;
+
+  } catch (e) {
+
+    /*
+     * If RIGHT_ARROW fails in a particular Slides environment,
+     * use a simple rectangle instead so the script continues.
+     */
+    Logger.log(
+      'Arrow fallback used: ' +
+      e.message
+    );
+
+    return addRectangle_(
+      slide,
+      x,
+      y + 7,
+      width,
+      4,
+      C.BLUE,
+      C.BLUE
+    );
+  }
 }
 
 
-// ======================================================================
-// COMPARISON CARD
-// ======================================================================
+/****************************************************************
+ * COMPARISON CARD
+ ****************************************************************/
 
 function addComparisonCard_(
   slide,
   heading,
   result,
-  x, y,
+  x,
+  y,
   C
 ) {
 
   addRoundedBox_(
     slide,
-    x, y, 255, 60,
+    x,
+    y,
+    255,
+    58,
     C.GRAY,
     C.BLUE
   );
 
+
   addText_(
     slide,
     heading,
-    x + 10, y + 8, 235, 18,
-    13, true, C.DARK_BLUE,
-    SlidesApp.ParagraphAlignment.CENTER,
+    x + 10,
+    y + 7,
+    235,
+    18,
+    13,
+    true,
+    C.DARK_BLUE,
+    'CENTER',
     C
   );
+
 
   addText_(
     slide,
     result,
-    x + 10, y + 31, 235, 20,
-    18, true, C.BLACK,
-    SlidesApp.ParagraphAlignment.CENTER,
+    x + 10,
+    y + 30,
+    235,
+    20,
+    17,
+    true,
+    C.BLACK,
+    'CENTER',
     C
   );
 }
 
 
-// ======================================================================
-// VERTICAL FLOW
-// ======================================================================
+/****************************************************************
+ * VERTICAL FLOW
+ ****************************************************************/
 
 function addVerticalFlow_(
   slide,
   items,
-  x, y, width,
+  x,
+  y,
+  width,
   C
 ) {
 
-  var h = 37;
+  var h = 39;
   var gap = 10;
 
   for (var i = 0; i < items.length; i++) {
 
+    var yy =
+      y +
+      i * (h + gap);
+
+
     addRoundedBox_(
       slide,
       x,
-      y + i * (h + gap),
+      yy,
       width,
       h,
       i === items.length - 1
@@ -1223,82 +2039,99 @@ function addVerticalFlow_(
       C.BLUE
     );
 
+
     addText_(
       slide,
       items[i],
       x + 10,
-      y + i * (h + gap) + 9,
+      yy + 8,
       width - 20,
-      20,
-      12,
+      23,
+      11.5,
       true,
       C.DARK_BLUE,
-      SlidesApp.ParagraphAlignment.CENTER,
+      'CENTER',
       C
     );
   }
 }
 
 
-// ======================================================================
-// CAMPUS CARD
-// ======================================================================
+/****************************************************************
+ * CAMPUS CARD
+ ****************************************************************/
 
 function addCampusCard_(
   slide,
   campus,
-  x, y,
+  x,
+  y,
   C
 ) {
 
   addRoundedBox_(
     slide,
-    x, y, 150, 70,
+    x,
+    y,
+    150,
+    70,
     C.LIGHT_BLUE,
     C.BLUE
   );
 
+
   addText_(
     slide,
     campus,
-    x + 10, y + 22, 130, 25,
-    17, true, C.DARK_BLUE,
-    SlidesApp.ParagraphAlignment.CENTER,
+    x + 10,
+    y + 22,
+    130,
+    25,
+    17,
+    true,
+    C.DARK_BLUE,
+    'CENTER',
     C
   );
 }
 
 
-// ======================================================================
-// TABLE
-// ======================================================================
+/****************************************************************
+ * SIMPLE TABLE
+ ****************************************************************/
 
 function addSimpleTable_(
   slide,
   headers,
   rows,
-  x, y,
+  x,
+  y,
   totalWidth,
   rowHeight,
   C
 ) {
 
   var cols = headers.length;
-  var colWidth = totalWidth / cols;
 
-  // Header
+  var colWidth =
+    totalWidth / cols;
+
+
+  /*
+   * TABLE HEADERS
+   */
   for (var c = 0; c < cols; c++) {
 
-    var header = slide.insertShape(
-      SlidesApp.ShapeType.RECTANGLE,
+    addRectangle_(
+      slide,
       x + c * colWidth,
       y,
       colWidth,
-      rowHeight
+      rowHeight,
+      C.BLUE,
+      C.WHITE
     );
 
-    header.getFill().setSolidFill(C.BLUE);
-    header.getBorder().getLineFill().setSolidFill(C.WHITE);
 
     addText_(
       slide,
@@ -1310,31 +2143,35 @@ function addSimpleTable_(
       10,
       true,
       C.WHITE,
-      SlidesApp.ParagraphAlignment.CENTER,
+      'CENTER',
       C
     );
   }
 
-  // Body
+
+  /*
+   * TABLE ROWS
+   */
   for (var r = 0; r < rows.length; r++) {
 
     for (var c2 = 0; c2 < cols; c2++) {
 
-      var cell = slide.insertShape(
-        SlidesApp.ShapeType.RECTANGLE,
+      var fill =
+        r % 2 === 0
+          ? C.GRAY
+          : C.WHITE;
+
+
+      addRectangle_(
+        slide,
         x + c2 * colWidth,
         y + rowHeight * (r + 1),
         colWidth,
-        rowHeight
+        rowHeight,
+        fill,
+        C.BORDER
       );
 
-      cell.getFill().setSolidFill(
-        r % 2 === 0 ? C.GRAY : C.WHITE
-      );
-
-      cell.getBorder()
-        .getLineFill()
-        .setSolidFill(C.BORDER);
 
       addText_(
         slide,
@@ -1346,7 +2183,7 @@ function addSimpleTable_(
         9,
         false,
         C.BLACK,
-        SlidesApp.ParagraphAlignment.CENTER,
+        'CENTER',
         C
       );
     }
@@ -1354,67 +2191,93 @@ function addSimpleTable_(
 }
 
 
-// ======================================================================
-// METHODOLOGY STEP
-// ======================================================================
+/****************************************************************
+ * METHODOLOGY STEP
+ ****************************************************************/
 
 function addMethodologyStep_(
   slide,
   number,
   label,
-  x, y,
+  x,
+  y,
   C
 ) {
 
-  var numberBox = slide.insertShape(
-    SlidesApp.ShapeType.RECTANGLE,
-    x, y, 75, 38
+  addRectangle_(
+    slide,
+    x,
+    y,
+    75,
+    38,
+    C.BLUE,
+    C.BLUE
   );
 
-  numberBox.getFill().setSolidFill(C.BLUE);
-  numberBox.getBorder().setTransparent();
 
-  var mainBox = slide.insertShape(
-    SlidesApp.ShapeType.RECTANGLE,
-    x + 75, y, 440, 38
+  addRectangle_(
+    slide,
+    x + 75,
+    y,
+    440,
+    38,
+    C.BLUE2,
+    C.BLUE2
   );
 
-  mainBox.getFill().setSolidFill(C.BLUE2);
-  mainBox.getBorder().setTransparent();
 
   addText_(
     slide,
     number,
-    x + 10, y + 7, 55, 22,
-    19, false, C.WHITE,
-    SlidesApp.ParagraphAlignment.CENTER,
+    x + 10,
+    y + 7,
+    55,
+    22,
+    18,
+    false,
+    C.WHITE,
+    'CENTER',
     C
   );
+
 
   addText_(
     slide,
     label,
-    x + 100, y + 10, 360, 20,
-    14, true, C.WHITE,
-    SlidesApp.ParagraphAlignment.LEFT,
+    x + 100,
+    y + 9,
+    360,
+    20,
+    14,
+    true,
+    C.WHITE,
+    'LEFT',
     C
   );
 }
 
 
-// ======================================================================
-// STUDY TIMELINE
-// ======================================================================
+/****************************************************************
+ * STUDY TIMELINE
+ ****************************************************************/
 
-function addStudyTimeline_(slide, x, y, C) {
+function addStudyTimeline_(
+  slide,
+  x,
+  y,
+  C
+) {
 
-  var line = slide.insertShape(
-    SlidesApp.ShapeType.RECTANGLE,
-    x, y + 38, 245, 4
+  addRectangle_(
+    slide,
+    x,
+    y + 38,
+    235,
+    4,
+    C.BLUE,
+    C.BLUE
   );
 
-  line.getFill().setSolidFill(C.BLUE);
-  line.getBorder().setTransparent();
 
   var labels = [
     '2013',
@@ -1423,12 +2286,14 @@ function addStudyTimeline_(slide, x, y, C) {
     '2026'
   ];
 
+
   var positions = [
     0,
     75,
     150,
     225
   ];
+
 
   for (var i = 0; i < labels.length; i++) {
 
@@ -1440,8 +2305,20 @@ function addStudyTimeline_(slide, x, y, C) {
       20
     );
 
-    circle.getFill().setSolidFill(C.BLUE);
-    circle.getBorder().setTransparent();
+
+    try {
+
+      circle
+        .getFill()
+        .setSolidFill(C.BLUE);
+
+    } catch (e) {
+      Logger.log(
+        'Timeline circle warning: ' +
+        e.message
+      );
+    }
+
 
     addText_(
       slide,
@@ -1450,109 +2327,146 @@ function addStudyTimeline_(slide, x, y, C) {
       y + 58,
       65,
       30,
-      10,
+      9.5,
       true,
       C.DARK_BLUE,
-      SlidesApp.ParagraphAlignment.CENTER,
+      'CENTER',
       C
     );
   }
 }
 
 
-// ======================================================================
-// CRITERIA BOX
-// ======================================================================
+/****************************************************************
+ * CRITERIA BOX
+ ****************************************************************/
 
 function addCriteriaBox_(
   slide,
   heading,
   items,
-  x, y, w, h,
+  x,
+  y,
+  w,
+  h,
   C
 ) {
 
   addRoundedBox_(
     slide,
-    x, y, w, h,
+    x,
+    y,
+    w,
+    h,
     C.GRAY,
     C.BLUE
   );
 
+
   addText_(
     slide,
     heading,
-    x + 10, y + 12, w - 20, 22,
-    16, true, C.DARK_BLUE,
-    SlidesApp.ParagraphAlignment.CENTER,
+    x + 10,
+    y + 12,
+    w - 20,
+    22,
+    16,
+    true,
+    C.DARK_BLUE,
+    'CENTER',
     C
   );
+
 
   addBulletList_(
     slide,
     items,
-    x + 18, y + 45, w - 36, h - 55,
-    10.5,
+    x + 18,
+    y + 45,
+    w - 36,
+    h - 55,
+    10,
     C
   );
 }
 
 
-// ======================================================================
-// ANALYSIS CARD
-// ======================================================================
+/****************************************************************
+ * STATISTICAL ANALYSIS CARD
+ ****************************************************************/
 
 function addAnalysisCard_(
   slide,
   heading,
   lines,
-  x, y,
+  x,
+  y,
   C
 ) {
 
   addRoundedBox_(
     slide,
-    x, y, 190, 155,
+    x,
+    y,
+    190,
+    160,
     C.GRAY,
     C.BLUE
   );
 
+
   addText_(
     slide,
     heading,
-    x + 10, y + 15, 170, 22,
-    16, true, C.DARK_BLUE,
-    SlidesApp.ParagraphAlignment.CENTER,
+    x + 10,
+    y + 14,
+    170,
+    22,
+    16,
+    true,
+    C.DARK_BLUE,
+    'CENTER',
     C
   );
+
 
   addText_(
     slide,
     lines.join('\n'),
-    x + 15, y + 50, 160, 90,
-    11.5, false, C.BLACK,
-    SlidesApp.ParagraphAlignment.CENTER,
+    x + 15,
+    y + 50,
+    160,
+    95,
+    11,
+    false,
+    C.BLACK,
+    'CENTER',
     C
   );
 }
 
 
-// ======================================================================
-// MISSING INFORMATION BOX
-// ======================================================================
+/****************************************************************
+ * MISSING INFORMATION BOX
+ ****************************************************************/
 
 function addMissingInformationBox_(
   slide,
-  x, y,
+  x,
+  y,
   C
 ) {
 
   addRoundedBox_(
     slide,
-    x, y, 520, 75,
+    x,
+    y,
+    520,
+    75,
     C.YELLOW,
     C.YELLOW_BORDER
   );
+
 
   addText_(
     slide,
@@ -1561,20 +2475,23 @@ function addMissingInformationBox_(
     y + 23,
     480,
     28,
-    19,
+    18,
     true,
-    '#7A5200',
-    SlidesApp.ParagraphAlignment.CENTER,
+    C.YELLOW_TEXT,
+    'CENTER',
     C
   );
 }
 
 
-// ======================================================================
-// SUBJECT FLOW PLACEHOLDER
-// ======================================================================
+/****************************************************************
+ * SUBJECT SELECTION RESULTS FLOW
+ ****************************************************************/
 
-function addSubjectFlowPlaceholder_(slide, C) {
+function addSubjectSelectionFlow_(
+  slide,
+  C
+) {
 
   var labels = [
     'Subjects Reviewed\nn = —',
@@ -1583,43 +2500,54 @@ function addSubjectFlowPlaceholder_(slide, C) {
     'Study Groups\nn = —'
   ];
 
-  var x = 55;
-  var y = 245;
-  var w = 135;
+
+  var startX = 45;
+  var y = 235;
+
+  var boxWidth = 135;
+  var gap = 27;
+
 
   for (var i = 0; i < labels.length; i++) {
 
+    var x =
+      startX +
+      i * (boxWidth + gap);
+
+
     addRoundedBox_(
       slide,
-      x + i * 160,
+      x,
       y,
-      w,
-      60,
+      boxWidth,
+      65,
       C.LIGHT_BLUE,
       C.BLUE
     );
 
+
     addText_(
       slide,
       labels[i],
-      x + i * 160 + 5,
+      x + 5,
       y + 15,
-      w - 10,
-      32,
-      12,
+      boxWidth - 10,
+      38,
+      11.5,
       true,
       C.DARK_BLUE,
-      SlidesApp.ParagraphAlignment.CENTER,
+      'CENTER',
       C
     );
+
 
     if (i < labels.length - 1) {
 
       addArrow_(
         slide,
-        x + i * 160 + w + 7,
-        y + 20,
-        25,
+        x + boxWidth + 5,
+        y + 23,
+        18,
         C
       );
     }
@@ -1627,39 +2555,55 @@ function addSubjectFlowPlaceholder_(slide, C) {
 }
 
 
-// ======================================================================
-// CRITIQUE COLUMN
-// ======================================================================
+/****************************************************************
+ * STUDY CRITIQUE EMPTY COLUMN
+ ****************************************************************/
 
 function addEmptyCritiqueColumn_(
   slide,
   title,
-  x, y,
+  x,
+  y,
   C
 ) {
 
   addRoundedBox_(
     slide,
-    x, y, 270, 100,
+    x,
+    y,
+    270,
+    100,
     C.GRAY,
     C.BLUE
   );
 
+
   addText_(
     slide,
     title,
-    x + 15, y + 15, 240, 22,
-    17, true, C.DARK_BLUE,
-    SlidesApp.ParagraphAlignment.CENTER,
+    x + 15,
+    y + 15,
+    240,
+    22,
+    17,
+    true,
+    C.DARK_BLUE,
+    'CENTER',
     C
   );
+
 
   addText_(
     slide,
     'Add only when supported by the research paper.',
-    x + 25, y + 55, 220, 28,
-    11, false, C.DARK_GRAY,
-    SlidesApp.ParagraphAlignment.CENTER,
+    x + 25,
+    y + 55,
+    220,
+    28,
+    11,
+    false,
+    C.DARK_GRAY,
+    'CENTER',
     C
   );
 }
