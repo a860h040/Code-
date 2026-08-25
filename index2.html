@@ -1,12 +1,798 @@
-Question: Apixaban 5 mg PO twice daily is ordered for VTE prophylaxis after left total hip arthroplasty. Is this order appropriate? If not, what should be changed?
-Correct answer: No. Change to apixaban 2.5 mg PO twice daily. For hip replacement prophylaxis, treatment is typically continued for 35 days and started after adequate hemostasis, generally 12–24 hours after surgery.
-Question: Ketorolac 30 mg IV every 6 hours scheduled is ordered for postoperative pain in this 83-year-old patient. Is this order appropriate?
-Correct answer: No. For a patient ≥65 years old, reduce to ketorolac 15 mg IV every 6 hours, with a maximum of 60 mg/day. Use for the shortest necessary duration and no longer than 5 days.
-Question: Potassium chloride 20 mEq IV push once is ordered for a potassium level of 3.2 mmol/L. Is this order appropriate?
-Correct answer: No. Potassium chloride should never be given by IV push. Change it to a diluted IV infusion, such as KCl 20 mEq IVPB over approximately 2 hours, according to hospital policy and IV access.
-Question: Ondansetron 16 mg IV every 6 hours PRN is ordered for postoperative nausea and vomiting. Is this order appropriate?
-Correct answer: No. The dose is too high for routine postoperative nausea/vomiting. Change to ondansetron 4 mg IV PRN.
-Question: Acetaminophen 1,000 mg PO every 8 hours scheduled is ordered for postoperative multimodal pain control. Is this order appropriate?
-Correct answer: Yes. Verify as written. The total daily dose is 3,000 mg/day. Confirm that the patient is not receiving additional acetaminophen-containing medications.
-Question: Senna-docusate 2 tablets PO nightly is ordered for constipation prevention while receiving postoperative opioid therapy. Is this order appropriate?
-Correct answer: Yes. Verify as written. This is an appropriate postoperative bowel regimen.
+/**********************************************************************
+ * ADD FACILITY TO SHEET1 USING FIN
+ *
+ * MATCHING:
+ *
+ * Sheet1 FIN
+ *      ↓
+ * Ortho FIN / PATIENT_FIN
+ *      ↓
+ * Ortho FACILITY
+ *      ↓
+ * New FACILITY column in Sheet1
+ *
+ *
+ * IMPORTANT:
+ * ------------------------------------------------------------
+ * - Does NOT delete any existing Sheet1 data.
+ * - Does NOT change the Ortho sheet.
+ * - Adds FACILITY to Sheet1 if it does not already exist.
+ * - Every FACILITY result cell contains a Google Sheets formula.
+ * - Matching is performed using FIN.
+ *
+ *
+ * RUN:
+ * addFacilityToSheet1ByFIN
+ **********************************************************************/
+
+
+const FACILITY_FIN_CONFIG = {
+
+  SHEET1_NAME: "Sheet1",
+
+  ORTHO_SHEET_NAME: "Ortho",
+
+  SHEET1_FIN_HEADERS: [
+    "FIN",
+    "PATIENT_FIN",
+    "Patient FIN",
+    "Patient_FIN"
+  ],
+
+  ORTHO_FIN_HEADERS: [
+    "FIN",
+    "PATIENT_FIN",
+    "Patient FIN",
+    "Patient_FIN"
+  ],
+
+  FACILITY_HEADERS: [
+    "FACILITY",
+    "Facility",
+    "E_LOC_FACILITY_DISP",
+    "Campus",
+    "Hospital"
+  ],
+
+  OUTPUT_HEADER: "FACILITY"
+
+};
+
+
+/**********************************************************************
+ * MAIN FUNCTION
+ **********************************************************************/
+function addFacilityToSheet1ByFIN() {
+
+  const ss =
+    SpreadsheetApp.getActiveSpreadsheet();
+
+
+  const sheet1 =
+    ss.getSheetByName(
+      FACILITY_FIN_CONFIG.SHEET1_NAME
+    );
+
+
+  const ortho =
+    ss.getSheetByName(
+      FACILITY_FIN_CONFIG.ORTHO_SHEET_NAME
+    );
+
+
+  /********************************************************************
+   * CHECK SHEETS
+   ********************************************************************/
+  if (!sheet1) {
+
+    SpreadsheetApp
+      .getUi()
+      .alert(
+        'Could not find sheet "' +
+        FACILITY_FIN_CONFIG.SHEET1_NAME +
+        '".'
+      );
+
+    return;
+
+  }
+
+
+  if (!ortho) {
+
+    SpreadsheetApp
+      .getUi()
+      .alert(
+        'Could not find sheet "' +
+        FACILITY_FIN_CONFIG.ORTHO_SHEET_NAME +
+        '".'
+      );
+
+    return;
+
+  }
+
+
+  const sheet1LastRow =
+    sheet1.getLastRow();
+
+
+  const sheet1LastColumn =
+    sheet1.getLastColumn();
+
+
+  const orthoLastRow =
+    ortho.getLastRow();
+
+
+  const orthoLastColumn =
+    ortho.getLastColumn();
+
+
+  if (sheet1LastRow < 2) {
+
+    SpreadsheetApp
+      .getUi()
+      .alert(
+        "Sheet1 does not contain patient data."
+      );
+
+    return;
+
+  }
+
+
+  if (orthoLastRow < 2) {
+
+    SpreadsheetApp
+      .getUi()
+      .alert(
+        "Ortho does not contain patient data."
+      );
+
+    return;
+
+  }
+
+
+  /********************************************************************
+   * READ HEADERS
+   ********************************************************************/
+  const sheet1Headers =
+    sheet1
+      .getRange(
+        1,
+        1,
+        1,
+        sheet1LastColumn
+      )
+      .getDisplayValues()[0];
+
+
+  const orthoHeaders =
+    ortho
+      .getRange(
+        1,
+        1,
+        1,
+        orthoLastColumn
+      )
+      .getDisplayValues()[0];
+
+
+  /********************************************************************
+   * FIND SHEET1 FIN
+   ********************************************************************/
+  const sheet1FinColumn =
+    findFacilityHeader_(
+      sheet1Headers,
+      FACILITY_FIN_CONFIG.SHEET1_FIN_HEADERS
+    );
+
+
+  if (!sheet1FinColumn) {
+
+    SpreadsheetApp
+      .getUi()
+      .alert(
+
+        "Could not find the FIN column in Sheet1.\n\n" +
+
+        "Expected one of:\n" +
+
+        FACILITY_FIN_CONFIG
+          .SHEET1_FIN_HEADERS
+          .join("\n")
+
+      );
+
+    return;
+
+  }
+
+
+  /********************************************************************
+   * FIND ORTHO FIN
+   ********************************************************************/
+  const orthoFinColumn =
+    findFacilityHeader_(
+      orthoHeaders,
+      FACILITY_FIN_CONFIG.ORTHO_FIN_HEADERS
+    );
+
+
+  if (!orthoFinColumn) {
+
+    SpreadsheetApp
+      .getUi()
+      .alert(
+
+        "Could not find the FIN column in Ortho.\n\n" +
+
+        "Expected one of:\n" +
+
+        FACILITY_FIN_CONFIG
+          .ORTHO_FIN_HEADERS
+          .join("\n")
+
+      );
+
+    return;
+
+  }
+
+
+  /********************************************************************
+   * FIND ORTHO FACILITY
+   ********************************************************************/
+  const orthoFacilityColumn =
+    findFacilityHeader_(
+      orthoHeaders,
+      FACILITY_FIN_CONFIG.FACILITY_HEADERS
+    );
+
+
+  if (!orthoFacilityColumn) {
+
+    SpreadsheetApp
+      .getUi()
+      .alert(
+
+        'Could not find the "FACILITY" column in Ortho.'
+
+      );
+
+    return;
+
+  }
+
+
+  /********************************************************************
+   * FIND OR CREATE FACILITY COLUMN IN SHEET1
+   ********************************************************************/
+  let outputFacilityColumn =
+    findFacilityHeader_(
+      sheet1Headers,
+      [
+        FACILITY_FIN_CONFIG.OUTPUT_HEADER
+      ]
+    );
+
+
+  if (!outputFacilityColumn) {
+
+    outputFacilityColumn =
+      sheet1.getLastColumn() + 1;
+
+
+    sheet1
+      .getRange(
+        1,
+        outputFacilityColumn
+      )
+      .setValue(
+        FACILITY_FIN_CONFIG.OUTPUT_HEADER
+      );
+
+  }
+
+
+  /********************************************************************
+   * CONVERT COLUMN NUMBERS TO LETTERS
+   ********************************************************************/
+  const sheet1FinLetter =
+    facilityColumnLetter_(
+      sheet1FinColumn
+    );
+
+
+  const orthoFinLetter =
+    facilityColumnLetter_(
+      orthoFinColumn
+    );
+
+
+  const orthoFacilityLetter =
+    facilityColumnLetter_(
+      orthoFacilityColumn
+    );
+
+
+  /********************************************************************
+   * SAFE ORTHO SHEET NAME
+   ********************************************************************/
+  const safeOrthoName =
+
+    "'" +
+
+    ortho
+      .getName()
+      .replace(
+        /'/g,
+        "''"
+      ) +
+
+    "'";
+
+
+  /********************************************************************
+   * ORTHO RANGES
+   ********************************************************************/
+  const orthoFinRange =
+
+    `${safeOrthoName}!` +
+
+    `$${orthoFinLetter}$2:` +
+
+    `$${orthoFinLetter}$${orthoLastRow}`;
+
+
+  const orthoFacilityRange =
+
+    `${safeOrthoName}!` +
+
+    `$${orthoFacilityLetter}$2:` +
+
+    `$${orthoFacilityLetter}$${orthoLastRow}`;
+
+
+  /********************************************************************
+   * BUILD FORMULAS
+   ********************************************************************/
+  const formulas = [];
+
+
+  for (
+    let row = 2;
+    row <= sheet1LastRow;
+    row++
+  ) {
+
+    const sheet1FinReference =
+      `$${sheet1FinLetter}${row}`;
+
+
+    /******************************************************************
+     * FORMULA LOGIC
+     *
+     * 1. If FIN blank → blank
+     *
+     * 2. FILTER Ortho FACILITY where:
+     *
+     *      normalized Ortho FIN
+     *            =
+     *      normalized Sheet1 FIN
+     *
+     * 3. UNIQUE removes duplicate Ortho records.
+     *
+     * 4. If there is one unique facility → return it.
+     *
+     * 5. If multiple different facilities → AMBIGUOUS.
+     *
+     * 6. If no matching FIN → NOT FOUND.
+     *
+     ******************************************************************/
+    const formula =
+
+      `=IF(` +
+
+        `${sheet1FinReference}="",` +
+
+        `"",` +
+
+        `IFERROR(` +
+
+          `IF(` +
+
+            `COUNTUNIQUE(` +
+
+              `FILTER(` +
+
+                `${orthoFacilityRange},` +
+
+                `ARRAYFORMULA(` +
+
+                  `TRIM(` +
+
+                    `TO_TEXT(${orthoFinRange})` +
+
+                  `)` +
+
+                `)=` +
+
+                `TRIM(TO_TEXT(${sheet1FinReference})),` +
+
+                `${orthoFacilityRange}<>""` +
+
+              `)` +
+
+            `)=1,` +
+
+            `INDEX(` +
+
+              `UNIQUE(` +
+
+                `FILTER(` +
+
+                  `${orthoFacilityRange},` +
+
+                  `ARRAYFORMULA(` +
+
+                    `TRIM(` +
+
+                      `TO_TEXT(${orthoFinRange})` +
+
+                    `)` +
+
+                  `)=` +
+
+                  `TRIM(TO_TEXT(${sheet1FinReference})),` +
+
+                  `${orthoFacilityRange}<>""` +
+
+                `)` +
+
+              `),` +
+
+              `1` +
+
+            `),` +
+
+            `"AMBIGUOUS"` +
+
+          `),` +
+
+          `"NOT FOUND"` +
+
+        `)` +
+
+      `)`;
+
+
+    formulas.push([
+      formula
+    ]);
+
+  }
+
+
+  /********************************************************************
+   * WRITE FORMULAS TO SHEET1
+   ********************************************************************/
+  sheet1
+    .getRange(
+      2,
+      outputFacilityColumn,
+      formulas.length,
+      1
+    )
+    .setFormulas(
+      formulas
+    );
+
+
+  /********************************************************************
+   * FORMAT FACILITY COLUMN
+   ********************************************************************/
+  sheet1
+    .getRange(
+      1,
+      outputFacilityColumn,
+      sheet1LastRow,
+      1
+    )
+    .setWrap(true);
+
+
+  sheet1
+    .getRange(
+      1,
+      outputFacilityColumn
+    )
+    .setFontWeight(
+      "bold"
+    )
+    .setBackground(
+      "#D9EAF7"
+    )
+    .setHorizontalAlignment(
+      "center"
+    );
+
+
+  sheet1.setColumnWidth(
+    outputFacilityColumn,
+    180
+  );
+
+
+  SpreadsheetApp.flush();
+
+
+  /********************************************************************
+   * CALCULATE MATCH COUNTS
+   ********************************************************************/
+  const outputValues =
+    sheet1
+      .getRange(
+        2,
+        outputFacilityColumn,
+        sheet1LastRow - 1,
+        1
+      )
+      .getDisplayValues();
+
+
+  let matched =
+    0;
+
+
+  let notFound =
+    0;
+
+
+  let ambiguous =
+    0;
+
+
+  let blankFin =
+    0;
+
+
+  outputValues.forEach(
+    function(row) {
+
+      const value =
+        String(
+          row[0] || ""
+        ).trim();
+
+
+      if (
+        value === ""
+      ) {
+
+        blankFin++;
+
+      }
+
+      else if (
+        value ===
+        "NOT FOUND"
+      ) {
+
+        notFound++;
+
+      }
+
+      else if (
+        value ===
+        "AMBIGUOUS"
+      ) {
+
+        ambiguous++;
+
+      }
+
+      else {
+
+        matched++;
+
+      }
+
+    }
+  );
+
+
+  /********************************************************************
+   * COMPLETION MESSAGE
+   ********************************************************************/
+  SpreadsheetApp
+    .getUi()
+    .alert(
+
+      "FACILITY column completed.\n\n" +
+
+      "Matched: " +
+      matched +
+      "\n" +
+
+      "Not found: " +
+      notFound +
+      "\n" +
+
+      "Ambiguous: " +
+      ambiguous +
+      "\n" +
+
+      "Blank FIN: " +
+      blankFin +
+      "\n\n" +
+
+      "The FACILITY cells contain formulas and will update automatically."
+
+    );
+
+}
+
+
+/**********************************************************************
+ *
+ * FIND HEADER
+ *
+ * CASE-INSENSITIVE
+ *
+ * RETURNS 1-BASED COLUMN NUMBER
+ *
+ **********************************************************************/
+function findFacilityHeader_(
+  headers,
+  possibleHeaders
+) {
+
+  const normalizedHeaders =
+    headers.map(
+      function(header) {
+
+        return normalizeFacilityHeader_(
+          header
+        );
+
+      }
+    );
+
+
+  for (
+    let i = 0;
+    i < possibleHeaders.length;
+    i++
+  ) {
+
+    const target =
+      normalizeFacilityHeader_(
+        possibleHeaders[i]
+      );
+
+
+    const index =
+      normalizedHeaders.indexOf(
+        target
+      );
+
+
+    if (
+      index !== -1
+    ) {
+
+      return index + 1;
+
+    }
+
+  }
+
+
+  return null;
+
+}
+
+
+/**********************************************************************
+ *
+ * NORMALIZE HEADER
+ *
+ **********************************************************************/
+function normalizeFacilityHeader_(
+  value
+) {
+
+  return String(
+    value || ""
+  )
+    .trim()
+    .toLowerCase()
+    .replace(
+      /\s+/g,
+      " "
+    )
+    .replace(
+      /_/g,
+      " "
+    );
+
+}
+
+
+/**********************************************************************
+ *
+ * COLUMN NUMBER → LETTER
+ *
+ **********************************************************************/
+function facilityColumnLetter_(
+  columnNumber
+) {
+
+  let result =
+    "";
+
+
+  let number =
+    columnNumber;
+
+
+  while (
+    number > 0
+  ) {
+
+    const remainder =
+      (
+        number -
+        1
+      ) % 26;
+
+
+    result =
+
+      String.fromCharCode(
+        65 +
+        remainder
+      ) +
+
+      result;
+
+
+    number =
+      Math.floor(
+        (
+          number -
+          1
+        ) /
+        26
+      );
+
+  }
+
+
+  return result;
+
+}
+
+
+/**********************************************************************
+ *
+ * OPTIONAL GOOGLE SHEETS MENU
+ *
+ **********************************************************************/
+function onOpen() {
+
+  SpreadsheetApp
+    .getUi()
+    .createMenu(
+      "Apixaban MUE"
+    )
+    .addItem(
+      "Add Facility Using FIN",
+      "addFacilityToSheet1ByFIN"
+    )
+    .addToUi();
+
+}
