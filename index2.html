@@ -1,86 +1,528 @@
 /**********************************************************************
+ * STANDALONE 4-SECTION APIXABAN DURATION PIE CHART
  *
- * UPDATED FOUR-SECTION PIE CHART
+ * SOURCE:
+ * Sheet1
  *
- * FIXES BLANK PIE CHART ISSUE
+ * OUTPUT:
+ * MUE 4-Section Pie
  *
- * FOUR SECTIONS:
+ * FOUR PIE SECTIONS:
  *
  * 1. Total Hip – Appropriate Duration
  * 2. Total Hip – Inappropriate Duration
  * 3. Total Knee – Appropriate Duration
  * 4. Total Knee – Inappropriate Duration
  *
- * The pie slices show percentages.
- * The legend shows patient counts (n).
+ * STANDARD:
+ * Knee = 12 days
+ * Hip  = 35 days
  *
- * Together the four sections = 100%.
+ * IMPORTANT:
+ * ------------------------------------------------------------
+ * - Does NOT modify Sheet1.
+ * - Does NOT modify your other graph sheets.
+ * - Does NOT depend on any other Apps Script functions.
+ * - All counts and percentages are Google Sheets formulas.
+ * - The four pie sections equal 100%.
+ * - The legend contains patient count (n).
+ * - The slices display percentage.
  *
+ * RUN:
+ * buildFourSectionDurationPieChart
  **********************************************************************/
-function buildOverallPieSheet_(ctx) {
 
-  const sh =
-    resetSheet_(
-      ctx.ss,
-      MUE.SHEETS.OVERALL_PIE
+
+function buildFourSectionDurationPieChart() {
+
+  const ss =
+    SpreadsheetApp.getActiveSpreadsheet();
+
+
+  const SOURCE_SHEET =
+    "Sheet1";
+
+
+  const OUTPUT_SHEET =
+    "MUE 4-Section Pie";
+
+
+  const KNEE_DURATION =
+    12;
+
+
+  const HIP_DURATION =
+    35;
+
+
+  /********************************************************************
+   * GET SOURCE SHEET
+   ********************************************************************/
+  const source =
+    ss.getSheetByName(
+      SOURCE_SHEET
     );
+
+
+  if (!source) {
+
+    SpreadsheetApp
+      .getUi()
+      .alert(
+        'Could not find the sheet "' +
+        SOURCE_SHEET +
+        '".'
+      );
+
+    return;
+
+  }
+
+
+  const lastRow =
+    source.getLastRow();
+
+
+  const lastColumn =
+    source.getLastColumn();
+
+
+  if (lastRow < 2) {
+
+    SpreadsheetApp
+      .getUi()
+      .alert(
+        "Sheet1 does not contain patient data."
+      );
+
+    return;
+
+  }
+
+
+  /********************************************************************
+   * READ HEADERS
+   ********************************************************************/
+  const headers =
+    source
+      .getRange(
+        1,
+        1,
+        1,
+        lastColumn
+      )
+      .getDisplayValues()[0];
+
+
+  /********************************************************************
+   * FIND SURGERY COLUMN
+   ********************************************************************/
+  const surgeryColumn =
+    findFourPieHeader_(
+      headers,
+      [
+        "Type of surgery",
+        "Surgery Type",
+        "Procedure Type",
+        "Procedure"
+      ]
+    );
+
+
+  /********************************************************************
+   * FIND DURATION COLUMN
+   ********************************************************************/
+  const durationColumn =
+    findFourPieHeader_(
+      headers,
+      [
+        "Number of outpatient days supplied (total treatment duration)",
+        "Total treatment duration",
+        "Total Treatment Duration",
+        "Total treatment duration (days)",
+        "Treatment duration",
+        "Total Duration",
+        "Duration"
+      ]
+    );
+
+
+  if (!surgeryColumn) {
+
+    SpreadsheetApp
+      .getUi()
+      .alert(
+        'Could not find the "Type of surgery" column.'
+      );
+
+    return;
+
+  }
+
+
+  if (!durationColumn) {
+
+    SpreadsheetApp
+      .getUi()
+      .alert(
+        "Could not find the treatment-duration column."
+      );
+
+    return;
+
+  }
+
+
+  /********************************************************************
+   * CONVERT COLUMN NUMBERS TO LETTERS
+   ********************************************************************/
+  const surgeryLetter =
+    fourPieColumnLetter_(
+      surgeryColumn
+    );
+
+
+  const durationLetter =
+    fourPieColumnLetter_(
+      durationColumn
+    );
+
+
+  const safeSource =
+
+    "'" +
+
+    source
+      .getName()
+      .replace(
+        /'/g,
+        "''"
+      ) +
+
+    "'";
+
+
+  /********************************************************************
+   * CREATE / RESET OUTPUT SHEET
+   ********************************************************************/
+  let output =
+    ss.getSheetByName(
+      OUTPUT_SHEET
+    );
+
+
+  if (!output) {
+
+    output =
+      ss.insertSheet(
+        OUTPUT_SHEET
+      );
+
+  }
+
+  else {
+
+    /******************************************************************
+     * REMOVE OLD CHARTS
+     ******************************************************************/
+    output
+      .getCharts()
+      .forEach(
+        function(chart) {
+
+          output.removeChart(
+            chart
+          );
+
+        }
+      );
+
+
+    /******************************************************************
+     * BREAK MERGED CELLS
+     ******************************************************************/
+    output
+      .getDataRange()
+      .getMergedRanges()
+      .forEach(
+        function(range) {
+
+          range.breakApart();
+
+        }
+      );
+
+
+    output.clear();
+
+  }
 
 
   /********************************************************************
    * TITLE
    ********************************************************************/
-  addSheetTitle_(
-    sh,
-    "Apixaban Duration Appropriateness by Surgery Type"
-  );
+  output
+    .getRange("A1:H1")
+    .merge()
+    .setValue(
+      "Apixaban Duration Appropriateness by Surgery Type"
+    )
+    .setFontSize(16)
+    .setFontWeight("bold")
+    .setHorizontalAlignment("center")
+    .setBackground("#D9EAF7");
 
 
-  /********************************************************************
-   * DESCRIPTION
-   ********************************************************************/
-  sh
+  output
     .getRange("A2:H2")
     .merge()
     .setValue(
-      "Four-section pie chart showing total hip and total knee " +
-      "arthroplasty patients by duration appropriateness. " +
-      "Each percentage uses all included hip/knee patients as the denominator."
+      "Four-section pie chart of total hip and total knee arthroplasty " +
+      "patients based on duration appropriateness."
     )
     .setWrap(true);
 
 
-  sh
+  output
     .getRange("A3:H3")
     .merge()
     .setValue(
-      "Inappropriate Duration includes Too Long, Too Short, and " +
-      "Unable to Determine so that every included hip/knee patient " +
-      "is represented and the four sections equal 100%."
+      "Appropriate duration: knee = 12 days; hip = 35 days. " +
+      "Any other documented duration is classified as inappropriate."
     )
     .setWrap(true)
     .setFontStyle("italic");
 
 
-  const a =
-    ctx.auditName;
+  /********************************************************************
+   *
+   * PATIENT-LEVEL CALCULATION TABLE
+   *
+   * A = source row
+   * B = procedure
+   * C = duration
+   * D = duration status
+   *
+   ********************************************************************/
+  output
+    .getRange("A5:D5")
+    .setValues([
+      [
+        "Source Row",
+        "Procedure",
+        "Duration (days)",
+        "Duration Assessment"
+      ]
+    ])
+    .setFontWeight("bold")
+    .setHorizontalAlignment("center")
+    .setBackground("#EAF2F8");
 
 
-  const r =
-    ctx.auditLastRow;
+  const formulas = [];
+
+
+  for (
+    let sourceRow = 2;
+    sourceRow <= lastRow;
+    sourceRow++
+  ) {
+
+    const outputRow =
+      sourceRow + 4;
+
+
+    const surgeryRef =
+      `${safeSource}!${surgeryLetter}${sourceRow}`;
+
+
+    const durationRef =
+      `${safeSource}!${durationLetter}${sourceRow}`;
+
+
+    /******************************************************************
+     * PROCEDURE CLASSIFICATION
+     *
+     * Strictly identifies total hip / knee arthroplasty.
+     ******************************************************************/
+    const procedureFormula =
+
+      `=IF(` +
+
+        `OR(` +
+
+          `REGEXMATCH(LOWER(TO_TEXT(${surgeryRef})),"total joint.*hip"),` +
+
+          `REGEXMATCH(LOWER(TO_TEXT(${surgeryRef})),"total hip"),` +
+
+          `REGEXMATCH(LOWER(TO_TEXT(${surgeryRef})),"hip arthroplasty"),` +
+
+          `REGEXMATCH(LOWER(TO_TEXT(${surgeryRef})),"(^|[^a-z])tha([^a-z]|$)")` +
+
+        `),` +
+
+        `"Hip",` +
+
+        `IF(` +
+
+          `OR(` +
+
+            `REGEXMATCH(LOWER(TO_TEXT(${surgeryRef})),"total joint.*knee"),` +
+
+            `REGEXMATCH(LOWER(TO_TEXT(${surgeryRef})),"total knee"),` +
+
+            `REGEXMATCH(LOWER(TO_TEXT(${surgeryRef})),"knee arthroplasty"),` +
+
+            `REGEXMATCH(LOWER(TO_TEXT(${surgeryRef})),"(^|[^a-z])tka([^a-z]|$)")` +
+
+          `),` +
+
+          `"Knee",` +
+
+          `"Not included"` +
+
+        `)` +
+
+      `)`;
+
+
+    /******************************************************************
+     * DURATION
+     ******************************************************************/
+    const durationFormula =
+
+      `=IFERROR(` +
+
+        `VALUE(` +
+
+          `REGEXEXTRACT(` +
+
+            `TO_TEXT(${durationRef}),` +
+
+            `"[0-9]+\\.?[0-9]*"` +
+
+          `)` +
+
+        `),` +
+
+        `""` +
+
+      `)`;
+
+
+    /******************************************************************
+     * DURATION APPROPRIATENESS
+     *
+     * For exactly 4 pie sections:
+     *
+     * Appropriate = exact recommended duration
+     *
+     * Inappropriate = any other value, including missing duration
+     ******************************************************************/
+    const assessmentFormula =
+
+      `=IF(` +
+
+        `B${outputRow}="Not included",` +
+
+        `"Not included",` +
+
+        `IF(` +
+
+          `B${outputRow}="Hip",` +
+
+          `IF(` +
+
+            `C${outputRow}=${HIP_DURATION},` +
+
+            `"Appropriate",` +
+
+            `"Inappropriate"` +
+
+          `),` +
+
+          `IF(` +
+
+            `B${outputRow}="Knee",` +
+
+            `IF(` +
+
+              `C${outputRow}=${KNEE_DURATION},` +
+
+              `"Appropriate",` +
+
+              `"Inappropriate"` +
+
+            `),` +
+
+            `"Not included"` +
+
+          `)` +
+
+        `)` +
+
+      `)`;
+
+
+    formulas.push([
+      `=${sourceRow}`,
+      procedureFormula,
+      durationFormula,
+      assessmentFormula
+    ]);
+
+  }
+
+
+  /********************************************************************
+   * WRITE PATIENT FORMULAS
+   ********************************************************************/
+  output
+    .getRange(
+      6,
+      1,
+      formulas.length,
+      4
+    )
+    .setFormulas(
+      formulas
+    );
+
+
+  const auditLastRow =
+    5 +
+    formulas.length;
+
+
+  output
+    .getRange(
+      5,
+      1,
+      formulas.length + 1,
+      4
+    )
+    .setBorder(
+      true,
+      true,
+      true,
+      true,
+      true,
+      true
+    );
 
 
   /********************************************************************
    *
-   * MAIN SUMMARY TABLE
+   * FOUR-SECTION SUMMARY
    *
    ********************************************************************/
-  sh
-    .getRange("A5:C10")
+  output
+    .getRange("F5:H10")
     .setValues([
       [
         "Category",
         "Patient Count (n)",
-        "% of Included Patients"
+        "%"
       ],
       [
         "Total Hip – Appropriate Duration",
@@ -110,124 +552,124 @@ function buildOverallPieSheet_(ctx) {
     ]);
 
 
-  styleHeader_(
-    sh.getRange("A5:C5")
-  );
+  output
+    .getRange("F5:H5")
+    .setFontWeight("bold")
+    .setHorizontalAlignment("center")
+    .setBackground("#EAF2F8");
 
 
   /********************************************************************
    * HIP APPROPRIATE
    ********************************************************************/
-  sh
-    .getRange("B6")
+  output
+    .getRange("G6")
     .setFormula(
       `=COUNTIFS(` +
-        `${a}!$B$5:$B$${r},"Hip",` +
-        `${a}!$I$5:$I$${r},"Appropriate"` +
+        `$B$6:$B$${auditLastRow},"Hip",` +
+        `$D$6:$D$${auditLastRow},"Appropriate"` +
       `)`
     );
 
 
   /********************************************************************
    * HIP INAPPROPRIATE
-   *
-   * Total Hip - Appropriate Hip
    ********************************************************************/
-  sh
-    .getRange("B7")
+  output
+    .getRange("G7")
     .setFormula(
-      `=COUNTIF(` +
-        `${a}!$B$5:$B$${r},"Hip"` +
-      `)-B6`
+      `=COUNTIFS(` +
+        `$B$6:$B$${auditLastRow},"Hip",` +
+        `$D$6:$D$${auditLastRow},"Inappropriate"` +
+      `)`
     );
 
 
   /********************************************************************
    * KNEE APPROPRIATE
    ********************************************************************/
-  sh
-    .getRange("B8")
+  output
+    .getRange("G8")
     .setFormula(
       `=COUNTIFS(` +
-        `${a}!$B$5:$B$${r},"Knee",` +
-        `${a}!$I$5:$I$${r},"Appropriate"` +
+        `$B$6:$B$${auditLastRow},"Knee",` +
+        `$D$6:$D$${auditLastRow},"Appropriate"` +
       `)`
     );
 
 
   /********************************************************************
    * KNEE INAPPROPRIATE
-   *
-   * Total Knee - Appropriate Knee
    ********************************************************************/
-  sh
-    .getRange("B9")
+  output
+    .getRange("G9")
     .setFormula(
-      `=COUNTIF(` +
-        `${a}!$B$5:$B$${r},"Knee"` +
-      `)-B8`
+      `=COUNTIFS(` +
+        `$B$6:$B$${auditLastRow},"Knee",` +
+        `$D$6:$D$${auditLastRow},"Inappropriate"` +
+      `)`
     );
 
 
   /********************************************************************
-   * TOTAL INCLUDED PATIENTS
+   * TOTAL
    ********************************************************************/
-  sh
-    .getRange("B10")
+  output
+    .getRange("G10")
     .setFormula(
-      "=SUM(B6:B9)"
+      "=SUM(G6:G9)"
     );
 
 
   /********************************************************************
    * PERCENTAGES
    *
-   * All use same denominator.
+   * SAME DENOMINATOR FOR ALL FOUR CATEGORIES
    ********************************************************************/
-  sh
-    .getRange("C6")
+  output
+    .getRange("H6")
     .setFormula(
-      "=IFERROR(B6/$B$10,0)"
+      "=IFERROR(G6/$G$10,0)"
     );
 
 
-  sh
-    .getRange("C7")
+  output
+    .getRange("H7")
     .setFormula(
-      "=IFERROR(B7/$B$10,0)"
+      "=IFERROR(G7/$G$10,0)"
     );
 
 
-  sh
-    .getRange("C8")
+  output
+    .getRange("H8")
     .setFormula(
-      "=IFERROR(B8/$B$10,0)"
+      "=IFERROR(G8/$G$10,0)"
     );
 
 
-  sh
-    .getRange("C9")
+  output
+    .getRange("H9")
     .setFormula(
-      "=IFERROR(B9/$B$10,0)"
+      "=IFERROR(G9/$G$10,0)"
     );
 
 
-  sh
-    .getRange("C10")
+  output
+    .getRange("H10")
     .setFormula(
-      "=SUM(C6:C9)"
+      "=SUM(H6:H9)"
     );
 
 
-  sh
-    .getRange("C6:C10")
+  output
+    .getRange("H6:H10")
     .setNumberFormat(
       "0.0%"
     );
 
 
-  sh
-    .getRange("A5:C10")
+  output
+    .getRange("F5:H10")
     .setBorder(
       true,
       true,
@@ -238,8 +680,8 @@ function buildOverallPieSheet_(ctx) {
     );
 
 
-  sh
-    .getRange("A10:C10")
+  output
+    .getRange("F10:H10")
     .setFontWeight(
       "bold"
     );
@@ -247,110 +689,17 @@ function buildOverallPieSheet_(ctx) {
 
   /********************************************************************
    *
-   * VALIDATION TABLE
+   * PIE SOURCE
+   *
+   * Legend contains n.
+   *
+   * Example:
+   *
+   * Hip – Appropriate (n=9)
    *
    ********************************************************************/
-  sh
-    .getRange("E5:F9")
-    .setValues([
-      [
-        "Validation",
-        "Result"
-      ],
-      [
-        "Included Hip Patients",
-        ""
-      ],
-      [
-        "Included Knee Patients",
-        ""
-      ],
-      [
-        "Total Included Patients",
-        ""
-      ],
-      [
-        "Pie Total %",
-        ""
-      ]
-    ]);
-
-
-  styleHeader_(
-    sh.getRange("E5:F5")
-  );
-
-
-  sh
-    .getRange("F6")
-    .setFormula(
-      `=COUNTIF(` +
-        `${a}!$B$5:$B$${r},"Hip"` +
-      `)`
-    );
-
-
-  sh
-    .getRange("F7")
-    .setFormula(
-      `=COUNTIF(` +
-        `${a}!$B$5:$B$${r},"Knee"` +
-      `)`
-    );
-
-
-  sh
-    .getRange("F8")
-    .setFormula(
-      "=F6+F7"
-    );
-
-
-  sh
-    .getRange("F9")
-    .setFormula(
-      "=SUM(C6:C9)"
-    );
-
-
-  sh
-    .getRange("F9")
-    .setNumberFormat(
-      "0.0%"
-    );
-
-
-  sh
-    .getRange("E5:F9")
-    .setBorder(
-      true,
-      true,
-      true,
-      true,
-      true,
-      true
-    );
-
-
-  /********************************************************************
-   *
-   * PIE CHART SOURCE TABLE
-   *
-   * IMPORTANT FIX:
-   *
-   * Keep labels shorter.
-   *
-   * Counts are included in the legend label:
-   *
-   * Total Hip – Appropriate (n=9)
-   *
-   * The actual pie slice displays:
-   *
-   * 11.1%
-   *
-   ********************************************************************/
-  sh
-    .getRange("H5:I9")
+  output
+    .getRange("J5:K9")
     .setValues([
       [
         "Category",
@@ -375,81 +724,70 @@ function buildOverallPieSheet_(ctx) {
     ]);
 
 
-  styleHeader_(
-    sh.getRange("H5:I5")
-  );
+  output
+    .getRange("J5:K5")
+    .setFontWeight("bold")
+    .setBackground("#EAF2F8");
 
 
-  /********************************************************************
-   * HIP APPROPRIATE
-   ********************************************************************/
-  sh
-    .getRange("H6")
+  output
+    .getRange("J6")
     .setFormula(
-      `="Hip – Appropriate (n="&B6&")"`
+      `="Hip – Appropriate (n="&G6&")"`
     );
 
 
-  sh
-    .getRange("I6")
+  output
+    .getRange("K6")
     .setFormula(
-      "=B6"
+      "=G6"
     );
 
 
-  /********************************************************************
-   * HIP INAPPROPRIATE
-   ********************************************************************/
-  sh
-    .getRange("H7")
+  output
+    .getRange("J7")
     .setFormula(
-      `="Hip – Inappropriate (n="&B7&")"`
+      `="Hip – Inappropriate (n="&G7&")"`
     );
 
 
-  sh
-    .getRange("I7")
+  output
+    .getRange("K7")
     .setFormula(
-      "=B7"
+      "=G7"
     );
 
 
-  /********************************************************************
-   * KNEE APPROPRIATE
-   ********************************************************************/
-  sh
-    .getRange("H8")
+  output
+    .getRange("J8")
     .setFormula(
-      `="Knee – Appropriate (n="&B8&")"`
+      `="Knee – Appropriate (n="&G8&")"`
     );
 
 
-  sh
-    .getRange("I8")
+  output
+    .getRange("K8")
     .setFormula(
-      "=B8"
+      "=G8"
     );
 
 
-  /********************************************************************
-   * KNEE INAPPROPRIATE
-   ********************************************************************/
-  sh
-    .getRange("H9")
+  output
+    .getRange("J9")
     .setFormula(
-      `="Knee – Inappropriate (n="&B9&")"`
+      `="Knee – Inappropriate (n="&G9&")"`
     );
 
 
-  sh
-    .getRange("I9")
+  output
+    .getRange("K9")
     .setFormula(
-      "=B9"
+      "=G9"
     );
 
 
-  sh
-    .getRange("H5:I9")
+  output
+    .getRange("J5:K9")
     .setBorder(
       true,
       true,
@@ -461,119 +799,66 @@ function buildOverallPieSheet_(ctx) {
 
 
   /********************************************************************
-   *
-   * INAPPROPRIATE DURATION BREAKDOWN
-   *
+   * VALIDATION
    ********************************************************************/
-  sh
-    .getRange("E12:H16")
+  output
+    .getRange("F12:G15")
     .setValues([
       [
-        "Procedure",
-        "Too Long",
-        "Too Short",
-        "Unable to Determine"
+        "Validation",
+        "Result"
       ],
       [
-        "Hip",
-        "",
-        "",
+        "Hip Patients",
         ""
       ],
       [
-        "Knee",
-        "",
-        "",
+        "Knee Patients",
         ""
       ],
       [
-        "",
-        "",
-        "",
-        ""
-      ],
-      [
-        "Note",
-        "Too Long + Too Short + Unable to Determine are grouped as Inappropriate Duration.",
-        "",
+        "Total Percentage",
         ""
       ]
     ]);
 
 
-  styleHeader_(
-    sh.getRange("E12:H12")
-  );
+  output
+    .getRange("F12:G12")
+    .setFontWeight("bold")
+    .setBackground("#EAF2F8");
 
 
-  /********************************************************************
-   * HIP BREAKDOWN
-   ********************************************************************/
-  sh
-    .getRange("F13")
-    .setFormula(
-      `=COUNTIFS(` +
-        `${a}!$B$5:$B$${r},"Hip",` +
-        `${a}!$I$5:$I$${r},"Too long"` +
-      `)`
-    );
-
-
-  sh
+  output
     .getRange("G13")
     .setFormula(
-      `=COUNTIFS(` +
-        `${a}!$B$5:$B$${r},"Hip",` +
-        `${a}!$I$5:$I$${r},"Too short"` +
-      `)`
+      `=COUNTIF($B$6:$B$${auditLastRow},"Hip")`
     );
 
 
-  sh
-    .getRange("H13")
-    .setFormula(
-      `=COUNTIFS(` +
-        `${a}!$B$5:$B$${r},"Hip",` +
-        `${a}!$I$5:$I$${r},"Unable to determine"` +
-      `)`
-    );
-
-
-  /********************************************************************
-   * KNEE BREAKDOWN
-   ********************************************************************/
-  sh
-    .getRange("F14")
-    .setFormula(
-      `=COUNTIFS(` +
-        `${a}!$B$5:$B$${r},"Knee",` +
-        `${a}!$I$5:$I$${r},"Too long"` +
-      `)`
-    );
-
-
-  sh
+  output
     .getRange("G14")
     .setFormula(
-      `=COUNTIFS(` +
-        `${a}!$B$5:$B$${r},"Knee",` +
-        `${a}!$I$5:$I$${r},"Too short"` +
-      `)`
+      `=COUNTIF($B$6:$B$${auditLastRow},"Knee")`
     );
 
 
-  sh
-    .getRange("H14")
+  output
+    .getRange("G15")
     .setFormula(
-      `=COUNTIFS(` +
-        `${a}!$B$5:$B$${r},"Knee",` +
-        `${a}!$I$5:$I$${r},"Unable to determine"` +
-      `)`
+      "=SUM(H6:H9)"
     );
 
 
-  sh
-    .getRange("E12:H16")
+  output
+    .getRange("G15")
+    .setNumberFormat(
+      "0.0%"
+    );
+
+
+  output
+    .getRange("F12:G15")
     .setBorder(
       true,
       true,
@@ -581,62 +866,68 @@ function buildOverallPieSheet_(ctx) {
       true,
       true,
       true
-    )
-    .setWrap(true);
+    );
 
 
   /********************************************************************
    * COLUMN WIDTHS
    ********************************************************************/
-  sh.setColumnWidth(
+  output.setColumnWidth(
     1,
+    90
+  );
+
+
+  output.setColumnWidth(
+    2,
+    120
+  );
+
+
+  output.setColumnWidth(
+    3,
+    120
+  );
+
+
+  output.setColumnWidth(
+    4,
+    150
+  );
+
+
+  output.setColumnWidth(
+    6,
     300
   );
 
 
-  sh.setColumnWidth(
-    2,
-    130
+  output.setColumnWidth(
+    7,
+    125
   );
 
 
-  sh.setColumnWidth(
-    3,
-    160
-  );
-
-
-  sh.setColumnWidth(
-    5,
-    180
-  );
-
-
-  sh.setColumnWidth(
-    6,
-    140
-  );
-
-
-  sh.setColumnWidth(
+  output.setColumnWidth(
     8,
-    280
+    100
   );
 
 
-  sh.setColumnWidth(
-    9,
+  output.setColumnWidth(
+    10,
+    250
+  );
+
+
+  output.setColumnWidth(
+    11,
     100
   );
 
 
   /********************************************************************
-   *
-   * CRITICAL FIX
-   *
-   * Force Google Sheets to finish calculating B6:B10 and H6:I9
-   * BEFORE the chart is created.
-   *
+   * FORCE FORMULAS TO CALCULATE BEFORE CHART
    ********************************************************************/
   SpreadsheetApp.flush();
 
@@ -650,44 +941,18 @@ function buildOverallPieSheet_(ctx) {
 
 
   /********************************************************************
-   * REMOVE ANY OLD CHARTS
-   ********************************************************************/
-  sh
-    .getCharts()
-    .forEach(
-      function(chart) {
-
-        sh.removeChart(
-          chart
-        );
-
-      }
-    );
-
-
-  /********************************************************************
-   *
    * CREATE PIE CHART
-   *
-   * FIX:
-   *
-   * pieSliceText = percentage
-   *
-   * instead of:
-   *
-   * pieSliceText = label
-   *
    ********************************************************************/
   const chart =
 
-    sh
+    output
       .newChart()
 
       .asPieChart()
 
       .addRange(
-        sh.getRange(
-          "H5:I9"
+        output.getRange(
+          "J5:K9"
         )
       )
 
@@ -697,7 +962,7 @@ function buildOverallPieSheet_(ctx) {
 
       .setPosition(
         18,
-        1,
+        6,
         0,
         0
       )
@@ -707,43 +972,28 @@ function buildOverallPieSheet_(ctx) {
         "Apixaban Duration Appropriateness by Surgery Type"
       )
 
-      .setOption(
-        "legend",
-        {
-          position:
-            "right",
-          textStyle:
-            {
-              fontSize:
-                11
-            }
-        }
-      )
-
       /****************************************************************
-       * SHOW % DIRECTLY ON EACH PIE SLICE
+       * PERCENTAGE DIRECTLY ON PIE
        ****************************************************************/
       .setOption(
         "pieSliceText",
         "percentage"
       )
 
-      .setOption(
-        "pieSliceTextStyle",
-        {
-          fontSize:
-            12
-        }
-      )
-
       /****************************************************************
-       * SHOW EVEN VERY SMALL SLICE
-       *
-       * Important because Knee Appropriate may only be ~1%.
+       * SHOW VERY SMALL SLICE
        ****************************************************************/
       .setOption(
         "sliceVisibilityThreshold",
         0
+      )
+
+      .setOption(
+        "legend",
+        {
+          position:
+            "right"
+        }
       )
 
       .setOption(
@@ -759,27 +1009,155 @@ function buildOverallPieSheet_(ctx) {
       .build();
 
 
-  sh.insertChart(
+  output.insertChart(
     chart
   );
 
 
+  SpreadsheetApp.flush();
+
+
   /********************************************************************
-   * FINAL FLUSH
+   * GO TO OUTPUT SHEET
    ********************************************************************/
-  SpreadsheetApp.flush();
-
-
-  Utilities.sleep(
-    500
+  ss.setActiveSheet(
+    output
   );
 
 
-  SpreadsheetApp.flush();
+  SpreadsheetApp
+    .getUi()
+    .alert(
+
+      "4-section pie chart created successfully.\n\n" +
+
+      "New sheet:\n" +
+
+      OUTPUT_SHEET +
+      "\n\n" +
+
+      "The legend displays patient count (n), and the pie displays percentage."
+
+    );
+
+}
 
 
-  finishGraphSheet_(
-    sh
-  );
+/**********************************************************************
+ *
+ * FIND HEADER
+ *
+ **********************************************************************/
+function findFourPieHeader_(
+  headers,
+  options
+) {
+
+  const cleanHeaders =
+    headers.map(
+      function(header) {
+
+        return String(
+          header || ""
+        )
+          .trim()
+          .toLowerCase()
+          .replace(
+            /\s+/g,
+            " "
+          );
+
+      }
+    );
+
+
+  for (
+    let i = 0;
+    i < options.length;
+    i++
+  ) {
+
+    const target =
+      String(
+        options[i]
+      )
+        .trim()
+        .toLowerCase()
+        .replace(
+          /\s+/g,
+          " "
+        );
+
+
+    const index =
+      cleanHeaders.indexOf(
+        target
+      );
+
+
+    if (
+      index !== -1
+    ) {
+
+      return index + 1;
+
+    }
+
+  }
+
+
+  return null;
+
+}
+
+
+/**********************************************************************
+ *
+ * COLUMN NUMBER → LETTER
+ *
+ **********************************************************************/
+function fourPieColumnLetter_(
+  number
+) {
+
+  let result =
+    "";
+
+
+  while (
+    number > 0
+  ) {
+
+    const remainder =
+      (
+        number -
+        1
+      ) %
+      26;
+
+
+    result =
+
+      String.fromCharCode(
+        65 +
+        remainder
+      ) +
+
+      result;
+
+
+    number =
+      Math.floor(
+        (
+          number -
+          1
+        ) /
+        26
+      );
+
+  }
+
+
+  return result;
 
 }
