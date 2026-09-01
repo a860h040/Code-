@@ -1,1227 +1,455 @@
-/**********************************************************************
- * 12
-APIXABAN MUE
- * TWO SIDE-BY-SIDE PIE CHARTS
+/******************************************************************
+ * APIXABAN MUE → ASHP POSTER
  *
- * SOURCE:
- * Sheet1
+ * PURPOSE:
+ * Transfers the Apixaban MUE content into a Google Slides
+ * poster template.
  *
- * OUTPUT:
- * MUE 2-Pie Duration
+ * HOW TO USE:
+ * 1. Upload/open your poster template in Google Slides.
+ * 2. Replace the existing poster text with these placeholders:
  *
- * LEFT PIE:
- * Total Hip Arthroplasty
- *   - Appropriate Duration
- *   - Inappropriate Duration
+ *    {{TITLE}}
+ *    {{AUTHORS}}
+ *    {{AFFILIATIONS}}
+ *    {{DISCLOSURE}}
+ *    {{BACKGROUND}}
+ *    {{PURPOSE}}
+ *    {{METHODS}}
+ *    {{RESULTS}}
+ *    {{DISCUSSION}}
+ *    {{CONCLUSION}}
+ *    {{REFERENCES}}
  *
- * RIGHT PIE:
- * Total Knee Arthroplasty
- *   - Appropriate Duration
- *   - Inappropriate Duration
+ * 3. Open Extensions > Apps Script.
+ * 4. Paste this entire code into Code.gs.
+ * 5. Run transferMUEToPoster().
  *
- * STANDARD:
- * Hip  = 35 days
- * Knee = 12 days
- *
- * IMPORTANT:
- * ------------------------------------------------------------
- * - Sheet1 is NOT modified.
- * - All calculations are formula-driven.
- * - Each pie equals 100% of that procedure population.
- * - Legend contains patient count (n).
- * - Pie slices display percentage.
- *
- * RUN:
- * buildTwoDurationPieCharts
- **********************************************************************/
+ ******************************************************************/
 
+function transferMUEToPoster() {
 
-function buildTwoDurationPieCharts() {
+  const presentation = SlidesApp.getActivePresentation();
 
-  const ss =
-    SpreadsheetApp.getActiveSpreadsheet();
-
-
-  const SOURCE_SHEET =
-    "Sheet1";
-
-
-  const OUTPUT_SHEET =
-    "MUE 2-Pie Duration";
-
-
-  const HIP_DURATION =
-    35;
-
-
-  const KNEE_DURATION =
-    12;
-
-
-  /********************************************************************
-   * GET SOURCE
-   ********************************************************************/
-  const source =
-    ss.getSheetByName(
-      SOURCE_SHEET
+  if (!presentation) {
+    throw new Error(
+      "No active Google Slides presentation was found. Open your poster template first."
     );
-
-
-  if (!source) {
-
-    SpreadsheetApp
-      .getUi()
-      .alert(
-        'Could not find sheet "' +
-        SOURCE_SHEET +
-        '".'
-      );
-
-    return;
-
   }
 
+  /***************************************************************
+   * POSTER DATA
+   ***************************************************************/
 
-  const lastRow =
-    source.getLastRow();
+  const posterData = {
 
+    TITLE:
+      "Evaluation of Apixaban Dosing and Duration for Venous Thromboembolism Prophylaxis Following Total Hip or Knee Arthroplasty",
 
-  const lastColumn =
-    source.getLastColumn();
+    AUTHORS:
+      "Alhamza Hamza, PharmD • [Preceptor Name, Credentials]",
 
+    AFFILIATIONS:
+      "Ascension St. Vincent’s, Jacksonville, Florida",
 
-  if (lastRow < 2) {
+    DISCLOSURE:
+      "The authors have no conflict of interest.",
 
-    SpreadsheetApp
-      .getUi()
-      .alert(
-        "Sheet1 does not contain patient data."
-      );
 
-    return;
+    BACKGROUND:
+      "• Patients undergoing total hip arthroplasty (THA) or total knee arthroplasty (TKA) are at increased risk for postoperative venous thromboembolism (VTE), including deep vein thrombosis and pulmonary embolism.\n\n" +
 
-  }
+      "• Apixaban is an option for VTE prophylaxis following THA and TKA.\n\n" +
 
+      "• The FDA-approved apixaban regimen is 2.5 mg orally twice daily for 35 days following THA and 12 days following TKA.\n\n" +
 
-  /********************************************************************
-   * READ HEADERS
-   ********************************************************************/
-  const headers =
-    source
-      .getRange(
-        1,
-        1,
-        1,
-        lastColumn
-      )
-      .getDisplayValues()[0];
+      "• Differences in recommended prophylaxis duration between THA and TKA may contribute to variation in discharge prescribing practices.\n\n" +
 
+      "• Evaluation of institutional prescribing practices may identify opportunities to improve consistency, pharmacist review, and provider education.",
 
-  /********************************************************************
-   * FIND SURGERY COLUMN
-   ********************************************************************/
-  const surgeryColumn =
-    findTwoPieHeader_(
-      headers,
-      [
-        "Type of surgery",
-        "Surgery Type",
-        "Procedure Type",
-        "Procedure"
-      ]
-    );
 
+    PURPOSE:
+      "• Evaluate the appropriateness of apixaban dose and total treatment duration for VTE prophylaxis following THA or TKA.\n\n" +
 
-  /********************************************************************
-   * FIND DURATION COLUMN
-   ********************************************************************/
-  const durationColumn =
-    findTwoPieHeader_(
-      headers,
-      [
-        "Number of outpatient days supplied (total treatment duration)",
-        "Total treatment duration",
-        "Total Treatment Duration",
-        "Total treatment duration (days)",
-        "Treatment duration",
-        "Total Duration",
-        "Duration"
-      ]
-    );
+      "• Identify opportunities to improve discharge prescribing and adherence to procedure-specific treatment durations.",
 
 
-  if (!surgeryColumn) {
+    METHODS:
+      "• Retrospective medication use evaluation using electronic health record data.\n\n" +
 
-    SpreadsheetApp
-      .getUi()
-      .alert(
-        'Could not find the "Type of surgery" column.'
-      );
+      "• Study period: November 1, 2025 through August 1, 2026.\n\n" +
 
-    return;
+      "• Adult patients undergoing THA or TKA who received apixaban for postoperative VTE prophylaxis were evaluated.\n\n" +
 
-  }
+      "• Patients were excluded for chronic therapeutic anticoagulation, apixaban use for another indication, other orthopedic procedures, or development of acute DVT or PE during admission.\n\n" +
 
+      "• Appropriate therapy was defined as apixaban 2.5 mg orally twice daily for 35 days after THA or 12 days after TKA.\n\n" +
 
-  if (!durationColumn) {
+      "• The primary outcome was the percentage of patients receiving both the recommended apixaban dose and duration.",
 
-    SpreadsheetApp
-      .getUi()
-      .alert(
-        "Could not find the treatment duration column."
-      );
 
-    return;
+    RESULTS:
+      "• 208 patients were screened and 81 patients met inclusion criteria.\n\n" +
 
-  }
+      "• 44 patients (54.3%) underwent hip arthroplasty and 37 patients (45.7%) underwent knee arthroplasty.\n\n" +
 
+      "• Apixaban dose was appropriate in 81 of 81 patients (100%).\n\n" +
 
-  /********************************************************************
-   * COLUMN LETTERS
-   ********************************************************************/
-  const surgeryLetter =
-    twoPieColumnLetter_(
-      surgeryColumn
-    );
+      "• Only 10 patients (12.3%) received the recommended treatment duration.\n\n" +
 
+      "• 40 patients (49.4%) received prolonged therapy and 31 patients (38.3%) received abbreviated therapy.\n\n" +
 
-  const durationLetter =
-    twoPieColumnLetter_(
-      durationColumn
-    );
+      "• THA: 20.5% appropriate, 22.7% prolonged, and 56.8% abbreviated.\n\n" +
 
+      "• TKA: 2.7% appropriate, 81.1% prolonged, and 16.2% abbreviated.\n\n" +
 
-  const safeSource =
+      "• The median treatment duration was 30 days (IQR 30–35 days).",
 
-    "'" +
 
-    source
-      .getName()
-      .replace(
-        /'/g,
-        "''"
-      ) +
+    DISCUSSION:
+      "• Although apixaban dosing was appropriate in all patients, treatment duration frequently differed from procedure-specific recommendations.\n\n" +
 
-    "'";
+      "• A 30-day course was the most frequently prescribed duration for both procedure types: 16 TKA patients and 20 THA patients.\n\n" +
 
+      "• Use of a similar duration for both procedures may explain the observed pattern of prolonged prophylaxis following TKA and abbreviated prophylaxis following THA.\n\n" +
 
-  /********************************************************************
-   * CREATE / RESET OUTPUT SHEET
-   ********************************************************************/
-  let output =
-    ss.getSheetByName(
-      OUTPUT_SHEET
-    );
-
-
-  if (!output) {
-
-    output =
-      ss.insertSheet(
-        OUTPUT_SHEET
-      );
+      "• Duration required optimization in 97.3% of TKA patients and 79.5% of THA patients.\n\n" +
 
-  } else {
+      "• These findings demonstrate an opportunity to improve discharge prescribing workflows and procedure-specific duration selection.",
 
 
-    /******************************************************************
-     * DELETE OLD CHARTS
-     ******************************************************************/
-    output
-      .getCharts()
-      .forEach(
-        function(chart) {
+    CONCLUSION:
+      "• Apixaban dosing for postoperative VTE prophylaxis was appropriate in all included patients; however, only 12.3% received the recommended treatment duration.\n\n" +
 
-          output.removeChart(
-            chart
-          );
+      "• Treatment duration required optimization in 87.7% of patients.\n\n" +
 
-        }
-      );
+      "• Standardized discharge prescribing workflows, pharmacist review of treatment duration and stop dates, electronic health record alerts, and targeted provider education may improve adherence to procedure-specific recommendations.",
 
 
-    /******************************************************************
-     * BREAK OLD MERGED CELLS
-     ******************************************************************/
-    output
-      .getDataRange()
-      .getMergedRanges()
-      .forEach(
-        function(range) {
+    REFERENCES:
+      "1. Lieberman JR, Heckmann N. J Am Acad Orthop Surg. 2017;25(12):789-798.\n\n" +
 
-          range.breakApart();
+      "2. Muscatelli SR, Charters MA, Hallstrom BR. Arthroplast Today. 2021;10:105-107.\n\n" +
 
-        }
-      );
+      "3. Apixaban prescribing information. Pfizer Inc; 2025.\n\n" +
 
+      "4. Falck-Ytter Y, Francis CW, Johanson NA, et al. Chest. 2012;141(2 Suppl):e278S-e325S.\n\n" +
 
-    output.clear();
+      "5. National Institute for Health and Care Excellence. Apixaban for preventing venous thromboembolism after hip or knee replacement surgery. TA245.\n\n" +
 
-  }
+      "6. Halvorsen S, Mehilli J, Cassese S, et al. Eur Heart J. 2022;43(39):3826-3924."
+  };
 
 
-  /********************************************************************
-   * MAIN TITLE
-   ********************************************************************/
-  output
-    .getRange("A1:L1")
-    .merge()
-    .setValue(
-      "Apixaban Duration Appropriateness by Surgery Type"
-    )
-    .setFontSize(16)
-    .setFontWeight("bold")
-    .setHorizontalAlignment("center")
-    .setBackground("#D9EAF7");
+  /***************************************************************
+   * REPLACE ALL POSTER PLACEHOLDERS
+   ***************************************************************/
 
+  Object.keys(posterData).forEach(function(key) {
 
-  output
-    .getRange("A2:L2")
-    .merge()
-    .setValue(
-      "Total hip and total knee arthroplasty are displayed separately. " +
-      "Each pie represents 100% of patients within that procedure type."
-    )
-    .setHorizontalAlignment("center")
-    .setWrap(true);
+    const placeholder = "{{" + key + "}}";
+    const replacement = posterData[key];
 
-
-  output
-    .getRange("A3:L3")
-    .merge()
-    .setValue(
-      "Appropriate duration: Total Hip = 35 days; Total Knee = 12 days."
-    )
-    .setHorizontalAlignment("center")
-    .setFontStyle("italic");
-
-
-  /********************************************************************
-   *
-   * PATIENT-LEVEL AUDIT TABLE
-   *
-   ********************************************************************/
-  output
-    .getRange("A5:D5")
-    .setValues([
-      [
-        "Source Row",
-        "Procedure",
-        "Duration (days)",
-        "Duration Assessment"
-      ]
-    ])
-    .setFontWeight("bold")
-    .setBackground("#EAF2F8")
-    .setHorizontalAlignment("center");
-
-
-  const formulas = [];
-
-
-  for (
-    let sourceRow = 2;
-    sourceRow <= lastRow;
-    sourceRow++
-  ) {
-
-    const outputRow =
-      sourceRow + 4;
-
-
-    const surgeryRef =
-      `${safeSource}!${surgeryLetter}${sourceRow}`;
-
-
-    const durationRef =
-      `${safeSource}!${durationLetter}${sourceRow}`;
-
-
-    /******************************************************************
-     * PROCEDURE
-     ******************************************************************/
-    const procedureFormula =
-
-      `=IF(` +
-
-        `OR(` +
-
-          `REGEXMATCH(LOWER(TO_TEXT(${surgeryRef})),"total joint.*hip"),` +
-
-          `REGEXMATCH(LOWER(TO_TEXT(${surgeryRef})),"total hip"),` +
-
-          `REGEXMATCH(LOWER(TO_TEXT(${surgeryRef})),"hip arthroplasty"),` +
-
-          `REGEXMATCH(LOWER(TO_TEXT(${surgeryRef})),"(^|[^a-z])tha([^a-z]|$)")` +
-
-        `),` +
-
-        `"Hip",` +
-
-        `IF(` +
-
-          `OR(` +
-
-            `REGEXMATCH(LOWER(TO_TEXT(${surgeryRef})),"total joint.*knee"),` +
-
-            `REGEXMATCH(LOWER(TO_TEXT(${surgeryRef})),"total knee"),` +
-
-            `REGEXMATCH(LOWER(TO_TEXT(${surgeryRef})),"knee arthroplasty"),` +
-
-            `REGEXMATCH(LOWER(TO_TEXT(${surgeryRef})),"(^|[^a-z])tka([^a-z]|$)")` +
-
-          `),` +
-
-          `"Knee",` +
-
-          `"Not included"` +
-
-        `)` +
-
-      `)`;
-
-
-    /******************************************************************
-     * ACTUAL DURATION
-     ******************************************************************/
-    const durationFormula =
-
-      `=IFERROR(` +
-
-        `VALUE(` +
-
-          `REGEXEXTRACT(` +
-
-            `TO_TEXT(${durationRef}),` +
-
-            `"[0-9]+\\.?[0-9]*"` +
-
-          `)` +
-
-        `),` +
-
-        `""` +
-
-      `)`;
-
-
-    /******************************************************************
-     * APPROPRIATE / INAPPROPRIATE
-     *
-     * HIP:
-     * 35 days = Appropriate
-     *
-     * KNEE:
-     * 12 days = Appropriate
-     *
-     * Any other duration = Inappropriate
-     ******************************************************************/
-    const assessmentFormula =
-
-      `=IF(` +
-
-        `B${outputRow}="Hip",` +
-
-        `IF(` +
-
-          `C${outputRow}=${HIP_DURATION},` +
-
-          `"Appropriate",` +
-
-          `"Inappropriate"` +
-
-        `),` +
-
-        `IF(` +
-
-          `B${outputRow}="Knee",` +
-
-          `IF(` +
-
-            `C${outputRow}=${KNEE_DURATION},` +
-
-            `"Appropriate",` +
-
-            `"Inappropriate"` +
-
-          `),` +
-
-          `"Not included"` +
-
-        `)` +
-
-      `)`;
-
-
-    formulas.push([
-      `=${sourceRow}`,
-      procedureFormula,
-      durationFormula,
-      assessmentFormula
-    ]);
-
-  }
-
-
-  /********************************************************************
-   * WRITE AUDIT FORMULAS
-   ********************************************************************/
-  output
-    .getRange(
-      6,
-      1,
-      formulas.length,
-      4
-    )
-    .setFormulas(
-      formulas
-    );
-
-
-  const auditLastRow =
-    5 +
-    formulas.length;
-
-
-  output
-    .getRange(
-      5,
-      1,
-      formulas.length + 1,
-      4
-    )
-    .setBorder(
-      true,
-      true,
-      true,
-      true,
-      true,
+    presentation.replaceAllText(
+      placeholder,
+      replacement,
       true
     );
+  });
 
 
-  /********************************************************************
-   *
-   * HIP SUMMARY
-   *
-   ********************************************************************/
-  output
-    .getRange("F5:H8")
-    .setValues([
-      [
-        "Total Hip Arthroplasty",
-        "n",
-        "%"
-      ],
-      [
-        "Appropriate Duration",
-        "",
-        ""
-      ],
-      [
-        "Inappropriate Duration",
-        "",
-        ""
-      ],
-      [
-        "Total",
-        "",
-        ""
-      ]
-    ]);
+  /***************************************************************
+   * FINISH
+   ***************************************************************/
 
-
-  output
-    .getRange("F5:H5")
-    .setFontWeight("bold")
-    .setBackground("#EAF2F8")
-    .setHorizontalAlignment("center");
-
-
-  /********************************************************************
-   * HIP APPROPRIATE
-   ********************************************************************/
-  output
-    .getRange("G6")
-    .setFormula(
-
-      `=COUNTIFS(` +
-
-        `$B$6:$B$${auditLastRow},"Hip",` +
-
-        `$D$6:$D$${auditLastRow},"Appropriate"` +
-
-      `)`
-
-    );
-
-
-  /********************************************************************
-   * HIP INAPPROPRIATE
-   ********************************************************************/
-  output
-    .getRange("G7")
-    .setFormula(
-
-      `=COUNTIFS(` +
-
-        `$B$6:$B$${auditLastRow},"Hip",` +
-
-        `$D$6:$D$${auditLastRow},"Inappropriate"` +
-
-      `)`
-
-    );
-
-
-  /********************************************************************
-   * HIP TOTAL
-   ********************************************************************/
-  output
-    .getRange("G8")
-    .setFormula(
-      "=SUM(G6:G7)"
-    );
-
-
-  output
-    .getRange("H6")
-    .setFormula(
-      "=IFERROR(G6/$G$8,0)"
-    );
-
-
-  output
-    .getRange("H7")
-    .setFormula(
-      "=IFERROR(G7/$G$8,0)"
-    );
-
-
-  output
-    .getRange("H8")
-    .setFormula(
-      "=SUM(H6:H7)"
-    );
-
-
-  output
-    .getRange("H6:H8")
-    .setNumberFormat(
-      "0.0%"
-    );
-
-
-  output
-    .getRange("F5:H8")
-    .setBorder(
-      true,
-      true,
-      true,
-      true,
-      true,
-      true
-    );
-
-
-  /********************************************************************
-   *
-   * KNEE SUMMARY
-   *
-   ********************************************************************/
-  output
-    .getRange("J5:L8")
-    .setValues([
-      [
-        "Total Knee Arthroplasty",
-        "n",
-        "%"
-      ],
-      [
-        "Appropriate Duration",
-        "",
-        ""
-      ],
-      [
-        "Inappropriate Duration",
-        "",
-        ""
-      ],
-      [
-        "Total",
-        "",
-        ""
-      ]
-    ]);
-
-
-  output
-    .getRange("J5:L5")
-    .setFontWeight("bold")
-    .setBackground("#EAF2F8")
-    .setHorizontalAlignment("center");
-
-
-  /********************************************************************
-   * KNEE APPROPRIATE
-   ********************************************************************/
-  output
-    .getRange("K6")
-    .setFormula(
-
-      `=COUNTIFS(` +
-
-        `$B$6:$B$${auditLastRow},"Knee",` +
-
-        `$D$6:$D$${auditLastRow},"Appropriate"` +
-
-      `)`
-
-    );
-
-
-  /********************************************************************
-   * KNEE INAPPROPRIATE
-   ********************************************************************/
-  output
-    .getRange("K7")
-    .setFormula(
-
-      `=COUNTIFS(` +
-
-        `$B$6:$B$${auditLastRow},"Knee",` +
-
-        `$D$6:$D$${auditLastRow},"Inappropriate"` +
-
-      `)`
-
-    );
-
-
-  /********************************************************************
-   * KNEE TOTAL
-   ********************************************************************/
-  output
-    .getRange("K8")
-    .setFormula(
-      "=SUM(K6:K7)"
-    );
-
-
-  output
-    .getRange("L6")
-    .setFormula(
-      "=IFERROR(K6/$K$8,0)"
-    );
-
-
-  output
-    .getRange("L7")
-    .setFormula(
-      "=IFERROR(K7/$K$8,0)"
-    );
-
-
-  output
-    .getRange("L8")
-    .setFormula(
-      "=SUM(L6:L7)"
-    );
-
-
-  output
-    .getRange("L6:L8")
-    .setNumberFormat(
-      "0.0%"
-    );
-
-
-  output
-    .getRange("J5:L8")
-    .setBorder(
-      true,
-      true,
-      true,
-      true,
-      true,
-      true
-    );
-
-
-  /********************************************************************
-   *
-   * HIP PIE SOURCE
-   *
-   * Legend includes n.
-   *
-   ********************************************************************/
-  output
-    .getRange("F10:G12")
-    .setValues([
-      [
-        "Hip",
-        "Patients"
-      ],
-      [
-        "",
-        ""
-      ],
-      [
-        "",
-        ""
-      ]
-    ]);
-
-
-  output
-    .getRange("F10:G10")
-    .setFontWeight("bold");
-
-
-  output
-    .getRange("F11")
-    .setFormula(
-      `="Appropriate Duration (n="&G6&")"`
-    );
-
-
-  output
-    .getRange("G11")
-    .setFormula(
-      "=G6"
-    );
-
-
-  output
-    .getRange("F12")
-    .setFormula(
-      `="Inappropriate Duration (n="&G7&")"`
-    );
-
-
-  output
-    .getRange("G12")
-    .setFormula(
-      "=G7"
-    );
-
-
-  /********************************************************************
-   *
-   * KNEE PIE SOURCE
-   *
-   ********************************************************************/
-  output
-    .getRange("J10:K12")
-    .setValues([
-      [
-        "Knee",
-        "Patients"
-      ],
-      [
-        "",
-        ""
-      ],
-      [
-        "",
-        ""
-      ]
-    ]);
-
-
-  output
-    .getRange("J10:K10")
-    .setFontWeight("bold");
-
-
-  output
-    .getRange("J11")
-    .setFormula(
-      `="Appropriate Duration (n="&K6&")"`
-    );
-
-
-  output
-    .getRange("K11")
-    .setFormula(
-      "=K6"
-    );
-
-
-  output
-    .getRange("J12")
-    .setFormula(
-      `="Inappropriate Duration (n="&K7&")"`
-    );
-
-
-  output
-    .getRange("K12")
-    .setFormula(
-      "=K7"
-    );
-
-
-  /********************************************************************
-   * WIDTHS
-   ********************************************************************/
-  output.setColumnWidth(
-    1,
-    85
+  SlidesApp.getUi().alert(
+    "MUE Poster Updated",
+    "Your apixaban MUE information has been transferred into the poster template.",
+    SlidesApp.getUi().ButtonSet.OK
   );
-
-
-  output.setColumnWidth(
-    2,
-    120
-  );
-
-
-  output.setColumnWidth(
-    3,
-    120
-  );
-
-
-  output.setColumnWidth(
-    4,
-    150
-  );
-
-
-  output.setColumnWidth(
-    6,
-    240
-  );
-
-
-  output.setColumnWidth(
-    7,
-    90
-  );
-
-
-  output.setColumnWidth(
-    8,
-    90
-  );
-
-
-  output.setColumnWidth(
-    10,
-    240
-  );
-
-
-  output.setColumnWidth(
-    11,
-    90
-  );
-
-
-  output.setColumnWidth(
-    12,
-    90
-  );
-
-
-  /********************************************************************
-   * WAIT FOR FORMULAS
-   ********************************************************************/
-  SpreadsheetApp.flush();
-
-
-  Utilities.sleep(
-    1200
-  );
-
-
-  SpreadsheetApp.flush();
-
-
-  /********************************************************************
-   *
-   * HIP PIE CHART
-   *
-   ********************************************************************/
-  const hipChart =
-
-    output
-      .newChart()
-
-      .asPieChart()
-
-      .addRange(
-        output.getRange(
-          "F10:G12"
-        )
-      )
-
-      .setNumHeaders(
-        1
-      )
-
-      .setPosition(
-        15,
-        5,
-        0,
-        0
-      )
-
-      .setOption(
-        "title",
-        "Total Hip Arthroplasty – Duration Appropriateness"
-      )
-
-      .setOption(
-        "pieSliceText",
-        "percentage"
-      )
-
-      .setOption(
-        "sliceVisibilityThreshold",
-        0
-      )
-
-      .setOption(
-        "legend",
-        {
-          position:
-            "bottom"
-        }
-      )
-
-      .setOption(
-        "width",
-        650
-      )
-
-      .setOption(
-        "height",
-        450
-      )
-
-      .build();
-
-
-  output.insertChart(
-    hipChart
-  );
-
-
-  /********************************************************************
-   *
-   * KNEE PIE CHART
-   *
-   ********************************************************************/
-  const kneeChart =
-
-    output
-      .newChart()
-
-      .asPieChart()
-
-      .addRange(
-        output.getRange(
-          "J10:K12"
-        )
-      )
-
-      .setNumHeaders(
-        1
-      )
-
-      .setPosition(
-        15,
-        11,
-        0,
-        0
-      )
-
-      .setOption(
-        "title",
-        "Total Knee Arthroplasty – Duration Appropriateness"
-      )
-
-      .setOption(
-        "pieSliceText",
-        "percentage"
-      )
-
-      .setOption(
-        "sliceVisibilityThreshold",
-        0
-      )
-
-      .setOption(
-        "legend",
-        {
-          position:
-            "bottom"
-        }
-      )
-
-      .setOption(
-        "width",
-        650
-      )
-
-      .setOption(
-        "height",
-        450
-      )
-
-      .build();
-
-
-  output.insertChart(
-    kneeChart
-  );
-
-
-  SpreadsheetApp.flush();
-
-
-  /********************************************************************
-   * OPEN OUTPUT
-   ********************************************************************/
-  ss.setActiveSheet(
-    output
-  );
-
-
-  SpreadsheetApp
-    .getUi()
-    .alert(
-
-      "Two pie charts created successfully.\n\n" +
-
-      "Left: Total Hip Arthroplasty\n" +
-
-      "Right: Total Knee Arthroplasty\n\n" +
-
-      "Each pie equals 100% of its procedure population."
-
-    );
-
 }
 
 
-/**********************************************************************
+/******************************************************************
+ * CREATE TABLE 1 – BASELINE CHARACTERISTICS
  *
- * FIND HEADER
- *
- **********************************************************************/
-function findTwoPieHeader_(
-  headers,
-  possibilities
-) {
+ * Run separately if you want the script to create the demographic
+ * table on the current slide.
+ ******************************************************************/
 
-  const normalized =
-    headers.map(
-      function(header) {
+function addBaselineCharacteristicsTable() {
 
-        return String(
-          header || ""
-        )
-          .trim()
-          .toLowerCase()
-          .replace(
-            /\s+/g,
-            " "
-          );
+  const presentation = SlidesApp.getActivePresentation();
+  const slide = presentation.getSelection()
+    .getCurrentPage();
 
-      }
-    );
+  if (!slide) {
+    throw new Error("Select the poster slide first.");
+  }
 
 
-  for (
-    let i = 0;
-    i < possibilities.length;
-    i++
-  ) {
+  const data = [
 
-    const target =
-      String(
-        possibilities[i]
-      )
-        .trim()
-        .toLowerCase()
-        .replace(
-          /\s+/g,
-          " "
-        );
+    ["Characteristic", "All Patients (n=81)"],
+
+    ["Median age, years (IQR)", "75 (65–80)"],
+
+    ["Median BMI, kg/m² (IQR)", "29.7 (26.1–36.4)"],
+
+    ["Male sex, n (%)", "36 (44.4)"],
+
+    ["Female sex, n (%)", "45 (55.6)"],
+
+    ["Total knee arthroplasty, n (%)", "37 (45.7)"],
+
+    ["Total hip arthroplasty, n (%)", "44 (54.3)"],
+
+    ["Primary procedure, n (%)", "70 (86.4)"],
+
+    ["Revision procedure, n (%)", "11 (13.6)"],
+
+    ["Elective procedure, n (%)", "67 (82.7)"],
+
+    ["Urgent/emergent procedure, n (%)", "14 (17.3)"]
+  ];
 
 
-    const index =
-      normalized.indexOf(
-        target
-      );
+  // POSITION
+  // Adjust these numbers depending on your poster layout.
+
+  const LEFT = 650;
+  const TOP = 300;
+  const WIDTH = 500;
+  const HEIGHT = 350;
 
 
-    if (
-      index !== -1
-    ) {
+  const table = slide.insertTable(
+    data.length,
+    data[0].length,
+    LEFT,
+    TOP,
+    WIDTH,
+    HEIGHT
+  );
 
-      return index + 1;
 
+  for (let r = 0; r < data.length; r++) {
+
+    for (let c = 0; c < data[r].length; c++) {
+
+      const cell = table.getCell(r, c);
+
+      cell.getText().setText(data[r][c]);
+
+      cell.getText()
+        .getTextStyle()
+        .setFontSize(11);
     }
-
   }
 
 
-  return null;
+  // Header formatting
+  for (let c = 0; c < 2; c++) {
 
+    table
+      .getCell(0, c)
+      .getText()
+      .getTextStyle()
+      .setBold(true)
+      .setFontSize(12);
+  }
 }
 
 
-/**********************************************************************
- *
- * COLUMN NUMBER → LETTER
- *
- **********************************************************************/
-function twoPieColumnLetter_(
-  number
-) {
+/******************************************************************
+ * CREATE TABLE 2 – APIXABAN USE
+ ******************************************************************/
 
-  let result =
-    "";
+function addApixabanUseTable() {
 
+  const presentation = SlidesApp.getActivePresentation();
+  const slide = presentation.getSelection()
+    .getCurrentPage();
 
-  while (
-    number > 0
-  ) {
-
-    const remainder =
-      (
-        number -
-        1
-      ) %
-      26;
-
-
-    result =
-
-      String.fromCharCode(
-        65 +
-        remainder
-      ) +
-
-      result;
-
-
-    number =
-      Math.floor(
-        (
-          number -
-          1
-        ) /
-        26
-      );
-
+  if (!slide) {
+    throw new Error("Select the poster slide first.");
   }
 
 
-  return result;
+  const data = [
 
+    ["Apixaban Use", "n (%)"],
+
+    ["Appropriate dose", "81 (100)"],
+
+    ["Dose requires optimization", "0 (0.0)"],
+
+    ["Appropriate duration", "10 (12.3)"],
+
+    ["Prolonged course", "40 (49.4)"],
+
+    ["Abbreviated course", "31 (38.3)"],
+
+    ["Fully appropriate regimen", "10 (12.3)"],
+
+    ["Duration requires optimization", "71 (87.7)"],
+
+    ["Median treatment duration", "30 days (IQR 30–35)"]
+  ];
+
+
+  const LEFT = 650;
+  const TOP = 680;
+  const WIDTH = 500;
+  const HEIGHT = 300;
+
+
+  const table = slide.insertTable(
+    data.length,
+    data[0].length,
+    LEFT,
+    TOP,
+    WIDTH,
+    HEIGHT
+  );
+
+
+  for (let r = 0; r < data.length; r++) {
+
+    for (let c = 0; c < data[r].length; c++) {
+
+      const cell = table.getCell(r, c);
+
+      cell.getText().setText(data[r][c]);
+
+      cell.getText()
+        .getTextStyle()
+        .setFontSize(11);
+    }
+  }
+
+
+  for (let c = 0; c < 2; c++) {
+
+    table
+      .getCell(0, c)
+      .getText()
+      .getTextStyle()
+      .setBold(true)
+      .setFontSize(12);
+  }
+}
+
+
+/******************************************************************
+ * CREATE PROCEDURE-SPECIFIC RESULTS TABLE
+ ******************************************************************/
+
+function addDurationResultsTable() {
+
+  const presentation = SlidesApp.getActivePresentation();
+  const slide = presentation.getSelection()
+    .getCurrentPage();
+
+  if (!slide) {
+    throw new Error("Select the poster slide first.");
+  }
+
+
+  const data = [
+
+    [
+      "Procedure",
+      "Appropriate",
+      "Prolonged",
+      "Abbreviated"
+    ],
+
+    [
+      "Total Hip Arthroplasty",
+      "20.5% (n=9)",
+      "22.7% (n=10)",
+      "56.8% (n=25)"
+    ],
+
+    [
+      "Total Knee Arthroplasty",
+      "2.7% (n=1)",
+      "81.1% (n=30)",
+      "16.2% (n=6)"
+    ]
+  ];
+
+
+  const LEFT = 650;
+  const TOP = 1010;
+  const WIDTH = 600;
+  const HEIGHT = 150;
+
+
+  const table = slide.insertTable(
+    data.length,
+    data[0].length,
+    LEFT,
+    TOP,
+    WIDTH,
+    HEIGHT
+  );
+
+
+  for (let r = 0; r < data.length; r++) {
+
+    for (let c = 0; c < data[r].length; c++) {
+
+      table
+        .getCell(r, c)
+        .getText()
+        .setText(data[r][c]);
+
+      table
+        .getCell(r, c)
+        .getText()
+        .getTextStyle()
+        .setFontSize(10);
+    }
+  }
+
+
+  for (let c = 0; c < data[0].length; c++) {
+
+    table
+      .getCell(0, c)
+      .getText()
+      .getTextStyle()
+      .setBold(true);
+  }
+}
+
+
+/******************************************************************
+ * OPTIONAL CUSTOM MENU
+ ******************************************************************/
+
+function onOpen() {
+
+  SlidesApp.getUi()
+    .createMenu("MUE Poster")
+    .addItem(
+      "Transfer MUE Text",
+      "transferMUEToPoster"
+    )
+    .addSeparator()
+    .addItem(
+      "Add Baseline Table",
+      "addBaselineCharacteristicsTable"
+    )
+    .addItem(
+      "Add Apixaban Use Table",
+      "addApixabanUseTable"
+    )
+    .addItem(
+      "Add Duration Results Table",
+      "addDurationResultsTable"
+    )
+    .addToUi();
 }
