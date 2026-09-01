@@ -1,99 +1,71 @@
-/******************************************************************
- * APIXABAN MUE → ASHP POSTER
- *
- * PURPOSE:
- * Transfers the Apixaban MUE content into a Google Slides
- * poster template.
- *
- * HOW TO USE:
- * 1. Upload/open your poster template in Google Slides.
- * 2. Replace the existing poster text with these placeholders:
- *
- *    {{TITLE}}
- *    {{AUTHORS}}
- *    {{AFFILIATIONS}}
- *    {{DISCLOSURE}}
- *    {{BACKGROUND}}
- *    {{PURPOSE}}
- *    {{METHODS}}
- *    {{RESULTS}}
- *    {{DISCUSSION}}
- *    {{CONCLUSION}}
- *    {{REFERENCES}}
- *
- * 3. Open Extensions > Apps Script.
- * 4. Paste this entire code into Code.gs.
- * 5. Run transferMUEToPoster().
- *
- ******************************************************************/
-
-function transferMUEToPoster() {
+function fillMUEPoster() {
 
   const presentation = SlidesApp.getActivePresentation();
+  const slides = presentation.getSlides();
 
-  if (!presentation) {
-    throw new Error(
-      "No active Google Slides presentation was found. Open your poster template first."
-    );
+  if (slides.length === 0) {
+    throw new Error("No slides found.");
   }
 
-  /***************************************************************
-   * POSTER DATA
-   ***************************************************************/
+  const slide = slides[0];
 
-  const posterData = {
+  /************************************************************
+   * YOUR MUE DATA
+   ************************************************************/
 
-    TITLE:
+  const data = {
+
+    title:
       "Evaluation of Apixaban Dosing and Duration for Venous Thromboembolism Prophylaxis Following Total Hip or Knee Arthroplasty",
 
-    AUTHORS:
+    authors:
       "Alhamza Hamza, PharmD • [Preceptor Name, Credentials]",
 
-    AFFILIATIONS:
+    affiliation:
       "Ascension St. Vincent’s, Jacksonville, Florida",
 
-    DISCLOSURE:
+    disclosure:
       "The authors have no conflict of interest.",
 
 
-    BACKGROUND:
+    background:
       "• Patients undergoing total hip arthroplasty (THA) or total knee arthroplasty (TKA) are at increased risk for postoperative venous thromboembolism (VTE), including deep vein thrombosis and pulmonary embolism.\n\n" +
 
-      "• Apixaban is an option for VTE prophylaxis following THA and TKA.\n\n" +
+      "• Apixaban is used for VTE prophylaxis following THA and TKA.\n\n" +
 
       "• The FDA-approved apixaban regimen is 2.5 mg orally twice daily for 35 days following THA and 12 days following TKA.\n\n" +
 
       "• Differences in recommended prophylaxis duration between THA and TKA may contribute to variation in discharge prescribing practices.\n\n" +
 
-      "• Evaluation of institutional prescribing practices may identify opportunities to improve consistency, pharmacist review, and provider education.",
+      "• Evaluation of institutional prescribing practices may identify opportunities to improve prescribing consistency, pharmacist review, and provider education.",
 
 
-    PURPOSE:
-      "• Evaluate the appropriateness of apixaban dose and total treatment duration for VTE prophylaxis following THA or TKA.\n\n" +
+    purpose:
+      "• Assess whether apixaban is prescribed at the appropriate dose and duration for VTE prophylaxis following THA and TKA.\n\n" +
 
       "• Identify opportunities to improve discharge prescribing and adherence to procedure-specific treatment durations.",
 
 
-    METHODS:
+    methods:
       "• Retrospective medication use evaluation using electronic health record data.\n\n" +
 
-      "• Study period: November 1, 2025 through August 1, 2026.\n\n" +
+      "• Patients who underwent THA or TKA and received apixaban between November 1, 2025 and August 1, 2026 were screened.\n\n" +
 
-      "• Adult patients undergoing THA or TKA who received apixaban for postoperative VTE prophylaxis were evaluated.\n\n" +
+      "• Adult patients were included if they underwent THA or TKA and received apixaban for postoperative VTE prophylaxis during hospitalization and/or at discharge.\n\n" +
 
-      "• Patients were excluded for chronic therapeutic anticoagulation, apixaban use for another indication, other orthopedic procedures, or development of acute DVT or PE during admission.\n\n" +
+      "• Patients were excluded if apixaban was prescribed for another indication, chronic therapeutic anticoagulation was used before admission, another orthopedic procedure was performed, or acute DVT or PE developed during admission.\n\n" +
 
-      "• Appropriate therapy was defined as apixaban 2.5 mg orally twice daily for 35 days after THA or 12 days after TKA.\n\n" +
+      "• Appropriate therapy was defined as apixaban 2.5 mg orally twice daily for 35 days following THA or 12 days following TKA.\n\n" +
 
-      "• The primary outcome was the percentage of patients receiving both the recommended apixaban dose and duration.",
+      "• The primary outcome was the percentage of patients receiving both the recommended apixaban dose and total treatment duration.",
 
 
-    RESULTS:
-      "• 208 patients were screened and 81 patients met inclusion criteria.\n\n" +
+    results:
+      "• 208 patients were screened and 81 met inclusion criteria.\n\n" +
 
-      "• 44 patients (54.3%) underwent hip arthroplasty and 37 patients (45.7%) underwent knee arthroplasty.\n\n" +
+      "• 44 patients (54.3%) underwent THA and 37 patients (45.7%) underwent TKA.\n\n" +
 
-      "• Apixaban dose was appropriate in 81 of 81 patients (100%).\n\n" +
+      "• Apixaban dosing was appropriate in 81 of 81 patients (100%).\n\n" +
 
       "• Only 10 patients (12.3%) received the recommended treatment duration.\n\n" +
 
@@ -103,353 +75,328 @@ function transferMUEToPoster() {
 
       "• TKA: 2.7% appropriate, 81.1% prolonged, and 16.2% abbreviated.\n\n" +
 
-      "• The median treatment duration was 30 days (IQR 30–35 days).",
+      "• Median treatment duration was 30 days (IQR 30–35).",
 
 
-    DISCUSSION:
-      "• Although apixaban dosing was appropriate in all patients, treatment duration frequently differed from procedure-specific recommendations.\n\n" +
+    discussion:
+      "• Duration of therapy required optimization in 87.7% of patients despite appropriate dosing in all patients.\n\n" +
 
-      "• A 30-day course was the most frequently prescribed duration for both procedure types: 16 TKA patients and 20 THA patients.\n\n" +
+      "• Thirty days was the most commonly prescribed treatment duration for both TKA (n=16) and THA (n=20).\n\n" +
 
-      "• Use of a similar duration for both procedures may explain the observed pattern of prolonged prophylaxis following TKA and abbreviated prophylaxis following THA.\n\n" +
+      "• A similar 30-day duration for both procedure types may have contributed to prolonged therapy after TKA and abbreviated therapy after THA.\n\n" +
 
       "• Duration required optimization in 97.3% of TKA patients and 79.5% of THA patients.\n\n" +
 
-      "• These findings demonstrate an opportunity to improve discharge prescribing workflows and procedure-specific duration selection.",
+      "• These findings identify opportunities to improve procedure-specific discharge prescribing.",
 
 
-    CONCLUSION:
-      "• Apixaban dosing for postoperative VTE prophylaxis was appropriate in all included patients; however, only 12.3% received the recommended treatment duration.\n\n" +
+    conclusion:
+      "• Apixaban dosing was appropriate in all included patients; however, only 12.3% received the recommended treatment duration.\n\n" +
 
       "• Treatment duration required optimization in 87.7% of patients.\n\n" +
 
       "• Standardized discharge prescribing workflows, pharmacist review of treatment duration and stop dates, electronic health record alerts, and targeted provider education may improve adherence to procedure-specific recommendations.",
 
 
-    REFERENCES:
-      "1. Lieberman JR, Heckmann N. J Am Acad Orthop Surg. 2017;25(12):789-798.\n\n" +
-
-      "2. Muscatelli SR, Charters MA, Hallstrom BR. Arthroplast Today. 2021;10:105-107.\n\n" +
-
-      "3. Apixaban prescribing information. Pfizer Inc; 2025.\n\n" +
-
-      "4. Falck-Ytter Y, Francis CW, Johanson NA, et al. Chest. 2012;141(2 Suppl):e278S-e325S.\n\n" +
-
-      "5. National Institute for Health and Care Excellence. Apixaban for preventing venous thromboembolism after hip or knee replacement surgery. TA245.\n\n" +
-
+    references:
+      "1. Lieberman JR, Heckmann N. J Am Acad Orthop Surg. 2017;25(12):789-798.\n" +
+      "2. Muscatelli SR, Charters MA, Hallstrom BR. Arthroplast Today. 2021;10:105-107.\n" +
+      "3. Apixaban prescribing information. Pfizer Inc; 2025.\n" +
+      "4. Falck-Ytter Y, Francis CW, Johanson NA, et al. Chest. 2012;141(2 suppl):e278S-e325S.\n" +
+      "5. National Institute for Health and Care Excellence. Guidance TA245.\n" +
       "6. Halvorsen S, Mehilli J, Cassese S, et al. Eur Heart J. 2022;43(39):3826-3924."
   };
 
 
-  /***************************************************************
-   * REPLACE ALL POSTER PLACEHOLDERS
-   ***************************************************************/
+  /************************************************************
+   * FIND SECTIONS IN YOUR EXISTING POSTER
+   ************************************************************/
 
-  Object.keys(posterData).forEach(function(key) {
-
-    const placeholder = "{{" + key + "}}";
-    const replacement = posterData[key];
-
-    presentation.replaceAllText(
-      placeholder,
-      replacement,
-      true
-    );
-  });
+  replaceSection(slide, "Background:", data.background);
+  replaceSection(slide, "Purpose:", data.purpose);
+  replaceSection(slide, "Methods:", data.methods);
+  replaceSection(slide, "Results:", data.results);
+  replaceSection(slide, "Discussion:", data.discussion);
+  replaceSection(slide, "Conclusion:", data.conclusion);
+  replaceSection(slide, "References:", data.references);
 
 
-  /***************************************************************
-   * FINISH
-   ***************************************************************/
+  /************************************************************
+   * REPLACE TITLE
+   ************************************************************/
+
+  replaceTextContaining(
+    slide,
+    "Retrospective analysis of rabies immunoglobulin",
+    data.title
+  );
+
+
+  /************************************************************
+   * REPLACE AUTHOR
+   ************************************************************/
+
+  replaceTextContaining(
+    slide,
+    "Alexia Bauer, PharmD",
+    data.authors
+  );
+
+
+  /************************************************************
+   * REPLACE AFFILIATION
+   ************************************************************/
+
+  replaceTextContaining(
+    slide,
+    "Ascension St. Vincent’s, Jacksonville, Florida",
+    data.affiliation
+  );
+
+
+  /************************************************************
+   * DISCLOSURE
+   ************************************************************/
+
+  replaceTextContaining(
+    slide,
+    "The authors have no conflict of interest",
+    data.disclosure
+  );
+
 
   SlidesApp.getUi().alert(
-    "MUE Poster Updated",
-    "Your apixaban MUE information has been transferred into the poster template.",
+    "Poster Updated",
+    "The MUE data has been transferred into the poster.",
     SlidesApp.getUi().ButtonSet.OK
   );
 }
 
 
-/******************************************************************
- * CREATE TABLE 1 – BASELINE CHARACTERISTICS
+/************************************************************
+ * FIND SECTION HEADING AND REPLACE THE TEXT BOX
+ ************************************************************/
+
+function replaceSection(slide, heading, body) {
+
+  const elements = getAllElements(slide);
+
+  let found = false;
+
+  for (let i = 0; i < elements.length; i++) {
+
+    const element = elements[i];
+
+    if (element.getPageElementType() !== SlidesApp.PageElementType.SHAPE) {
+      continue;
+    }
+
+    const shape = element.asShape();
+
+    if (!shape.getText) {
+      continue;
+    }
+
+    const textRange = shape.getText();
+    const currentText = textRange.asString();
+
+    if (
+      currentText &&
+      currentText.toLowerCase().indexOf(heading.toLowerCase()) !== -1
+    ) {
+
+      textRange.setText(
+        heading + "\n" + body
+      );
+
+      // Format entire box first
+      textRange
+        .getTextStyle()
+        .setFontFamily("Arial")
+        .setFontSize(14);
+
+      // Format heading
+      const headingLength = heading.length;
+
+      textRange
+        .getRange(0, headingLength)
+        .getTextStyle()
+        .setBold(true)
+        .setFontSize(20);
+
+      found = true;
+
+      Logger.log("Filled: " + heading);
+      break;
+    }
+  }
+
+  if (!found) {
+    Logger.log("NOT FOUND: " + heading);
+  }
+}
+
+
+/************************************************************
+ * REPLACE A TEXT BOX CONTAINING SPECIFIC WORDS
+ ************************************************************/
+
+function replaceTextContaining(slide, searchText, replacementText) {
+
+  const elements = getAllElements(slide);
+
+  for (let i = 0; i < elements.length; i++) {
+
+    const element = elements[i];
+
+    if (element.getPageElementType() !== SlidesApp.PageElementType.SHAPE) {
+      continue;
+    }
+
+    const shape = element.asShape();
+    const textRange = shape.getText();
+    const currentText = textRange.asString();
+
+    if (
+      currentText &&
+      currentText.toLowerCase().indexOf(searchText.toLowerCase()) !== -1
+    ) {
+
+      textRange.setText(replacementText);
+
+      Logger.log(
+        "Replaced text containing: " + searchText
+      );
+
+      return true;
+    }
+  }
+
+  Logger.log(
+    "Could not find: " + searchText
+  );
+
+  return false;
+}
+
+
+/************************************************************
+ * GET ALL ELEMENTS INCLUDING ELEMENTS INSIDE GROUPS
+ ************************************************************/
+
+function getAllElements(slide) {
+
+  const result = [];
+
+  const pageElements = slide.getPageElements();
+
+  for (let i = 0; i < pageElements.length; i++) {
+
+    collectElements(
+      pageElements[i],
+      result
+    );
+  }
+
+  return result;
+}
+
+
+function collectElements(element, result) {
+
+  if (
+    element.getPageElementType() ===
+    SlidesApp.PageElementType.GROUP
+  ) {
+
+    const group = element.asGroup();
+    const children = group.getChildren();
+
+    for (let i = 0; i < children.length; i++) {
+
+      collectElements(
+        children[i],
+        result
+      );
+    }
+
+  } else {
+
+    result.push(element);
+
+  }
+}
+
+
+/************************************************************
+ * DEBUG FUNCTION
  *
- * Run separately if you want the script to create the demographic
- * table on the current slide.
- ******************************************************************/
+ * RUN THIS IF SOMETHING STILL DOES NOT TRANSFER.
+ *
+ * It prints every text box in your poster.
+ ************************************************************/
 
-function addBaselineCharacteristicsTable() {
+function showPosterTextBoxes() {
 
-  const presentation = SlidesApp.getActivePresentation();
-  const slide = presentation.getSelection()
-    .getCurrentPage();
+  const presentation =
+    SlidesApp.getActivePresentation();
 
-  if (!slide) {
-    throw new Error("Select the poster slide first.");
-  }
+  const slide =
+    presentation.getSlides()[0];
 
+  const elements =
+    getAllElements(slide);
 
-  const data = [
+  let output = "";
 
-    ["Characteristic", "All Patients (n=81)"],
+  for (let i = 0; i < elements.length; i++) {
 
-    ["Median age, years (IQR)", "75 (65–80)"],
+    if (
+      elements[i].getPageElementType() ===
+      SlidesApp.PageElementType.SHAPE
+    ) {
 
-    ["Median BMI, kg/m² (IQR)", "29.7 (26.1–36.4)"],
+      const text =
+        elements[i]
+          .asShape()
+          .getText()
+          .asString();
 
-    ["Male sex, n (%)", "36 (44.4)"],
+      if (text.trim() !== "") {
 
-    ["Female sex, n (%)", "45 (55.6)"],
+        output +=
+          "\n\n--------------------\n" +
+          text;
 
-    ["Total knee arthroplasty, n (%)", "37 (45.7)"],
-
-    ["Total hip arthroplasty, n (%)", "44 (54.3)"],
-
-    ["Primary procedure, n (%)", "70 (86.4)"],
-
-    ["Revision procedure, n (%)", "11 (13.6)"],
-
-    ["Elective procedure, n (%)", "67 (82.7)"],
-
-    ["Urgent/emergent procedure, n (%)", "14 (17.3)"]
-  ];
-
-
-  // POSITION
-  // Adjust these numbers depending on your poster layout.
-
-  const LEFT = 650;
-  const TOP = 300;
-  const WIDTH = 500;
-  const HEIGHT = 350;
-
-
-  const table = slide.insertTable(
-    data.length,
-    data[0].length,
-    LEFT,
-    TOP,
-    WIDTH,
-    HEIGHT
-  );
-
-
-  for (let r = 0; r < data.length; r++) {
-
-    for (let c = 0; c < data[r].length; c++) {
-
-      const cell = table.getCell(r, c);
-
-      cell.getText().setText(data[r][c]);
-
-      cell.getText()
-        .getTextStyle()
-        .setFontSize(11);
+      }
     }
   }
 
+  Logger.log(output);
 
-  // Header formatting
-  for (let c = 0; c < 2; c++) {
-
-    table
-      .getCell(0, c)
-      .getText()
-      .getTextStyle()
-      .setBold(true)
-      .setFontSize(12);
-  }
-}
-
-
-/******************************************************************
- * CREATE TABLE 2 – APIXABAN USE
- ******************************************************************/
-
-function addApixabanUseTable() {
-
-  const presentation = SlidesApp.getActivePresentation();
-  const slide = presentation.getSelection()
-    .getCurrentPage();
-
-  if (!slide) {
-    throw new Error("Select the poster slide first.");
-  }
-
-
-  const data = [
-
-    ["Apixaban Use", "n (%)"],
-
-    ["Appropriate dose", "81 (100)"],
-
-    ["Dose requires optimization", "0 (0.0)"],
-
-    ["Appropriate duration", "10 (12.3)"],
-
-    ["Prolonged course", "40 (49.4)"],
-
-    ["Abbreviated course", "31 (38.3)"],
-
-    ["Fully appropriate regimen", "10 (12.3)"],
-
-    ["Duration requires optimization", "71 (87.7)"],
-
-    ["Median treatment duration", "30 days (IQR 30–35)"]
-  ];
-
-
-  const LEFT = 650;
-  const TOP = 680;
-  const WIDTH = 500;
-  const HEIGHT = 300;
-
-
-  const table = slide.insertTable(
-    data.length,
-    data[0].length,
-    LEFT,
-    TOP,
-    WIDTH,
-    HEIGHT
+  SlidesApp.getUi().alert(
+    "Finished",
+    "Open Execution log to see every text box found on the poster.",
+    SlidesApp.getUi().ButtonSet.OK
   );
-
-
-  for (let r = 0; r < data.length; r++) {
-
-    for (let c = 0; c < data[r].length; c++) {
-
-      const cell = table.getCell(r, c);
-
-      cell.getText().setText(data[r][c]);
-
-      cell.getText()
-        .getTextStyle()
-        .setFontSize(11);
-    }
-  }
-
-
-  for (let c = 0; c < 2; c++) {
-
-    table
-      .getCell(0, c)
-      .getText()
-      .getTextStyle()
-      .setBold(true)
-      .setFontSize(12);
-  }
 }
 
 
-/******************************************************************
- * CREATE PROCEDURE-SPECIFIC RESULTS TABLE
- ******************************************************************/
-
-function addDurationResultsTable() {
-
-  const presentation = SlidesApp.getActivePresentation();
-  const slide = presentation.getSelection()
-    .getCurrentPage();
-
-  if (!slide) {
-    throw new Error("Select the poster slide first.");
-  }
-
-
-  const data = [
-
-    [
-      "Procedure",
-      "Appropriate",
-      "Prolonged",
-      "Abbreviated"
-    ],
-
-    [
-      "Total Hip Arthroplasty",
-      "20.5% (n=9)",
-      "22.7% (n=10)",
-      "56.8% (n=25)"
-    ],
-
-    [
-      "Total Knee Arthroplasty",
-      "2.7% (n=1)",
-      "81.1% (n=30)",
-      "16.2% (n=6)"
-    ]
-  ];
-
-
-  const LEFT = 650;
-  const TOP = 1010;
-  const WIDTH = 600;
-  const HEIGHT = 150;
-
-
-  const table = slide.insertTable(
-    data.length,
-    data[0].length,
-    LEFT,
-    TOP,
-    WIDTH,
-    HEIGHT
-  );
-
-
-  for (let r = 0; r < data.length; r++) {
-
-    for (let c = 0; c < data[r].length; c++) {
-
-      table
-        .getCell(r, c)
-        .getText()
-        .setText(data[r][c]);
-
-      table
-        .getCell(r, c)
-        .getText()
-        .getTextStyle()
-        .setFontSize(10);
-    }
-  }
-
-
-  for (let c = 0; c < data[0].length; c++) {
-
-    table
-      .getCell(0, c)
-      .getText()
-      .getTextStyle()
-      .setBold(true);
-  }
-}
-
-
-/******************************************************************
- * OPTIONAL CUSTOM MENU
- ******************************************************************/
+/************************************************************
+ * ADD MENU
+ ************************************************************/
 
 function onOpen() {
 
   SlidesApp.getUi()
     .createMenu("MUE Poster")
     .addItem(
-      "Transfer MUE Text",
-      "transferMUEToPoster"
-    )
-    .addSeparator()
-    .addItem(
-      "Add Baseline Table",
-      "addBaselineCharacteristicsTable"
+      "Fill Poster",
+      "fillMUEPoster"
     )
     .addItem(
-      "Add Apixaban Use Table",
-      "addApixabanUseTable"
-    )
-    .addItem(
-      "Add Duration Results Table",
-      "addDurationResultsTable"
+      "Check Poster Text Boxes",
+      "showPosterTextBoxes"
     )
     .addToUi();
 }
