@@ -1,1847 +1,529 @@
-/**********************************************************************
+/***************************************************************
  * APIXABAN MUE POSTER BUILDER
- * Designed for a 48 x 36 inch, 4:3 landscape Google Slides poster.
+ * Google Slides Apps Script (Code.gs)
  *
- * IMPORTANT:
- * Before running:
- * File > Page setup > Custom > 48 x 36 inches
+ * Creates a NEW poster slide using the same 3-column structure
+ * as the example poster:
+ *   Left   = Background / Objective / Methods
+ *   Center = Results tables / figures
+ *   Right  = Discussion / Conclusion / References
  *
- * RUN:
- * buildApixabanPoster()
- **********************************************************************/
+ * The layout uses percentages of the current presentation size,
+ * so it works on standard widescreen slides and custom poster sizes.
+ ***************************************************************/
 
+const POSTER = {
+  author: 'Alhamza Hamza, PharmD',
+  coauthors: '[Add co-author names and credentials]',
+  affiliation: 'Ascension St. Vincent’s, Jacksonville, Florida',
+  contact: 'Alhamza Hamza, PharmD\nAscension St. Vincent’s\nDepartment of Pharmacy\n[add email address]',
+  title: 'Evaluation of Apixaban Dosing and Duration for Venous Thromboembolism Prophylaxis Following Total Hip or Knee Arthroplasty'
+};
 
-function buildApixabanPoster() {
+const COLORS = {
+  navy: '#0B4A7F',
+  blue: '#1D5D96',
+  paleBlue: '#E8F1F8',
+  lightBlue: '#D6E7F5',
+  white: '#FFFFFF',
+  black: '#202124',
+  gray: '#5F6368',
+  grid: '#B8C7D6',
+  appropriate: '#4285F4',
+  prolonged: '#EA4335',
+  abbreviated: '#F9AB00'
+};
 
-  const presentation = SlidesApp.getActivePresentation();
+function buildApixabanMUEPoster() {
+  const pres = SlidesApp.getActivePresentation();
+  if (!pres) throw new Error('Open the Google Slides presentation first.');
 
-  if (!presentation) {
-    throw new Error("Open your Google Slides presentation first.");
-  }
+  const W = pres.getPageWidth();
+  const H = pres.getPageHeight();
+  const S = Math.min(W / 960, H / 540); // proportional font scaling
 
-  const W = presentation.getPageWidth();
-  const H = presentation.getPageHeight();
+  const slide = pres.appendSlide(SlidesApp.PredefinedLayout.BLANK);
+  slide.getBackground().setSolidFill(COLORS.white);
 
-  /********************************************************************
-   * VERIFY POSTER SIZE
-   ********************************************************************/
+  // ---------- Layout ----------
+  const headerY = H * 0.018;
+  const contentTop = H * 0.170;
 
-  const ratio = W / H;
-  const expectedRatio = 4 / 3;
-
-  if (Math.abs(ratio - expectedRatio) > 0.04) {
-
-    SlidesApp.getUi().alert(
-      "Change Page Setup First",
-      "Your presentation is not using the correct poster proportions.\n\n" +
-      "Go to:\nFile → Page setup → Custom\n\n" +
-      "Set the size to:\n48 inches × 36 inches\n\n" +
-      "Then run Build Poster again.",
-      SlidesApp.getUi().ButtonSet.OK
-    );
-
-    return;
-  }
-
-
-  /********************************************************************
-   * CREATE NEW BLANK SLIDE
-   ********************************************************************/
-
-  const slide = presentation.appendSlide(
-    SlidesApp.PredefinedLayout.BLANK
-  );
-
-
-  /********************************************************************
-   * COLORS
-   ********************************************************************/
-
-  const C = {
-
-    navy: "#124E7C",
-
-    darkBlue: "#174F7C",
-
-    mediumBlue: "#5B8DB8",
-
-    lightBlue: "#DDECF7",
-
-    veryLightBlue: "#EEF5FA",
-
-    white: "#FFFFFF",
-
-    black: "#202124",
-
-    gray: "#666666",
-
-    appropriate: "#3979CC",
-
-    prolonged: "#CD6A6A",
-
-    abbreviated: "#D7A84B"
-
-  };
-
-
-  /********************************************************************
-   * POSTER CONTENT
-   ********************************************************************/
-
-  const TITLE =
-    "Evaluation of Apixaban Dosing and Duration for Venous " +
-    "Thromboembolism Prophylaxis Following Total Hip or Knee Arthroplasty";
-
-
-  const AUTHORS =
-    "Alhamza Hamza, PharmD; [Preceptor Name, PharmD, Credentials]";
-
-
-  const AFFILIATION =
-    "Ascension St. Vincent’s, Jacksonville, Florida";
-
-
-  /********************************************************************
-   * COLUMN LAYOUT
-   ********************************************************************/
-
-  const outerMargin = W * 0.018;
-
-  const leftX = outerMargin;
-  const leftW = W * 0.245;
-
-  const centerX = W * 0.282;
-  const centerW = W * 0.493;
-
+  const leftX = W * 0.015;
+  const leftW = W * 0.250;
+  const centerX = W * 0.285;
+  const centerW = W * 0.490;
   const rightX = W * 0.795;
-  const rightW = W * 0.187;
+  const rightW = W * 0.190;
 
-  /*
-   * Header now gets much more vertical space than previous version.
-   * This prevents title/authors from overlapping Results.
-   */
-  const contentTop = H * 0.165;
+  // ---------- Header ----------
+  addText(slide, 'Ascension Rx', leftX, headerY, leftW * 0.72, H * 0.045,
+          21 * S, COLORS.navy, true, SlidesApp.ParagraphAlignment.CENTER);
 
+  addText(slide, 'Ascension St. Vincent’s\nDepartment of Pharmacy\nJacksonville, Florida',
+          leftX, H * 0.065, leftW * 0.72, H * 0.072,
+          7.2 * S, COLORS.navy, true, SlidesApp.ParagraphAlignment.CENTER);
 
-  /********************************************************************
-   * HEADER - LEFT LOGO AREA
-   ********************************************************************/
+  addText(slide, POSTER.title,
+          W * 0.205, H * 0.018, W * 0.585, H * 0.075,
+          21 * S, COLORS.navy, true, SlidesApp.ParagraphAlignment.CENTER);
 
-  addText(
-    slide,
-    "Ascension Rx",
-    leftX,
-    H * 0.025,
-    leftW,
-    H * 0.040,
-    32,
-    C.navy,
-    true,
-    SlidesApp.ParagraphAlignment.CENTER
-  );
+  addText(slide, POSTER.author + '; ' + POSTER.coauthors,
+          W * 0.215, H * 0.095, W * 0.565, H * 0.026,
+          8.2 * S, COLORS.black, false, SlidesApp.ParagraphAlignment.CENTER);
 
+  addText(slide, POSTER.affiliation,
+          W * 0.215, H * 0.121, W * 0.565, H * 0.021,
+          7.2 * S, COLORS.black, false, SlidesApp.ParagraphAlignment.CENTER);
 
-  addText(
-    slide,
-    "Ascension St. Vincent’s\n" +
-    "Department of Pharmacy\n" +
-    "Jacksonville, Florida",
-    leftX,
-    H * 0.068,
-    leftW,
-    H * 0.060,
-    14,
-    C.navy,
-    true,
-    SlidesApp.ParagraphAlignment.CENTER
-  );
+  addText(slide, 'The authors have no conflict of interest.',
+          W * 0.215, H * 0.143, W * 0.565, H * 0.019,
+          6.6 * S, COLORS.black, true, SlidesApp.ParagraphAlignment.CENTER);
 
+  addOutlinedContactBox(slide, POSTER.contact,
+                        W * 0.825, H * 0.044, W * 0.150, H * 0.087,
+                        6.0 * S, COLORS.navy);
 
-  /********************************************************************
-   * HEADER - TITLE
-   ********************************************************************/
+  // ---------- LEFT COLUMN ----------
+  let y = contentTop;
 
-  addText(
-    slide,
-    TITLE,
-    centerX - W * 0.045,
-    H * 0.018,
-    centerW + W * 0.09,
-    H * 0.070,
-    34,
-    C.navy,
-    true,
-    SlidesApp.ParagraphAlignment.CENTER
-  );
-
-
-  /********************************************************************
-   * HEADER - AUTHORS
-   ********************************************************************/
-
-  addText(
-    slide,
-    AUTHORS,
-    centerX,
-    H * 0.092,
-    centerW,
-    H * 0.023,
-    18,
-    C.black,
-    false,
-    SlidesApp.ParagraphAlignment.CENTER
-  );
-
-
-  /********************************************************************
-   * HEADER - AFFILIATION
-   ********************************************************************/
-
-  addText(
-    slide,
-    AFFILIATION,
-    centerX,
-    H * 0.116,
-    centerW,
-    H * 0.020,
-    15,
-    C.black,
-    false,
-    SlidesApp.ParagraphAlignment.CENTER
-  );
-
-
-  /********************************************************************
-   * HEADER - DISCLOSURE
-   ********************************************************************/
-
-  addText(
-    slide,
-    "The authors have no conflict of interest.",
-    centerX,
-    H * 0.138,
-    centerW,
-    H * 0.018,
-    13,
-    C.black,
-    true,
-    SlidesApp.ParagraphAlignment.CENTER
-  );
-
-
-  /********************************************************************
-   * CONTACT BOX
-   ********************************************************************/
-
-  addContactBox(
-    slide,
-    "Alhamza Hamza, PharmD\n" +
-    "PGY1 Pharmacy Resident\n" +
-    "Ascension St. Vincent’s\n" +
-    "[email address]",
-    rightX + rightW * 0.10,
-    H * 0.038,
-    rightW * 0.82,
-    H * 0.083,
-    C.navy
-  );
-
-
-  /********************************************************************
-   *
-   * LEFT COLUMN
-   *
-   ********************************************************************/
-
-  let yLeft = contentTop;
-
-
-  /********************************************************************
-   * BACKGROUND
-   ********************************************************************/
-
-  addHeader(
-    slide,
-    "Background",
-    leftX,
-    yLeft,
-    leftW,
-    H * 0.034,
-    C.navy
-  );
-
-  yLeft += H * 0.042;
-
+  addSectionHeader(slide, 'Background', leftX, y, leftW, H * 0.035, S);
+  y += H * 0.043;
 
   const background =
-    "• Patients undergoing total hip arthroplasty (THA) or total knee " +
-    "arthroplasty (TKA) are at increased risk for postoperative venous " +
-    "thromboembolism (VTE).\n\n" +
+    '• Patients undergoing total hip arthroplasty (THA) or total knee arthroplasty (TKA) are at increased risk for postoperative venous thromboembolism (VTE).\n' +
+    '• Apixaban is an option for postoperative VTE prophylaxis after THA and TKA.\n' +
+    '• The FDA-approved regimen is apixaban 2.5 mg orally twice daily for 35 days after THA and 12 days after TKA.\n' +
+    '• Different recommended durations may contribute to variation in discharge prescribing.\n' +
+    '• Evaluating current use can identify opportunities to improve procedure-specific prescribing.';
 
-    "• Apixaban is an option for VTE prophylaxis following THA and TKA.\n\n" +
+  addBodyText(slide, background,
+              leftX + W * 0.006, y, leftW - W * 0.012, H * 0.245,
+              7.0 * S);
+  y += H * 0.255;
 
-    "• The FDA-approved regimen is apixaban 2.5 mg orally twice daily " +
-    "for 35 days following THA and 12 days following TKA.\n\n" +
-
-    "• Recommended duration therefore differs substantially by procedure type.\n\n" +
-
-    "• Variation in discharge prescribing may result in treatment durations " +
-    "that are longer or shorter than recommended.";
-
-
-  addText(
-    slide,
-    background,
-    leftX + W * 0.005,
-    yLeft,
-    leftW - W * 0.010,
-    H * 0.255,
-    16,
-    C.black,
-    false,
-    SlidesApp.ParagraphAlignment.START
-  );
-
-
-  yLeft += H * 0.265;
-
-
-  /********************************************************************
-   * OBJECTIVE
-   ********************************************************************/
-
-  addHeader(
-    slide,
-    "Objective",
-    leftX,
-    yLeft,
-    leftW,
-    H * 0.034,
-    C.navy
-  );
-
-
-  yLeft += H * 0.043;
-
+  addSectionHeader(slide, 'Objective', leftX, y, leftW, H * 0.035, S);
+  y += H * 0.043;
 
   const objective =
-    "To evaluate the appropriateness of apixaban dose and total treatment " +
-    "duration for postoperative VTE prophylaxis following THA or TKA and " +
-    "identify opportunities to improve discharge prescribing.";
+    'To evaluate the appropriateness of apixaban dose and total treatment duration for VTE prophylaxis following THA or TKA and identify opportunities to improve discharge prescribing.';
 
+  addBodyText(slide, objective,
+              leftX + W * 0.006, y, leftW - W * 0.012, H * 0.085,
+              7.2 * S);
+  y += H * 0.095;
 
-  addText(
-    slide,
-    objective,
-    leftX + W * 0.005,
-    yLeft,
-    leftW - W * 0.010,
-    H * 0.095,
-    16,
-    C.black,
-    false,
-    SlidesApp.ParagraphAlignment.START
-  );
-
-
-  yLeft += H * 0.105;
-
-
-  /********************************************************************
-   * METHODS
-   ********************************************************************/
-
-  addHeader(
-    slide,
-    "Methods",
-    leftX,
-    yLeft,
-    leftW,
-    H * 0.034,
-    C.navy
-  );
-
-
-  yLeft += H * 0.043;
-
+  addSectionHeader(slide, 'Methods', leftX, y, leftW, H * 0.035, S);
+  y += H * 0.043;
 
   const methods = [
-
-    [
-      "Study Design",
-      "Retrospective medication use evaluation"
-    ],
-
-    [
-      "Study Period",
-      "November 1, 2025 – August 1, 2026"
-    ],
-
-    [
-      "Study Population",
-      "Adults undergoing THA or TKA receiving apixaban for postoperative VTE prophylaxis"
-    ],
-
-    [
-      "Data Source",
-      "Electronic health record"
-    ],
-
-    [
-      "Appropriate Dose",
-      "Apixaban 2.5 mg orally twice daily"
-    ],
-
-    [
-      "Appropriate Duration",
-      "THA: 35 days\nTKA: 12 days"
-    ],
-
-    [
-      "Primary Outcome",
-      "Patients receiving both the recommended dose and duration"
-    ]
-
+    ['Study design', 'Retrospective medication use evaluation'],
+    ['Time frame', 'Nov 1, 2025 – Aug 1, 2026'],
+    ['Sites', 'Riverside, Southside, Clay County, St. Johns County'],
+    ['Inclusion', 'Adults with THA/TKA who received apixaban for postoperative VTE prophylaxis'],
+    ['Exclusion', 'Other apixaban indication; chronic therapeutic anticoagulation; other orthopedic procedure; acute inpatient DVT/PE'],
+    ['Appropriate regimen', 'Apixaban 2.5 mg twice daily; THA 35 days; TKA 12 days'],
+    ['Primary outcome', 'Percentage receiving both recommended dose and duration']
   ];
 
+  addMethodsTable(slide, methods, leftX, y, leftW, H * 0.335, 6.1 * S);
 
-  addTwoColumnTable(
-    slide,
-    methods,
-    leftX,
-    yLeft,
-    leftW,
-    H * 0.280,
-    C,
-    13
-  );
+  // ---------- CENTER COLUMN ----------
+  let cy = contentTop;
 
+  addSectionHeader(slide, 'Results', centerX, cy, centerW, H * 0.035, S);
+  cy += H * 0.045;
 
-  /********************************************************************
-   *
-   * CENTER COLUMN
-   *
-   ********************************************************************/
-
-  let yCenter = contentTop;
-
-
-  /********************************************************************
-   * RESULTS HEADER
-   ********************************************************************/
-
-  addHeader(
-    slide,
-    "Results",
-    centerX,
-    yCenter,
-    centerW,
-    H * 0.034,
-    C.navy
-  );
-
-
-  yCenter += H * 0.043;
-
-
-  /********************************************************************
-   * RESULTS TABLE WIDTH
-   ********************************************************************/
-
-  const tableGap = centerW * 0.020;
-
-  const tableW =
-    (centerW - tableGap) / 2;
-
-
-  /********************************************************************
-   * TABLE 1
-   ********************************************************************/
+  const gap = centerW * 0.025;
+  const tableW = (centerW - gap) / 2;
+  const tableH = H * 0.325;
 
   const baseline = [
-
-    ["Characteristic", "Result"],
-
-    ["Patients included", "81"],
-
-    ["Median age, years (IQR)", "75 (65–80)"],
-
-    ["Median BMI, kg/m² (IQR)", "29.7 (26.1–36.4)"],
-
-    ["Male", "36 (44.4%)"],
-
-    ["Female", "45 (55.6%)"],
-
-    ["Knee procedure", "37 (45.7%)"],
-
-    ["Hip procedure", "44 (54.3%)"],
-
-    ["Primary procedure", "70 (86.4%)"],
-
-    ["Revision procedure", "11 (13.6%)"],
-
-    ["Elective", "67 (82.7%)"],
-
-    ["Urgent/emergent", "14 (17.3%)"]
-
+    ['Characteristic', 'Result'],
+    ['Patients screened', '208'],
+    ['Patients included', '81'],
+    ['Median age, years (IQR)', '75 (65–80)'],
+    ['Median BMI, kg/m² (IQR)', '29.7 (26.1–36.4)'],
+    ['Female sex', '45 (55.6%)'],
+    ['Riverside', '27 (33.3%)'],
+    ['Southside', '38 (46.9%)'],
+    ['Clay County', '2 (2.5%)'],
+    ['St. Johns County', '14 (17.3%)'],
+    ['TKA', '37 (45.7%)'],
+    ['THA', '44 (54.3%)'],
+    ['Primary procedure', '70 (86.4%)'],
+    ['Elective procedure', '67 (82.7%)']
   ];
 
-
-  addResultsTable(
-    slide,
-    "Table 1: Baseline Characteristics",
-    baseline,
-    centerX,
-    yCenter,
-    tableW,
-    H * 0.315,
-    C
-  );
-
-
-  /********************************************************************
-   * TABLE 2
-   ********************************************************************/
-
-  const apixabanUse = [
-
-    ["Outcome", "Result"],
-
-    ["Appropriate dose", "81 (100%)"],
-
-    ["Dose requires optimization", "0 (0%)"],
-
-    ["Appropriate duration", "10 (12.3%)"],
-
-    ["Prolonged course", "40 (49.4%)"],
-
-    ["Abbreviated course", "31 (38.3%)"],
-
-    ["Fully appropriate regimen", "10 (12.3%)"],
-
-    ["Duration requires optimization", "71 (87.7%)"],
-
-    ["Median treatment duration", "30 days"],
-
-    ["Treatment duration IQR", "30–35 days"]
-
+  const outcomes = [
+    ['Outcome', 'Result'],
+    ['Appropriate dose', '81 (100%)'],
+    ['Appropriate duration', '10 (12.3%)'],
+    ['Prolonged course', '40 (49.4%)'],
+    ['Abbreviated course', '31 (38.3%)'],
+    ['Fully appropriate regimen', '10 (12.3%)'],
+    ['Duration requires optimization', '71 (87.7%)'],
+    ['Median duration, days (IQR)', '30 (30–35)'],
+    ['THA: appropriate duration', '9/44 (20.5%)'],
+    ['THA: prolonged', '10/44 (22.7%)'],
+    ['THA: abbreviated', '25/44 (56.8%)'],
+    ['TKA: appropriate duration', '1/37 (2.7%)'],
+    ['TKA: prolonged', '30/37 (81.1%)'],
+    ['TKA: abbreviated', '6/37 (16.2%)']
   ];
 
+  addResultTable(slide, 'Table 1. Baseline Characteristics', baseline,
+                 centerX, cy, tableW, tableH, 5.55 * S);
 
-  addResultsTable(
-    slide,
-    "Table 2: Apixaban Use",
-    apixabanUse,
-    centerX + tableW + tableGap,
-    yCenter,
-    tableW,
-    H * 0.315,
-    C
-  );
+  addResultTable(slide, 'Table 2. Apixaban Use and Appropriateness', outcomes,
+                 centerX + tableW + gap, cy, tableW, tableH, 5.40 * S);
 
+  cy += tableH + H * 0.014;
 
-  yCenter += H * 0.325;
+  addHighlightBox(slide,
+    'Primary outcome: 10 of 81 patients (12.3%) received both the recommended apixaban dose and total treatment duration.',
+    centerX, cy, centerW, H * 0.050, S);
 
-
-  /********************************************************************
-   * TABLE FOOTNOTE
-   ********************************************************************/
-
-  addText(
-    slide,
-    "Values are reported as median (IQR) or n (%) unless otherwise indicated.",
-    centerX,
-    yCenter,
-    centerW,
-    H * 0.017,
-    10,
-    C.gray,
-    false,
-    SlidesApp.ParagraphAlignment.CENTER
-  );
-
-
-  yCenter += H * 0.025;
-
-
-  /********************************************************************
-   * PRIMARY OUTCOME
-   ********************************************************************/
-
-  addHighlightBox(
-    slide,
-    "Primary Outcome: 10 of 81 patients (12.3%) received both the " +
-    "recommended apixaban dose and total treatment duration.",
-    centerX,
-    yCenter,
-    centerW,
-    H * 0.050,
-    C
-  );
-
-
-  yCenter += H * 0.062;
-
-
-  /********************************************************************
-   * TWO FIGURES
-   ********************************************************************/
+  cy += H * 0.068;
 
   const chartGap = centerW * 0.035;
+  const chartW = (centerW - chartGap) / 2;
+  const chartH = H * 0.315;
 
-  const chartW =
-    (centerW - chartGap) / 2;
+  drawAdherenceChart(slide, centerX, cy, chartW, chartH, S);
+  drawProcedureDurationChart(slide, centerX + chartW + chartGap, cy, chartW, chartH, S);
 
+  // ---------- RIGHT COLUMN ----------
+  let ry = contentTop;
 
-  drawRegimenChart(
-    slide,
-    centerX,
-    yCenter,
-    chartW,
-    H * 0.270,
-    C
-  );
-
-
-  drawDurationChart(
-    slide,
-    centerX + chartW + chartGap,
-    yCenter,
-    chartW,
-    H * 0.270,
-    C
-  );
-
-
-  /********************************************************************
-   *
-   * RIGHT COLUMN
-   *
-   ********************************************************************/
-
-  let yRight = contentTop;
-
-
-  /********************************************************************
-   * DISCUSSION
-   ********************************************************************/
-
-  addHeader(
-    slide,
-    "Discussion",
-    rightX,
-    yRight,
-    rightW,
-    H * 0.034,
-    C.navy
-  );
-
-
-  yRight += H * 0.042;
-
+  addSectionHeader(slide, 'Discussion', rightX, ry, rightW, H * 0.035, S);
+  ry += H * 0.043;
 
   const discussion =
-    "• Although apixaban dosing was appropriate in all patients, treatment " +
-    "duration required optimization in 87.7%.\n\n" +
+    '• Apixaban dosing was appropriate in all included patients, but duration required optimization in 87.7%.\n' +
+    '• A 30-day course was most common for both TKA (n=16) and THA (n=20).\n' +
+    '• A similar duration across procedure types may prolong prophylaxis after TKA and shorten prophylaxis after THA.\n' +
+    '• Recommended duration was achieved more often after THA than TKA (20.5% vs 2.7%).\n' +
+    '• The most common deviation was 5 days short after THA and 18 days long after TKA.';
 
-    "• Thirty days was the most common duration for both TKA (n=16) " +
-    "and THA (n=20).\n\n" +
+  addBodyText(slide, discussion,
+              rightX + W * 0.004, ry, rightW - W * 0.008, H * 0.300,
+              6.65 * S);
+  ry += H * 0.310;
 
-    "• A similar duration for both procedure types may explain the " +
-    "procedure-specific differences observed.\n\n" +
-
-    "• Only 2.7% of TKA patients received the recommended duration; " +
-    "81.1% received prolonged therapy.\n\n" +
-
-    "• Among THA patients, 20.5% received the recommended duration, " +
-    "while 56.8% received abbreviated therapy.";
-
-
-  addText(
-    slide,
-    discussion,
-    rightX + W * 0.004,
-    yRight,
-    rightW - W * 0.008,
-    H * 0.335,
-    15,
-    C.black,
-    false,
-    SlidesApp.ParagraphAlignment.START
-  );
-
-
-  yRight += H * 0.345;
-
-
-  /********************************************************************
-   * CONCLUSION
-   ********************************************************************/
-
-  addHeader(
-    slide,
-    "Conclusion",
-    rightX,
-    yRight,
-    rightW,
-    H * 0.034,
-    C.navy
-  );
-
-
-  yRight += H * 0.042;
-
+  addSectionHeader(slide, 'Conclusion', rightX, ry, rightW, H * 0.035, S);
+  ry += H * 0.043;
 
   const conclusion =
-    "• Apixaban dose selection was appropriate in 100% of patients, " +
-    "but only 12.3% received the recommended treatment duration.\n\n" +
+    '• Apixaban dose selection was appropriate in 100% of patients, but only 12.3% received the recommended duration.\n' +
+    '• Procedure-specific treatment duration should be reinforced at discharge.\n' +
+    '• Recommended interventions include standardized discharge workflows, pharmacist verification of duration and stop date, targeted provider education, and EHR alerts for nonconcordant durations.';
 
-    "• Procedure-specific durations should be reinforced during discharge prescribing.\n\n" +
+  addBodyText(slide, conclusion,
+              rightX + W * 0.004, ry, rightW - W * 0.008, H * 0.215,
+              6.65 * S);
+  ry += H * 0.225;
 
-    "• Standardized discharge workflows and pharmacist review of intended " +
-    "duration and stop date may improve regimen accuracy.\n\n" +
-
-    "• EHR alerts and targeted provider education may further improve " +
-    "adherence to recommended durations.";
-
-
-  addText(
-    slide,
-    conclusion,
-    rightX + W * 0.004,
-    yRight,
-    rightW - W * 0.008,
-    H * 0.260,
-    15,
-    C.black,
-    false,
-    SlidesApp.ParagraphAlignment.START
-  );
-
-
-  yRight += H * 0.270;
-
-
-  /********************************************************************
-   * REFERENCES
-   ********************************************************************/
-
-  addHeader(
-    slide,
-    "References",
-    rightX,
-    yRight,
-    rightW,
-    H * 0.034,
-    C.navy
-  );
-
-
-  yRight += H * 0.041;
-
+  addSectionHeader(slide, 'References', rightX, ry, rightW, H * 0.035, S);
+  ry += H * 0.042;
 
   const references =
-    "1. Lieberman JR, Heckmann N. J Am Acad Orthop Surg. 2017;25(12):789-798.\n\n" +
+    '1. Lieberman JR, Heckmann N. J Am Acad Orthop Surg. 2017;25(12):789-798.\n' +
+    '2. Muscatelli SR, Charters MA, Hallstrom BR. Arthroplast Today. 2021;10:105-107.\n' +
+    '3. Apixaban prescribing information. Pfizer Inc; 2025.\n' +
+    '4. Falck-Ytter Y, Francis CW, Johanson NA, et al. Chest. 2012;141(2 suppl):e278S-e325S.\n' +
+    '5. National Institute for Health and Care Excellence. TA245.\n' +
+    '6. Halvorsen S, Mehilli J, Cassese S, et al. Eur Heart J. 2022;43(39):3826-3924.';
 
-    "2. Muscatelli SR, Charters MA, Hallstrom BR. Arthroplast Today. 2021;10:105-107.\n\n" +
+  addText(slide, references,
+          rightX + W * 0.004, ry, rightW - W * 0.008, H * 0.150,
+          5.05 * S, COLORS.black, false, SlidesApp.ParagraphAlignment.START);
 
-    "3. Apixaban prescribing information. Pfizer Inc; 2025.\n\n" +
-
-    "4. Falck-Ytter Y, Francis CW, Johanson NA, et al. Chest. 2012;141(2 suppl):e278S-e325S.\n\n" +
-
-    "5. National Institute for Health and Care Excellence. TA245.\n\n" +
-
-    "6. Halvorsen S, Mehilli J, Cassese S, et al. Eur Heart J. 2022;43(39):3826-3924.";
-
-
-  addText(
-    slide,
-    references,
-    rightX + W * 0.003,
-    yRight,
-    rightW - W * 0.006,
-    H * 0.190,
-    11,
-    C.black,
-    false,
-    SlidesApp.ParagraphAlignment.START
-  );
-
-
-  /********************************************************************
-   * COMPLETE
-   ********************************************************************/
-
+  slide.selectAsCurrentPage();
   SlidesApp.getUi().alert(
-    "Poster Created",
-    "Your 48 × 36 Apixaban MUE poster has been created on a new slide.",
+    'Poster created',
+    'A new Apixaban MUE poster slide was created. Edit the author/co-author/email fields at the top of Code.gs if needed.',
     SlidesApp.getUi().ButtonSet.OK
   );
-
 }
 
+/*********************** TEXT / SHAPES ************************/
 
-/**********************************************************************
- * GENERIC TEXT FUNCTION
- **********************************************************************/
-
-function addText(
-  slide,
-  text,
-  x,
-  y,
-  w,
-  h,
-  fontSize,
-  color,
-  bold,
-  alignment
-) {
-
-  const box = slide.insertTextBox(
-    text,
-    x,
-    y,
-    w,
-    h
-  );
-
-
+function addText(slide, text, x, y, w, h, fontSize, color, bold, alignment) {
+  const box = slide.insertTextBox(text, x, y, w, h);
   const range = box.getText();
 
-
-  range
-    .getTextStyle()
-    .setFontFamily("Arial")
-    .setFontSize(fontSize)
+  range.getTextStyle()
+    .setFontFamily('Arial')
+    .setFontSize(Math.max(fontSize, 4.5))
     .setForegroundColor(color)
-    .setBold(bold);
+    .setBold(Boolean(bold));
 
+  // START is the valid Google Slides equivalent of left alignment.
+  range.getParagraphStyle().setParagraphAlignment(
+    alignment || SlidesApp.ParagraphAlignment.START
+  );
 
-  /*
-   * START = left alignment
-   * CENTER = center
-   * END = right
-   */
-
-  range
-    .getParagraphStyle()
-    .setParagraphAlignment(
-      alignment || SlidesApp.ParagraphAlignment.START
-    );
-
-
+  box.setContentAlignment(SlidesApp.ContentAlignment.TOP);
   return box;
 }
 
+function addBodyText(slide, text, x, y, w, h, fontSize) {
+  return addText(slide, text, x, y, w, h, fontSize,
+                 COLORS.black, false, SlidesApp.ParagraphAlignment.START);
+}
 
-/**********************************************************************
- * SECTION HEADER
- **********************************************************************/
+function addSectionHeader(slide, text, x, y, w, h, S) {
+  const shape = slide.insertShape(SlidesApp.ShapeType.ROUND_RECTANGLE, x, y, w, h);
+  shape.getFill().setSolidFill(COLORS.navy);
+  shape.getBorder().setTransparent();
+  shape.setContentAlignment(SlidesApp.ContentAlignment.MIDDLE);
 
-function addHeader(
-  slide,
-  text,
-  x,
-  y,
-  w,
-  h,
-  color
-) {
-
-  const box = slide.insertShape(
-    SlidesApp.ShapeType.ROUND_RECTANGLE,
-    x,
-    y,
-    w,
-    h
-  );
-
-
-  box.getFill()
-    .setSolidFill(color);
-
-
-  try {
-
-    box.getLine()
-      .getFill()
-      .setSolidFill(color);
-
-  } catch (e) {}
-
-
-  box.getText()
-    .setText(text);
-
-
-  box.getText()
-    .getTextStyle()
-    .setFontFamily("Arial")
-    .setFontSize(22)
+  const range = shape.getText();
+  range.setText(text);
+  range.getTextStyle()
+    .setFontFamily('Arial')
+    .setFontSize(Math.max(11.5 * S, 6.5))
     .setBold(true)
-    .setForegroundColor("#FFFFFF");
-
-
-  box.getText()
-    .getParagraphStyle()
-    .setParagraphAlignment(
-      SlidesApp.ParagraphAlignment.CENTER
-    );
-
-
-  box.setContentAlignment(
-    SlidesApp.ContentAlignment.MIDDLE
-  );
-
-
-  return box;
+    .setForegroundColor(COLORS.white);
+  range.getParagraphStyle().setParagraphAlignment(SlidesApp.ParagraphAlignment.CENTER);
+  return shape;
 }
 
+function addOutlinedContactBox(slide, text, x, y, w, h, fontSize, color) {
+  const shape = slide.insertShape(SlidesApp.ShapeType.RECTANGLE, x, y, w, h);
+  shape.getFill().setSolidFill(COLORS.white);
+  shape.getBorder().getLineFill().setSolidFill(color);
+  shape.getBorder().setWeight(1);
+  shape.setContentAlignment(SlidesApp.ContentAlignment.MIDDLE);
 
-/**********************************************************************
- * CONTACT BOX
- **********************************************************************/
-
-function addContactBox(
-  slide,
-  text,
-  x,
-  y,
-  w,
-  h,
-  color
-) {
-
-  const box = slide.insertShape(
-    SlidesApp.ShapeType.RECTANGLE,
-    x,
-    y,
-    w,
-    h
-  );
-
-
-  box.getFill()
-    .setSolidFill("#FFFFFF");
-
-
-  try {
-
-    box.getLine()
-      .getFill()
-      .setSolidFill(color);
-
-  } catch (e) {}
-
-
-  box.getText()
-    .setText(text);
-
-
-  box.getText()
-    .getTextStyle()
-    .setFontFamily("Arial")
-    .setFontSize(12)
+  const range = shape.getText();
+  range.setText(text);
+  range.getTextStyle()
+    .setFontFamily('Arial')
+    .setFontSize(Math.max(fontSize, 4.5))
     .setForegroundColor(color);
-
-
-  box.getText()
-    .getParagraphStyle()
-    .setParagraphAlignment(
-      SlidesApp.ParagraphAlignment.CENTER
-    );
-
-
-  box.setContentAlignment(
-    SlidesApp.ContentAlignment.MIDDLE
-  );
-
+  range.getParagraphStyle().setParagraphAlignment(SlidesApp.ParagraphAlignment.CENTER);
+  return shape;
 }
 
+function addHighlightBox(slide, text, x, y, w, h, S) {
+  const shape = slide.insertShape(SlidesApp.ShapeType.RECTANGLE, x, y, w, h);
+  shape.getFill().setSolidFill(COLORS.paleBlue);
+  shape.getBorder().getLineFill().setSolidFill(COLORS.navy);
+  shape.getBorder().setWeight(1);
+  shape.setContentAlignment(SlidesApp.ContentAlignment.MIDDLE);
 
-/**********************************************************************
- * METHODS TABLE
- **********************************************************************/
-
-function addTwoColumnTable(
-  slide,
-  data,
-  x,
-  y,
-  w,
-  h,
-  C,
-  fontSize
-) {
-
-  const table = slide.insertTable(
-    data.length,
-    2,
-    x,
-    y,
-    w,
-    h
-  );
-
-
-  for (let r = 0; r < data.length; r++) {
-
-    const left =
-      table.getCell(r, 0);
-
-
-    const right =
-      table.getCell(r, 1);
-
-
-    left.getText()
-      .setText(data[r][0]);
-
-
-    right.getText()
-      .setText(data[r][1]);
-
-
-    left.getFill()
-      .setSolidFill(C.lightBlue);
-
-
-    right.getFill()
-      .setSolidFill(C.white);
-
-
-    left.getText()
-      .getTextStyle()
-      .setFontFamily("Arial")
-      .setFontSize(fontSize)
-      .setBold(true)
-      .setForegroundColor(C.navy);
-
-
-    right.getText()
-      .getTextStyle()
-      .setFontFamily("Arial")
-      .setFontSize(fontSize)
-      .setForegroundColor(C.black);
-
-
-    left.getText()
-      .getParagraphStyle()
-      .setParagraphAlignment(
-        SlidesApp.ParagraphAlignment.CENTER
-      );
-
-
-    right.getText()
-      .getParagraphStyle()
-      .setParagraphAlignment(
-        SlidesApp.ParagraphAlignment.START
-      );
-
-
-    left.setContentAlignment(
-      SlidesApp.ContentAlignment.MIDDLE
-    );
-
-
-    right.setContentAlignment(
-      SlidesApp.ContentAlignment.MIDDLE
-    );
-
-  }
-
-}
-
-
-/**********************************************************************
- * RESULTS TABLE
- **********************************************************************/
-
-function addResultsTable(
-  slide,
-  title,
-  data,
-  x,
-  y,
-  w,
-  h,
-  C
-) {
-
-  const titleH =
-    h * 0.095;
-
-
-  const titleBox =
-    slide.insertShape(
-      SlidesApp.ShapeType.RECTANGLE,
-      x,
-      y,
-      w,
-      titleH
-    );
-
-
-  titleBox.getFill()
-    .setSolidFill(C.navy);
-
-
-  try {
-
-    titleBox.getLine()
-      .getFill()
-      .setSolidFill(C.navy);
-
-  } catch (e) {}
-
-
-  titleBox.getText()
-    .setText(title);
-
-
-  titleBox.getText()
-    .getTextStyle()
-    .setFontFamily("Arial")
-    .setFontSize(15)
+  const range = shape.getText();
+  range.setText(text);
+  range.getTextStyle()
+    .setFontFamily('Arial')
+    .setFontSize(Math.max(7.5 * S, 5.0))
     .setBold(true)
-    .setForegroundColor(C.white);
+    .setForegroundColor(COLORS.navy);
+  range.getParagraphStyle().setParagraphAlignment(SlidesApp.ParagraphAlignment.CENTER);
+  return shape;
+}
 
+function addRectangle(slide, x, y, w, h, fillColor, borderColor) {
+  const shape = slide.insertShape(SlidesApp.ShapeType.RECTANGLE, x, y, w, h);
+  shape.getFill().setSolidFill(fillColor);
+  if (borderColor) {
+    shape.getBorder().getLineFill().setSolidFill(borderColor);
+    shape.getBorder().setWeight(0.75);
+  } else {
+    shape.getBorder().setTransparent();
+  }
+  return shape;
+}
 
-  titleBox.getText()
-    .getParagraphStyle()
-    .setParagraphAlignment(
-      SlidesApp.ParagraphAlignment.CENTER
-    );
+/*************************** TABLES ****************************/
 
-
-  titleBox.setContentAlignment(
-    SlidesApp.ContentAlignment.MIDDLE
-  );
-
-
-  const table =
-    slide.insertTable(
-      data.length,
-      2,
-      x,
-      y + titleH,
-      w,
-      h - titleH
-    );
-
+function addMethodsTable(slide, data, x, y, w, h, fontSize) {
+  const table = slide.insertTable(data.length, 2, x, y, w, h);
 
   for (let r = 0; r < data.length; r++) {
-
     for (let c = 0; c < 2; c++) {
+      const cell = table.getCell(r, c);
+      cell.getText().setText(data[r][c]);
+      cell.setContentAlignment(SlidesApp.ContentAlignment.MIDDLE);
 
-      const cell =
-        table.getCell(r, c);
+      cell.getText().getTextStyle()
+        .setFontFamily('Arial')
+        .setFontSize(Math.max(fontSize, 4.5))
+        .setForegroundColor(c === 0 ? COLORS.navy : COLORS.black)
+        .setBold(c === 0);
 
-
-      cell.getText()
-        .setText(data[r][c]);
-
-
-      cell.setContentAlignment(
-        SlidesApp.ContentAlignment.MIDDLE
+      cell.getText().getParagraphStyle().setParagraphAlignment(
+        c === 0 ? SlidesApp.ParagraphAlignment.CENTER : SlidesApp.ParagraphAlignment.START
       );
 
-
-      if (r === 0) {
-
-        cell.getFill()
-          .setSolidFill(C.darkBlue);
-
-
-        cell.getText()
-          .getTextStyle()
-          .setFontFamily("Arial")
-          .setFontSize(13)
-          .setBold(true)
-          .setForegroundColor(C.white);
-
-
-        cell.getText()
-          .getParagraphStyle()
-          .setParagraphAlignment(
-            SlidesApp.ParagraphAlignment.CENTER
-          );
-
-      }
-
-      else {
-
-        if (r % 2 === 1) {
-
-          cell.getFill()
-            .setSolidFill(C.lightBlue);
-
-        }
-
-        else {
-
-          cell.getFill()
-            .setSolidFill(C.white);
-
-        }
-
-
-        cell.getText()
-          .getTextStyle()
-          .setFontFamily("Arial")
-          .setFontSize(12)
-          .setForegroundColor(C.black);
-
-
-        if (c === 0) {
-
-          cell.getText()
-            .getParagraphStyle()
-            .setParagraphAlignment(
-              SlidesApp.ParagraphAlignment.START
-            );
-
-        }
-
-        else {
-
-          cell.getText()
-            .getParagraphStyle()
-            .setParagraphAlignment(
-              SlidesApp.ParagraphAlignment.CENTER
-            );
-
-        }
-
-      }
-
+      cell.getFill().setSolidFill(c === 0 ? COLORS.lightBlue : COLORS.white);
     }
-
   }
-
+  return table;
 }
 
+function addResultTable(slide, title, data, x, y, w, h, fontSize) {
+  const titleH = h * 0.085;
 
-/**********************************************************************
- * PRIMARY OUTCOME HIGHLIGHT
- **********************************************************************/
+  const titleBar = slide.insertShape(SlidesApp.ShapeType.RECTANGLE, x, y, w, titleH);
+  titleBar.getFill().setSolidFill(COLORS.navy);
+  titleBar.getBorder().setTransparent();
+  titleBar.setContentAlignment(SlidesApp.ContentAlignment.MIDDLE);
 
-function addHighlightBox(
-  slide,
-  text,
-  x,
-  y,
-  w,
-  h,
-  C
-) {
-
-  const box =
-    slide.insertShape(
-      SlidesApp.ShapeType.RECTANGLE,
-      x,
-      y,
-      w,
-      h
-    );
-
-
-  box.getFill()
-    .setSolidFill(C.veryLightBlue);
-
-
-  try {
-
-    box.getLine()
-      .getFill()
-      .setSolidFill(C.navy);
-
-  } catch (e) {}
-
-
-  box.getText()
-    .setText(text);
-
-
-  box.getText()
-    .getTextStyle()
-    .setFontFamily("Arial")
-    .setFontSize(15)
+  const titleRange = titleBar.getText();
+  titleRange.setText(title);
+  titleRange.getTextStyle()
+    .setFontFamily('Arial')
+    .setFontSize(Math.max(fontSize + 0.8, 5.0))
     .setBold(true)
-    .setForegroundColor(C.navy);
+    .setForegroundColor(COLORS.white);
+  titleRange.getParagraphStyle().setParagraphAlignment(SlidesApp.ParagraphAlignment.CENTER);
 
+  const table = slide.insertTable(data.length, 2, x, y + titleH, w, h - titleH);
 
-  box.getText()
-    .getParagraphStyle()
-    .setParagraphAlignment(
-      SlidesApp.ParagraphAlignment.CENTER
-    );
+  for (let r = 0; r < data.length; r++) {
+    for (let c = 0; c < 2; c++) {
+      const cell = table.getCell(r, c);
+      cell.getText().setText(data[r][c]);
+      cell.setContentAlignment(SlidesApp.ContentAlignment.MIDDLE);
 
+      const isHeader = r === 0;
+      const isStripe = r > 0 && r % 2 === 1;
 
-  box.setContentAlignment(
-    SlidesApp.ContentAlignment.MIDDLE
-  );
-
-}
-
-
-/**********************************************************************
- * FIGURE 1
- **********************************************************************/
-
-function drawRegimenChart(
-  slide,
-  x,
-  y,
-  w,
-  h,
-  C
-) {
-
-  addText(
-    slide,
-    "Figure 1: Apixaban Regimen Adherence",
-    x,
-    y,
-    w,
-    h * 0.10,
-    14,
-    C.black,
-    true,
-    SlidesApp.ParagraphAlignment.CENTER
-  );
-
-
-  const top =
-    y + h * 0.18;
-
-
-  const bottom =
-    y + h * 0.78;
-
-
-  const plotH =
-    bottom - top;
-
-
-  const barW =
-    w * 0.17;
-
-
-  const doseX =
-    x + w * 0.27;
-
-
-  const durationX =
-    x + w * 0.65;
-
-
-  /********************************************************************
-   * 100% BAR
-   ********************************************************************/
-
-  addBar(
-    slide,
-    doseX,
-    top,
-    barW,
-    plotH,
-    C.mediumBlue,
-    "100%"
-  );
-
-
-  /********************************************************************
-   * 12.3% BAR
-   ********************************************************************/
-
-  const durationH =
-    plotH * 0.123;
-
-
-  addBar(
-    slide,
-    durationX,
-    bottom - durationH,
-    barW,
-    durationH,
-    C.mediumBlue,
-    "12.3%"
-  );
-
-
-  /********************************************************************
-   * LABELS
-   ********************************************************************/
-
-  addText(
-    slide,
-    "Correct Dose",
-    doseX - w * 0.08,
-    bottom + h * 0.025,
-    barW + w * 0.16,
-    h * 0.10,
-    11,
-    C.black,
-    true,
-    SlidesApp.ParagraphAlignment.CENTER
-  );
-
-
-  addText(
-    slide,
-    "Correct Duration",
-    durationX - w * 0.08,
-    bottom + h * 0.025,
-    barW + w * 0.16,
-    h * 0.10,
-    11,
-    C.black,
-    true,
-    SlidesApp.ParagraphAlignment.CENTER
-  );
-
-}
-
-
-/**********************************************************************
- * BASIC BAR
- **********************************************************************/
-
-function addBar(
-  slide,
-  x,
-  y,
-  w,
-  h,
-  color,
-  label
-) {
-
-  const bar =
-    slide.insertShape(
-      SlidesApp.ShapeType.RECTANGLE,
-      x,
-      y,
-      w,
-      h
-    );
-
-
-  bar.getFill()
-    .setSolidFill(color);
-
-
-  try {
-
-    bar.getLine()
-      .getFill()
-      .setSolidFill(color);
-
-  } catch (e) {}
-
-
-  if (h > 30) {
-
-    bar.getText()
-      .setText(label);
-
-
-    bar.getText()
-      .getTextStyle()
-      .setFontFamily("Arial")
-      .setFontSize(12)
-      .setBold(true)
-      .setForegroundColor("#FFFFFF");
-
-
-    bar.getText()
-      .getParagraphStyle()
-      .setParagraphAlignment(
-        SlidesApp.ParagraphAlignment.CENTER
+      cell.getFill().setSolidFill(
+        isHeader ? COLORS.blue : (isStripe ? COLORS.paleBlue : COLORS.white)
       );
 
+      cell.getText().getTextStyle()
+        .setFontFamily('Arial')
+        .setFontSize(Math.max(fontSize, 4.25))
+        .setBold(isHeader)
+        .setForegroundColor(isHeader ? COLORS.white : COLORS.black);
 
-    bar.setContentAlignment(
-      SlidesApp.ContentAlignment.MIDDLE
-    );
-
-  }
-
-  else {
-
-    addText(
-      slide,
-      label,
-      x - 20,
-      y - 30,
-      w + 40,
-      25,
-      11,
-      color,
-      true,
-      SlidesApp.ParagraphAlignment.CENTER
-    );
-
-  }
-
-}
-
-
-/**********************************************************************
- * FIGURE 2
- **********************************************************************/
-
-function drawDurationChart(
-  slide,
-  x,
-  y,
-  w,
-  h,
-  C
-) {
-
-  addText(
-    slide,
-    "Figure 2: Duration Appropriateness by Procedure Type",
-    x,
-    y,
-    w,
-    h * 0.10,
-    14,
-    C.black,
-    true,
-    SlidesApp.ParagraphAlignment.CENTER
-  );
-
-
-  const labelW =
-    w * 0.15;
-
-
-  const barX =
-    x + labelW;
-
-
-  const barW =
-    w * 0.80;
-
-
-  const barH =
-    h * 0.13;
-
-
-  /********************************************************************
-   * THA
-   ********************************************************************/
-
-  const hipY =
-    y + h * 0.29;
-
-
-  addText(
-    slide,
-    "THA",
-    x,
-    hipY,
-    labelW,
-    barH,
-    12,
-    C.black,
-    true,
-    SlidesApp.ParagraphAlignment.CENTER
-  );
-
-
-  stackedBar(
-    slide,
-    barX,
-    hipY,
-    barW,
-    barH,
-
-    [
-      [20.5, C.appropriate],
-      [22.7, C.prolonged],
-      [56.8, C.abbreviated]
-    ]
-  );
-
-
-  /********************************************************************
-   * TKA
-   ********************************************************************/
-
-  const kneeY =
-    y + h * 0.51;
-
-
-  addText(
-    slide,
-    "TKA",
-    x,
-    kneeY,
-    labelW,
-    barH,
-    12,
-    C.black,
-    true,
-    SlidesApp.ParagraphAlignment.CENTER
-  );
-
-
-  stackedBar(
-    slide,
-    barX,
-    kneeY,
-    barW,
-    barH,
-
-    [
-      [2.7, C.appropriate],
-      [81.1, C.prolonged],
-      [16.2, C.abbreviated]
-    ]
-  );
-
-
-  /********************************************************************
-   * LEGEND
-   ********************************************************************/
-
-  const legendY =
-    y + h * 0.77;
-
-
-  legend(
-    slide,
-    x + w * 0.06,
-    legendY,
-    C.appropriate,
-    "Appropriate",
-    C
-  );
-
-
-  legend(
-    slide,
-    x + w * 0.39,
-    legendY,
-    C.prolonged,
-    "Prolonged",
-    C
-  );
-
-
-  legend(
-    slide,
-    x + w * 0.68,
-    legendY,
-    C.abbreviated,
-    "Abbreviated",
-    C
-  );
-
-}
-
-
-/**********************************************************************
- * STACKED BAR
- **********************************************************************/
-
-function stackedBar(
-  slide,
-  x,
-  y,
-  w,
-  h,
-  segments
-) {
-
-  let currentX = x;
-
-
-  for (let i = 0; i < segments.length; i++) {
-
-    const percent =
-      segments[i][0];
-
-
-    const color =
-      segments[i][1];
-
-
-    const sectionW =
-      w * percent / 100;
-
-
-    const box =
-      slide.insertShape(
-        SlidesApp.ShapeType.RECTANGLE,
-        currentX,
-        y,
-        sectionW,
-        h
+      cell.getText().getParagraphStyle().setParagraphAlignment(
+        c === 0 ? SlidesApp.ParagraphAlignment.START : SlidesApp.ParagraphAlignment.CENTER
       );
-
-
-    box.getFill()
-      .setSolidFill(color);
-
-
-    try {
-
-      box.getLine()
-        .getFill()
-        .setSolidFill(color);
-
-    } catch (e) {}
-
-
-    if (sectionW > 45) {
-
-      box.getText()
-        .setText(
-          percent.toFixed(1) + "%"
-        );
-
-
-      box.getText()
-        .getTextStyle()
-        .setFontFamily("Arial")
-        .setFontSize(11)
-        .setBold(true)
-        .setForegroundColor("#FFFFFF");
-
-
-      box.getText()
-        .getParagraphStyle()
-        .setParagraphAlignment(
-          SlidesApp.ParagraphAlignment.CENTER
-        );
-
-
-      box.setContentAlignment(
-        SlidesApp.ContentAlignment.MIDDLE
-      );
-
     }
-
-
-    currentX += sectionW;
-
   }
-
+  return table;
 }
 
+/*************************** CHARTS ****************************/
 
-/**********************************************************************
- * LEGEND
- **********************************************************************/
+function drawAdherenceChart(slide, x, y, w, h, S) {
+  addText(slide, 'Figure 1. Overall Apixaban Regimen Adherence',
+          x, y, w, h * 0.10,
+          7.2 * S, COLORS.black, true, SlidesApp.ParagraphAlignment.CENTER);
 
-function legend(
-  slide,
-  x,
-  y,
-  color,
-  label,
-  C
-) {
+  const labelX = x + w * 0.02;
+  const barX = x + w * 0.34;
+  const barW = w * 0.60;
+  const barH = h * 0.13;
 
-  const square =
-    slide.insertShape(
-      SlidesApp.ShapeType.RECTANGLE,
-      x,
-      y,
-      14,
-      14
-    );
+  const row1 = y + h * 0.26;
+  const row2 = y + h * 0.52;
 
+  drawPercentBar(slide, 'Correct dose', 100.0, labelX, barX, row1, barW, barH, S);
+  drawPercentBar(slide, 'Correct duration', 12.3, labelX, barX, row2, barW, barH, S);
 
-  square.getFill()
-    .setSolidFill(color);
-
-
-  try {
-
-    square.getLine()
-      .getFill()
-      .setSolidFill(color);
-
-  } catch (e) {}
-
-
-  addText(
-    slide,
-    label,
-    x + 20,
-    y - 4,
-    120,
-    22,
-    9,
-    C.black,
-    false,
-    SlidesApp.ParagraphAlignment.START
-  );
-
+  addText(slide,
+          'Dose was appropriate in all patients, while only 12.3% received the recommended duration.',
+          x + w * 0.04, y + h * 0.73, w * 0.92, h * 0.18,
+          5.6 * S, COLORS.gray, false, SlidesApp.ParagraphAlignment.CENTER);
 }
 
+function drawPercentBar(slide, label, percent, labelX, barX, y, barW, barH, S) {
+  addText(slide, label, labelX, y - barH * 0.05, barX - labelX - 4, barH * 1.15,
+          6.0 * S, COLORS.black, true, SlidesApp.ParagraphAlignment.END);
 
-/**********************************************************************
- * REMOVE LAST SLIDE
- **********************************************************************/
+  addRectangle(slide, barX, y, barW, barH, '#E7EDF3', null);
+  addRectangle(slide, barX, y, Math.max(barW * percent / 100, 1.5), barH, COLORS.blue, null);
 
-function removeLastPoster() {
-
-  const presentation =
-    SlidesApp.getActivePresentation();
-
-
-  const slides =
-    presentation.getSlides();
-
-
-  if (slides.length <= 1) {
-
-    SlidesApp.getUi().alert(
-      "Cannot Remove Slide",
-      "The presentation must contain at least one slide.",
-      SlidesApp.getUi().ButtonSet.OK
-    );
-
-    return;
-  }
-
-
-  slides[slides.length - 1].remove();
-
-
-  SlidesApp.getUi().alert(
-    "Poster Removed",
-    "The last slide was removed.",
-    SlidesApp.getUi().ButtonSet.OK
-  );
-
+  addText(slide, percent.toFixed(1) + '%',
+          barX, y - barH * 0.02, barW, barH * 1.05,
+          6.2 * S, COLORS.black, true, SlidesApp.ParagraphAlignment.CENTER);
 }
 
+function drawProcedureDurationChart(slide, x, y, w, h, S) {
+  addText(slide, 'Figure 2. Duration Appropriateness by Procedure Type',
+          x, y, w, h * 0.10,
+          7.2 * S, COLORS.black, true, SlidesApp.ParagraphAlignment.CENTER);
 
-/**********************************************************************
- * MENU
- **********************************************************************/
+  const labelW = w * 0.12;
+  const barX = x + labelW;
+  const barW = w * 0.84;
+  const barH = h * 0.13;
+  const hipY = y + h * 0.24;
+  const kneeY = y + h * 0.48;
+
+  addText(slide, 'THA', x, hipY, labelW * 0.92, barH,
+          6.1 * S, COLORS.black, true, SlidesApp.ParagraphAlignment.CENTER);
+  addText(slide, 'TKA', x, kneeY, labelW * 0.92, barH,
+          6.1 * S, COLORS.black, true, SlidesApp.ParagraphAlignment.CENTER);
+
+  drawStackedBar(slide, barX, hipY, barW, barH,
+    [
+      {p: 20.5, color: COLORS.appropriate, label: '20.5%'},
+      {p: 22.7, color: COLORS.prolonged, label: '22.7%'},
+      {p: 56.8, color: COLORS.abbreviated, label: '56.8%'}
+    ], S);
+
+  drawStackedBar(slide, barX, kneeY, barW, barH,
+    [
+      {p: 2.7, color: COLORS.appropriate, label: ''},
+      {p: 81.1, color: COLORS.prolonged, label: '81.1%'},
+      {p: 16.2, color: COLORS.abbreviated, label: '16.2%'}
+    ], S);
+
+  addText(slide, 'TKA appropriate: 2.7%', barX, kneeY - h * 0.055, barW * 0.34, h * 0.05,
+          5.0 * S, COLORS.appropriate, true, SlidesApp.ParagraphAlignment.START);
+
+  const legendY = y + h * 0.70;
+  addLegend(slide, x + w * 0.04, legendY, COLORS.appropriate, 'Appropriate', S);
+  addLegend(slide, x + w * 0.36, legendY, COLORS.prolonged, 'Prolonged', S);
+  addLegend(slide, x + w * 0.66, legendY, COLORS.abbreviated, 'Abbreviated', S);
+
+  addText(slide,
+          'THA: 20.5% appropriate / 22.7% prolonged / 56.8% abbreviated\nTKA: 2.7% appropriate / 81.1% prolonged / 16.2% abbreviated',
+          x + w * 0.03, y + h * 0.79, w * 0.94, h * 0.18,
+          5.0 * S, COLORS.gray, false, SlidesApp.ParagraphAlignment.CENTER);
+}
+
+function drawStackedBar(slide, x, y, w, h, segments, S) {
+  let currentX = x;
+  segments.forEach(function(seg) {
+    const segW = w * seg.p / 100;
+    const rect = addRectangle(slide, currentX, y, segW, h, seg.color, null);
+
+    if (seg.label && segW > 24 * S) {
+      rect.setContentAlignment(SlidesApp.ContentAlignment.MIDDLE);
+      const range = rect.getText();
+      range.setText(seg.label);
+      range.getTextStyle()
+        .setFontFamily('Arial')
+        .setFontSize(Math.max(5.0 * S, 4.5))
+        .setBold(true)
+        .setForegroundColor(COLORS.white);
+      range.getParagraphStyle().setParagraphAlignment(SlidesApp.ParagraphAlignment.CENTER);
+    }
+    currentX += segW;
+  });
+}
+
+function addLegend(slide, x, y, color, label, S) {
+  const sq = 7 * S;
+  addRectangle(slide, x, y, sq, sq, color, null);
+  addText(slide, label, x + sq + 3 * S, y - 2 * S, 58 * S, 12 * S,
+          4.6 * S, COLORS.black, false, SlidesApp.ParagraphAlignment.START);
+}
+
+/*************************** MENU ******************************/
 
 function onOpen() {
-
   SlidesApp.getUi()
-    .createMenu("Apixaban MUE")
-    .addItem(
-      "Build Poster",
-      "buildApixabanPoster"
-    )
-    .addItem(
-      "Remove Last Poster",
-      "removeLastPoster"
-    )
+    .createMenu('Apixaban MUE')
+    .addItem('Build Poster', 'buildApixabanMUEPoster')
     .addToUi();
-
 }
